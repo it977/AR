@@ -57,7 +57,6 @@ export default function DebtManagement() {
 
   const [search, setSearch]     = useState('')
   const [aging, setAging]       = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo]     = useState('')
 
@@ -70,7 +69,7 @@ export default function DebtManagement() {
   const [kpis, setKpis] = useState({ total_debt: 0, total_paid: 0, total_balance: 0, records: 0 })
 
   const fetchKpis = useCallback(async () => {
-    // Batch-fetch ar_bills (debt records) and ar_debt (payoff records) — bypass 1000-row limit
+    // ດຶງຂໍ້ມູນຈາກ ar_debt (Pay off)
     async function fetchAll(buildQuery) {
       const PAGE = 1000
       let all = [], from = 0, total = null
@@ -84,27 +83,29 @@ export default function DebtManagement() {
       }
       return all
     }
-    const [billData, debtData] = await Promise.all([
-      fetchAll((f, t) => supabase.from('ar_bills').select('debt, debt_status', { count: 'exact' }).not('debt_status', 'is', null).range(f, t)),
-      fetchAll((f, t) => supabase.from('ar_debt').select('debt_amount, cash_paid, bcel_paid, bcel2_paid, ldb_paid, balance', { count: 'exact' }).range(f, t)),
-    ])
+    
+    const debtData = await fetchAll((f, t) => 
+      supabase.from('ar_debt').select('debt_amount, cash_paid, bcel_paid, bcel2_paid, ldb_paid, balance', { count: 'exact' }).range(f, t)
+    )
+    
     const originalDebt = debtData.reduce((s, r) => s + (r.debt_amount || 0), 0)
     const collected    = debtData.reduce((s, r) => s + (r.cash_paid || 0) + (r.bcel_paid || 0) + (r.bcel2_paid || 0) + (r.ldb_paid || 0), 0)
     const remaining    = debtData.reduce((s, r) => s + (r.balance    || 0), 0)
+    
     setKpis({
       total_debt:    originalDebt > 0 ? originalDebt : collected + remaining,
       total_paid:    collected,
       total_balance: remaining,
-      records:       billData.length,
+      records:       debtData.length,
     })
   }, [])
 
   const fetchRows = useCallback(async () => {
     setLoading(true)
-    let q = supabase.from('ar_bills').select('*', { count: 'exact' }).not('debt_status', 'is', null)
+    // ດຶງຂໍ້ມູນຈາກ ar_debt (Pay off) ແທນ ar_bills
+    let q = supabase.from('ar_debt').select('*', { count: 'exact' })
 
     if (search)       q = q.or(`bill_no.ilike.%${search}%,patient_name.ilike.%${search}%`)
-    if (statusFilter) q = q.eq('debt_status', statusFilter)
     if (aging) {
       const today = new Date()
       const dayAgo = (n) => new Date(today.getTime() - n * 86400000).toISOString().split('T')[0]
@@ -124,7 +125,7 @@ export default function DebtManagement() {
 
     if (!error) { setRows(data || []); setTotal(count || 0) }
     setLoading(false)
-  }, [search, aging, statusFilter, dateFrom, dateTo, page, pageSize])
+  }, [search, aging, dateFrom, dateTo, page, pageSize])
 
   useEffect(() => { fetchRows(); fetchKpis() }, [fetchRows, fetchKpis])
 
@@ -207,15 +208,6 @@ export default function DebtManagement() {
           />
         </div>
         <div>
-          <label className="block text-xs font-semibold text-slate-500 mb-1">ສະຖານະ</label>
-          <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(0) }}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
-            <option value="">ທັງໝົດ</option>
-            <option value="pending">ຍັງຄ້າງ</option>
-            <option value="paid">ຊຳລະແລ້ວ</option>
-          </select>
-        </div>
-        <div>
           <label className="block text-xs font-semibold text-slate-500 mb-1">Aging</label>
           <select value={aging} onChange={e => { setAging(e.target.value); setPage(0) }}
             className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
@@ -243,8 +235,8 @@ export default function DebtManagement() {
             <option value={500}>500 ແຖວ</option>
           </select>
         </div>
-        {(search || aging || statusFilter || dateFrom || dateTo) && (
-          <button onClick={() => { setSearch(''); setAging(''); setStatusFilter(''); setDateFrom(''); setDateTo(''); setPage(0) }}
+        {(search || aging || dateFrom || dateTo) && (
+          <button onClick={() => { setSearch(''); setAging(''); setDateFrom(''); setDateTo(''); setPage(0) }}
             className="text-xs text-slate-500 hover:text-slate-800 underline">
             ລ້າງ
           </button>
@@ -296,7 +288,9 @@ export default function DebtManagement() {
                   </td>
                 </tr>
               ) : rows.map(row => {
-                const collected = (row.cash || 0) + (row.bcel || 0) + (row.bcel2 || 0) + (row.ldb || 0)
+                // ໃຊ້ຂໍ້ມູນຈາກ ar_debt: debt_amount, amount_paid, balance
+                const collected = (row.cash_paid || 0) + (row.bcel_paid || 0) + (row.bcel2_paid || 0) + (row.ldb_paid || 0)
+                const debt = row.balance || 0
                 const days = row.date ? Math.max(0, Math.floor((Date.now() - new Date(row.date).getTime()) / 86400000)) : 0
                 const daysCls = days <= 15
                   ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
@@ -305,6 +299,7 @@ export default function DebtManagement() {
                   : days <= 45
                   ? 'bg-orange-100 text-orange-700 border border-orange-200'
                   : 'bg-red-100 text-red-700 border border-red-200'
+                const isPaid = debt <= 0
                 return (
                   <tr key={row.id} className="hover:bg-slate-50 transition-colors">
                     <td className="table-td font-mono text-xs font-semibold text-primary-600">{row.bill_no}</td>
@@ -317,8 +312,8 @@ export default function DebtManagement() {
                     </td>
                     <td className="table-td text-xs text-slate-500">{row.insurance || '—'}</td>
                     <td className="table-td text-right font-mono text-xs">{fmt(row.grand_total)}</td>
-                    <td className="table-td text-right font-mono text-xs text-emerald-600">{fmt(collected)}</td>
-                    <td className="table-td text-right font-mono text-xs font-semibold text-red-600">{fmt(row.debt)}</td>
+                    <td className="table-td text-right font-mono text-xs text-emerald-600">{fmt(row.amount_paid || collected)}</td>
+                    <td className="table-td text-right font-mono text-xs font-semibold text-red-600">{fmt(debt)}</td>
                     <td className="table-td text-center">
                       <span className={`inline-flex items-center justify-center min-w-[48px] px-2 py-0.5 rounded-lg text-xs font-bold ${daysCls}`}>
                         {days} ມື້
@@ -330,7 +325,7 @@ export default function DebtManagement() {
                       )})()}
                     </td>
                     <td className="table-td text-center">
-                      {row.debt_status === 'paid' ? (
+                      {isPaid ? (
                         <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold bg-emerald-100 text-emerald-700 rounded-lg border border-emerald-200">
                           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
