@@ -189,10 +189,13 @@ export default function DailySales() {
     }
 
     try {
-      // Wait for charts to render
-      await waitForCharts()
+      // Close modal first
+      setShowPdfModal(false)
+      
+      // Wait for charts and modal to close
+      await new Promise(resolve => setTimeout(resolve, 1000))
 
-      // Create a temporary container for selected pages
+      // Get the dashboard content directly
       const element = document.createElement('div')
       element.style.padding = '15px'
       element.style.background = 'white'
@@ -212,16 +215,22 @@ export default function DailySales() {
       `
       element.appendChild(header)
 
-      // Clone and add selected sections
+      // Clone and add selected sections from visible dashboard
       if (selectedPages.includes('daily') && dashboardRef.current) {
         const dailyContent = dashboardRef.current.cloneNode(true)
         dailyContent.style.marginBottom = '30px'
         dailyContent.style.pageBreakAfter = 'always'
         dailyContent.style.width = '1100px'
         
-        // Remove debug button from cloned content
-        const debugBtn = dailyContent.querySelector('button')
-        if (debugBtn) debugBtn.remove()
+        // Remove interactive elements
+        const buttons = dailyContent.querySelectorAll('button')
+        buttons.forEach(btn => btn.remove())
+        
+        const selects = dailyContent.querySelectorAll('select')
+        selects.forEach(sel => sel.remove())
+        
+        const inputs = dailyContent.querySelectorAll('input')
+        inputs.forEach(inp => inp.remove())
         
         // Fix chart containers
         const charts = dailyContent.querySelectorAll('.chart-card')
@@ -234,11 +243,12 @@ export default function DailySales() {
         element.appendChild(dailyContent)
       }
 
+      // Wait a bit more for content to render
+      await new Promise(resolve => setTimeout(resolve, 500))
+
       // Generate PDF
       await html2pdf().set(opt).from(element).save()
 
-      // Close modal after successful download
-      setShowPdfModal(false)
       alert('ດາວໂຫລດ PDF ສຳເລັດ!')
     } catch (err) {
       console.error('PDF download error:', err)
