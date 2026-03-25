@@ -120,11 +120,10 @@ export default function DailySales() {
   const shiftData = useMemo(() => computeShiftData(rows || []), [rows])
 
   // Collection stats from ar_debt (Pay off sheet)
-  // ໃຊ້ channel-by-channel sum (ຕາມ Summary_CashFlow) ບໍ່ amount_paid ດຽວ
   const collectionStats = useMemo(() => {
     const dr = debtRows || []
-    const amount = dr.reduce((s, r) =>
-      s + (r.cash_paid || 0) + (r.bcel_paid || 0) + (r.bcel2_paid || 0) + (r.ldb_paid || 0), 0)
+    // ໃຊ້ amount_paid ໂດຍກົງ (ບໍ່ແມ່ນ channel breakdown)
+    const amount = dr.reduce((s, r) => s + (r.amount_paid || 0), 0)
     const bills  = new Set(dr.map(r => r.bill_no).filter(Boolean)).size
     return { amount, bills }
   }, [debtRows])
