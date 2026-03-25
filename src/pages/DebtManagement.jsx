@@ -57,7 +57,7 @@ export default function DebtManagement() {
 
   const [search, setSearch]     = useState('')
   const [aging, setAging]       = useState('')
-  const [statusFilter, setStatusFilter] = useState('pending')  // ເລີ່ມດ້ວຍຍັງຄ້າງ
+  const [statusFilter, setStatusFilter] = useState('')  // ເລີ່ມດ້ວຍທັງໝົດ
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo]     = useState('')
 
@@ -249,7 +249,7 @@ export default function DebtManagement() {
           </select>
         </div>
         {(search || aging || statusFilter || dateFrom || dateTo) && (
-          <button onClick={() => { setSearch(''); setAging(''); setStatusFilter('pending'); setDateFrom(''); setDateTo(''); setPage(0) }}
+          <button onClick={() => { setSearch(''); setAging(''); setStatusFilter(''); setDateFrom(''); setDateTo(''); setPage(0) }}
             className="text-xs text-slate-500 hover:text-slate-800 underline">
             ລ້າງ
           </button>
