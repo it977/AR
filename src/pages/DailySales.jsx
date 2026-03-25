@@ -109,6 +109,8 @@ function TopCard({ label, sublabel, value, isLAK = true, color = 'indigo' }) {
 export default function DailySales() {
   const [filters, setFilters] = useState({ dateFrom: '', dateTo: '' })
   const [downloading, setDownloading] = useState(false)
+  const [showPdfModal, setShowPdfModal] = useState(false)
+  const [selectedPages, setSelectedPages] = useState(['daily'])
   const dashboardRef = useRef()
 
   const { data: rows,      loading }  = useARData(filters)
@@ -135,23 +137,66 @@ export default function DailySales() {
   // PDF Download Function
   const downloadPDF = async () => {
     setDownloading(true)
-    const element = dashboardRef.current
+    
+    const pages = {
+      daily: 'ລາຍງານປະຈຳວັນ',
+      customer: 'ລູກຄ້າ & ການບໍລິການ',
+      payment: 'ຊ່ອງທາງການຊຳລະ',
+      debt: 'ໜີ້ຄ້າງຊຳລະ',
+      aging: 'ລາຍງານອາຍຸໜີ້'
+    }
+
+    const filename = `AR_Report_${selectedPages.join('_')}_${new Date().toISOString().split('T')[0]}.pdf`
+    
     const opt = {
-      margin: 5,
-      filename: `Daily_Sales_Report_${new Date().toISOString().split('T')[0]}.pdf`,
+      margin: 10,
+      filename: filename,
       image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
+      html2canvas: { scale: 2, useCORS: true, logging: false },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
+      pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
     }
 
     try {
+      // Create a temporary container for selected pages
+      const element = document.createElement('div')
+      element.style.padding = '20px'
+      element.style.background = 'white'
+      
+      // Add header
+      const header = document.createElement('div')
+      header.innerHTML = `
+        <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 10px; color: #1e293b;">AR Finance Report</h1>
+        <p style="color: #64748b; margin-bottom: 20px;">Generated: ${new Date().toLocaleString('lo-LA')}</p>
+        <p style="color: #64748b; margin-bottom: 20px;">Pages: ${selectedPages.map(p => pages[p]).join(', ')}</p>
+        <hr style="border: 1px solid #e2e8f0; margin-bottom: 20px;" />
+      `
+      element.appendChild(header)
+
+      // Clone and add selected sections
+      if (selectedPages.includes('daily') && dashboardRef.current) {
+        const dailyContent = dashboardRef.current.cloneNode(true)
+        dailyContent.style.marginBottom = '40px'
+        dailyContent.style.pageBreakAfter = 'always'
+        element.appendChild(dailyContent)
+      }
+
       await html2pdf().set(opt).from(element).save()
+      setShowPdfModal(false)
     } catch (err) {
       console.error('PDF download error:', err)
       alert('ເກີດຂໍ້ຜິດພາດໃນການດາວໂຫລດ PDF')
     } finally {
       setDownloading(false)
     }
+  }
+
+  const togglePage = (page) => {
+    setSelectedPages(prev => 
+      prev.includes(page) 
+        ? prev.filter(p => p !== page)
+        : [...prev, page]
+    )
   }
 
   // Chart options
@@ -218,27 +263,15 @@ export default function DailySales() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={downloadPDF}
+            onClick={() => setShowPdfModal(true)}
             disabled={downloading || loading}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white text-sm font-semibold rounded-lg flex items-center gap-2 transition-colors"
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white text-sm font-semibold rounded-lg flex items-center gap-2 transition-colors shadow-sm"
             title="ດາວໂຫລດ PDF"
           >
-            {downloading ? (
-              <>
-                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                ກຳລັງດາວໂຫລດ...
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                ດາວໂຫລດ PDF
-              </>
-            )}
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            ດາວໂຫລດ PDF
           </button>
           <DateFilter filters={filters} onChange={f => setFilters(prev => ({ ...prev, ...f }))} />
           <FilterSelect label="ກະວຽກ" value={filters.workload}
@@ -249,6 +282,91 @@ export default function DailySales() {
             options={['GN','INS','B2B']} />
         </div>
       </div>
+
+      {/* PDF Download Modal */}
+      {showPdfModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-slate-800">ເລືອກໜ້າທີ່ຈະດາວໂຫລດ</h3>
+              <button
+                onClick={() => setShowPdfModal(false)}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="space-y-3 mb-6">
+              {[
+                { id: 'daily', label: 'ລາຍງານປະຈຳວັນ', icon: '📊' },
+                { id: 'customer', label: 'ລູກຄ້າ & ການບໍລິການ', icon: '👥' },
+                { id: 'payment', label: 'ຊ່ອງທາງການຊຳລະ', icon: '💳' },
+                { id: 'debt', label: 'ໜີ້ຄ້າງຊຳລະ', icon: '💰' },
+                { id: 'aging', label: 'ລາຍງານອາຍຸໜີ້', icon: '📅' },
+              ].map(page => (
+                <label
+                  key={page.id}
+                  className={`flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all ${
+                    selectedPages.includes(page.id)
+                      ? 'border-emerald-500 bg-emerald-50'
+                      : 'border-slate-200 hover:border-slate-300'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedPages.includes(page.id)}
+                    onChange={() => togglePage(page.id)}
+                    className="w-5 h-5 text-emerald-600 rounded focus:ring-emerald-500"
+                  />
+                  <span className="text-2xl">{page.icon}</span>
+                  <span className="font-medium text-slate-700 flex-1">{page.label}</span>
+                </label>
+              ))}
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setSelectedPages(['daily', 'customer', 'payment', 'debt', 'aging'])}
+                className="flex-1 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition-colors"
+              >
+                ເລືອກທັງໝົດ
+              </button>
+              <button
+                onClick={() => setSelectedPages(['daily'])}
+                className="flex-1 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition-colors"
+              >
+                ຍົກເລີກ
+              </button>
+            </div>
+
+            <button
+              onClick={downloadPDF}
+              disabled={downloading || selectedPages.length === 0}
+              className="w-full mt-4 px-4 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white font-bold rounded-lg flex items-center justify-center gap-2 transition-colors"
+            >
+              {downloading ? (
+                <>
+                  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  ກຳລັງດາວໂຫລດ...
+                </>
+              ) : (
+                <>
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  ດາວໂຫລດ ({selectedPages.length}) ໜ້າ
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Row 1: 5 Top KPIs (PDF style) ── */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
