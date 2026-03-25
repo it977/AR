@@ -92,18 +92,34 @@ function StepIndicator({ current }) {
 async function upsertBatch(table, rows) {
   if (!rows.length) return
   
+  // Deduplicate rows by conflict key before upsert
+  const seen = new Map()
+  const uniqueRows = []
+  
+  const conflictKey = table === 'ar_bills' 
+    ? (r) => `${r.bill_no}__${r.date}__${r.workload || 'ALL'}`
+    : (r) => `${r.bill_no}__${r.date}`
+  
+  // Keep last occurrence of each unique key
+  for (const row of rows) {
+    const key = conflictKey(row)
+    seen.set(key, row)
+  }
+  
+  uniqueRows.push(...seen.values())
+  
   // ແບ່ງເປັນກຸ່ມຍ່ອຍໆລະ 100 rows ເພື່ອຫຼີກລ່ຽງ conflict
   const CHUNK_SIZE = 100
-  for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
-    const chunk = rows.slice(i, i + CHUNK_SIZE)
+  for (let i = 0; i < uniqueRows.length; i += CHUNK_SIZE) {
+    const chunk = uniqueRows.slice(i, i + CHUNK_SIZE)
     
     // ສຳລັບ ar_bills ໃຊ້ onConflict ທີ່ລວມ workload ນຳ
-    const conflictKey = table === 'ar_bills' 
+    const conflictKeyDb = table === 'ar_bills' 
       ? 'bill_no,date,workload' 
       : 'bill_no,date'
     
     const { error } = await supabase.from(table).upsert(chunk, {
-      onConflict: conflictKey,
+      onConflict: conflictKeyDb,
       ignoreDuplicates: false,
     })
     
