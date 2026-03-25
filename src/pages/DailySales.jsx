@@ -164,48 +164,73 @@ export default function DailySales() {
   const downloadPDF = async () => {
     setDownloading(true)
 
-    const filename = `AR_Report_Daily_${new Date().toISOString().split('T')[0]}.pdf`
+    const filename = `AR_Daily_Report_${new Date().toISOString().split('T')[0]}.pdf`
 
     const opt = {
-      margin: [8, 8, 8, 8],
+      margin: [10, 10, 10, 10],
       filename: filename,
-      image: { type: 'jpeg', quality: 1 },
+      image: { type: 'jpeg', quality: 0.95 },
       html2canvas: {
-        scale: 1.2,
+        scale: 1,
         useCORS: true,
         logging: false,
+        scrollX: 0,
+        scrollY: 0,
+        x: 0,
+        y: 0,
       },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
-      pagebreak: { mode: ['avoid-all', 'css'], avoid: ['.chart-card'] }
+      pagebreak: { mode: ['avoid-all'] }
     }
 
     try {
       // Close modal first
       setShowPdfModal(false)
       
-      // Wait for modal to close
-      await new Promise(resolve => setTimeout(resolve, 800))
+      // Wait for modal to close and content to render
+      await new Promise(resolve => setTimeout(resolve, 1000))
 
-      // Clone the dashboard content
-      const element = dashboardRef.current.cloneNode(true)
-      element.style.padding = '10px'
+      // Create clean container
+      const element = document.createElement('div')
       element.style.background = 'white'
-      element.style.width = '1000px'
-      element.style.maxWidth = '1000px'
+      element.style.padding = '20px'
+      element.style.width = '1123px' // A4 landscape width at 96 DPI
+      element.style.minHeight = '794px' // A4 height
       element.style.fontFamily = 'Noto Sans Lao, Inter, sans-serif'
-      element.style.fontSize = '11px'
       
-      // Remove buttons and interactive elements
-      const interactiveElements = element.querySelectorAll('button, select, input')
-      interactiveElements.forEach(el => el.remove())
-      
-      // Fix chart containers for proper page breaks
-      const charts = element.querySelectorAll('.chart-card')
-      charts.forEach(chart => {
-        chart.style.pageBreakInside = 'avoid'
-        chart.style.breakInside = 'avoid'
-        chart.style.marginBottom = '15px'
-      })
+      // Add title
+      const title = document.createElement('div')
+      title.style.marginBottom = '20px'
+      title.innerHTML = `
+        <h1 style="font-size: 22px; font-weight: bold; color: #1e293b; margin-bottom: 5px;">AR Finance - Daily Sales Report</h1>
+        <p style="color: #64748b; font-size: 12px;">Generated: ${new Date().toLocaleString('lo-LA')}</p>
+        <hr style="border: 1px solid #e2e8f0; margin-top: 10px;" />
+      `
+      element.appendChild(title)
+
+      // Clone dashboard content (excluding header and filters)
+      if (dashboardRef.current) {
+        const content = dashboardRef.current.cloneNode(true)
+        content.style.width = '1080px'
+        
+        // Remove interactive elements
+        const toRemove = content.querySelectorAll('button, select, input, [role="button"]')
+        toRemove.forEach(el => el.remove())
+        
+        // Ensure charts have time to render
+        const chartContainers = content.querySelectorAll('.chart-card')
+        chartContainers.forEach(chart => {
+          chart.style.pageBreakInside = 'avoid'
+          chart.style.breakInside = 'avoid'
+          chart.style.marginBottom = '20px'
+          chart.style.border = '1px solid #e2e8f0'
+        })
+        
+        element.appendChild(content)
+      }
+
+      // Wait for images and charts
+      await new Promise(resolve => setTimeout(resolve, 1500))
 
       // Generate PDF
       await html2pdf().set(opt).from(element).save()
