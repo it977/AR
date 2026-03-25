@@ -156,7 +156,7 @@ export default function DebtManagement() {
 
   async function handleDelete() {
     setSaving(true)
-    const { error } = await supabase.from('ar_bills').delete().eq('id', delTarget.id)
+    const { error } = await supabase.from('ar_debt').delete().eq('id', delTarget.id)
     setSaving(false)
     if (!error) {
       logAction({ action: 'ລົບໜີ້', bill_no: delTarget.bill_no, patient_name: delTarget.patient_name, amount: delTarget.debt })
@@ -166,9 +166,12 @@ export default function DebtManagement() {
 
   async function handleDeleteAll() {
     setSaving(true)
-    const { error } = await supabase.from('ar_bills').delete().not('debt_status', 'is', null)
+    const { error } = await supabase.from('ar_debt').delete().not('id', 'is', null)
     setSaving(false)
-    if (!error) { setDelAll(false); fetchRows(); fetchKpis() }
+    if (!error) { 
+      logAction({ action: 'ລົບໜີ້ທັງໝົດ', details: 'ລຶບທັງໝົດຈາກ ar_debt' })
+      setDelAll(false); fetchRows(); fetchKpis() 
+    }
     else alert('Error: ' + error.message)
   }
 

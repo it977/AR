@@ -8,7 +8,15 @@
       "Bash(git commit *)",
       "Bash(git push *)",
       "Bash(npm install *)",
-      "Bash(git push)"
+      "Bash(git push)",
+      "Bash(dir *)",
+      "Bash(findstr *)",
+      "Bash(rmdir *)",
+      "Bash(taskkill *)",
+      "Bash(timeout *)",
+      "Bash(node *)",
+      "Bash(move *)"
     ]
-  }
+  },
+  "$version": 3
 }

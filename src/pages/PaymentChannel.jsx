@@ -154,8 +154,10 @@ export default function PaymentChannel() {
   const collectedPct    = grandTotal > 0 ? (totalCollected / grandTotal * 100).toFixed(1) : '0.0'
   const outstandingPct  = grandTotal > 0 ? (kpis.outstandingDebt / grandTotal * 100).toFixed(1) : '0.0'
 
-  // For PDF-style: Actual Income = cash+bcel+bcel2+ldb + collection from payoff
-  const actualIncomeTotal = kpis.actualIncome + collectionStats.amount
+  // For PDF-style: Actual Income = Daily Income + Collection from payoff
+  // Daily Income = Actual Total Sale - Outstanding Debts
+  const dailyIncome = kpis.totalSales - kpis.outstandingDebt
+  const actualIncomeTotal = dailyIncome + collectionStats.amount
 
   if (loading) return <div className="p-6"><LoadingSpinner /></div>
 

@@ -40,6 +40,24 @@
   }
   .chart-card {
     @apply bg-white rounded-2xl p-5 shadow-sm border border-slate-100;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .chart-card > * {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  /* PDF Export styles */
+  .pdf-export {
+    width: 1400px;
+    max-width: 1400px;
+  }
+  .pdf-export .chart-card {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .pdf-export .recharts-wrapper {
+    page-break-inside: avoid;
   }
   .nav-item {
     @apply flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 cursor-pointer;

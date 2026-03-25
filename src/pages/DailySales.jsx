@@ -108,6 +108,7 @@ function TopCard({ label, sublabel, value, isLAK = true, color = 'indigo' }) {
 
 export default function DailySales() {
   const [filters, setFilters] = useState({ dateFrom: '', dateTo: '' })
+  const [showDebug, setShowDebug] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [showPdfModal, setShowPdfModal] = useState(false)
   const [selectedPages, setSelectedPages] = useState(['daily'])
@@ -122,14 +123,34 @@ export default function DailySales() {
   // Collection stats from ar_debt (Pay off sheet)
   const collectionStats = useMemo(() => {
     const dr = debtRows || []
-    // ໃຊ້ amount_paid ໂດຍກົງ (ບໍ່ແມ່ນ channel breakdown)
-    const amount = dr.reduce((s, r) => s + (r.amount_paid || 0), 0)
+    // ຄິດໄລ່ຍອດຊຳລະໜີ້: ໃຊ້ຜົນບວກຂອງ channel payments ຫຼື debt_amount - balance
+    const amount = dr.reduce((s, r) => {
+      // ພະຍາຍາມໃຊ້ channel payments ກ່ອນ
+      const channelPaid = (r.cash_paid || 0) + (r.bcel_paid || 0) + (r.bcel2_paid || 0) + (r.ldb_paid || 0)
+      if (channelPaid > 0) return s + channelPaid
+      // ຖ້າບໍ່ມີ channel payments, ໃຊ້ amount_paid
+      if (r.amount_paid) return s + r.amount_paid
+      // ຖ້າບໍ່ມີອີກ, ຄິດໄລ່ຈາກ debt_amount - balance
+      const debtPaid = (r.debt_amount || 0) - (r.balance || 0)
+      return s + (debtPaid > 0 ? debtPaid : 0)
+    }, 0)
     const bills  = new Set(dr.map(r => r.bill_no).filter(Boolean)).size
-    return { amount, bills }
+    return { 
+      amount, 
+      bills, 
+      cash: dr.reduce((s, r) => s + (r.cash_paid || 0), 0), 
+      bcel: dr.reduce((s, r) => s + (r.bcel_paid || 0), 0), 
+      bcel2: dr.reduce((s, r) => s + (r.bcel2_paid || 0), 0), 
+      ldb: dr.reduce((s, r) => s + (r.ldb_paid || 0), 0) 
+    }
   }, [debtRows])
 
-  // Actual Income = ເງິນທີ່ເກັບໄດ້ທັງໝົດ (ຈາກ billing + ຈາກ collection)
-  const actualIncomeTotal = kpis.cash + kpis.bcel + kpis.bcel2 + kpis.ldb + collectionStats.amount
+  // Actual Income = ລາຍຮັບຈິງທີ່ເກັບໄດ້ທັງໝົດ
+  // ສູດ: Daily Income + Collection
+  // Daily Income = Actual Total Sale - Outstanding Debts (ເງິນທີ່ເກັບໄດ້ຕອນອອກບິນ)
+  // Collection = ງິນທີ່ເກັບໄດ້ຈາກໜີ້ຄ້າງ (Pay off)
+  const dailyIncome = kpis.totalSales - kpis.outstandingDebt
+  const actualIncomeTotal = dailyIncome + collectionStats.amount
 
   const totalRevenue = Object.values(shiftData).reduce((s, v) => s + v.revenue, 0)
   const shiftPcts    = SHIFTS.map(s =>
@@ -139,7 +160,7 @@ export default function DailySales() {
   // PDF Download Function
   const downloadPDF = async () => {
     setDownloading(true)
-    
+
     const pages = {
       daily: 'ລາຍງານປະຈຳວັນ',
       customer: 'ລູກຄ້າ & ການບໍລິການ',
@@ -149,22 +170,33 @@ export default function DailySales() {
     }
 
     const filename = `AR_Report_${selectedPages.join('_')}_${new Date().toISOString().split('T')[0]}.pdf`
-    
+
     const opt = {
-      margin: 10,
+      margin: [10, 15, 10, 15],
       filename: filename,
       image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, logging: false },
+      html2canvas: { 
+        scale: 2, 
+        useCORS: true, 
+        logging: false,
+        windowWidth: 1400,
+        windowHeight: 900,
+      },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
       pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
     }
 
     try {
+      // Wait for charts to render
+      await waitForCharts()
+
       // Create a temporary container for selected pages
       const element = document.createElement('div')
       element.style.padding = '20px'
       element.style.background = 'white'
-      
+      element.style.width = '1400px'
+      element.style.maxWidth = '1400px'
+
       // Add header
       const header = document.createElement('div')
       header.innerHTML = `
@@ -180,11 +212,17 @@ export default function DailySales() {
         const dailyContent = dashboardRef.current.cloneNode(true)
         dailyContent.style.marginBottom = '40px'
         dailyContent.style.pageBreakAfter = 'always'
+        // Fix chart containers
+        const charts = dailyContent.querySelectorAll('.chart-card, .recharts-wrapper')
+        charts.forEach(chart => {
+          chart.style.pageBreakInside = 'avoid'
+          chart.style.breakInside = 'avoid'
+        })
         element.appendChild(dailyContent)
       }
 
       await html2pdf().set(opt).from(element).save()
-      
+
       // Close modal after successful download
       setShowPdfModal(false)
       alert('ດາວໂຫລດ PDF ສຳເລັດ!')
@@ -194,6 +232,13 @@ export default function DailySales() {
     } finally {
       setDownloading(false)
     }
+  }
+
+  // Wait for charts to render
+  const waitForCharts = () => {
+    return new Promise(resolve => {
+      setTimeout(resolve, 500) // Wait 500ms for charts to render
+    })
   }
 
   const togglePage = (page) => {
@@ -267,6 +312,13 @@ export default function DailySales() {
           <p className="text-sm text-slate-500 mt-0.5">Daily Sales Report • ໜ່ວຍ: LAK</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => { console.log('Debug toggle'); setShowDebug(prev => !prev); }}
+            className="px-3 py-2 bg-slate-700 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm"
+            title="ສະແດງຂໍ້ມູນ Debug"
+          >
+            🐞 Debug
+          </button>
           <button
             onClick={() => setShowPdfModal(true)}
             disabled={downloading || loading}
@@ -393,7 +445,7 @@ export default function DailySales() {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <BreakdownCard
-              label="Actual Income" sublabel="ລາຍຮັບຈິງ (ເງີນສົດ + ໂອນ + ເກັບໜີ້)"
+              label="Actual Income" sublabel="ລາຍຮັບຈິງ (Daily Income + Collection)"
               value={actualIncomeTotal} color="green"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>}
             />
@@ -519,6 +571,49 @@ export default function DailySales() {
           <ReactApexChart options={dailyTrendOpts} series={trendSeries} type="area" height={250} />
         ) : <EmptyState message="ບໍ່ມີຂໍ້ມູນ" sublabel="ກະລຸນາອັບໂຫຼດ Excel ກ່ອນ" />}
       </div>
+
+      {/* Debug Panel */}
+      {showDebug && (
+        <div className="bg-slate-900 text-white p-6 rounded-xl font-mono text-xs border-2 border-emerald-500 shadow-xl">
+          <div className="flex justify-between items-center mb-4">
+            <h4 className="font-bold text-lg text-emerald-400">📊 Data Debug Panel</h4>
+            <button onClick={() => setShowDebug(false)} className="text-slate-400 hover:text-white text-xl font-bold">✕</button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
+              <h5 className="font-bold text-blue-400 mb-2 text-sm">📄 ar_bills (Daily Sheet)</h5>
+              <div className="space-y-1">
+                <p>Rows: <span className="text-white font-semibold">{rows?.length || 0}</span></p>
+                <p>Cash: <span className="text-white font-semibold">{formatNumber(kpis.cash)}</span></p>
+                <p>BCEL: <span className="text-white font-semibold">{formatNumber(kpis.bcel)}</span></p>
+                <p>BCEL2: <span className="text-white font-semibold">{formatNumber(kpis.bcel2)}</span></p>
+                <p>LDB: <span className="text-white font-semibold">{formatNumber(kpis.ldb)}</span></p>
+                <p className="pt-2 border-t border-slate-700">Billing Total: <span className="text-emerald-400 font-bold">{formatNumber(kpis.cash + kpis.bcel + kpis.bcel2 + kpis.ldb)}</span></p>
+              </div>
+            </div>
+            <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
+              <h5 className="font-bold text-violet-400 mb-2 text-sm">💳 ar_debt (Pay off)</h5>
+              <div className="space-y-1">
+                <p>Rows: <span className="text-white font-semibold">{debtRows?.length || 0}</span></p>
+                <p>Cash Paid: <span className="text-white font-semibold">{formatNumber(collectionStats.cash)}</span></p>
+                <p>BCEL Paid: <span className="text-white font-semibold">{formatNumber(collectionStats.bcel)}</span></p>
+                <p>BCEL2 Paid: <span className="text-white font-semibold">{formatNumber(collectionStats.bcel2)}</span></p>
+                <p>LDB Paid: <span className="text-white font-semibold">{formatNumber(collectionStats.ldb)}</span></p>
+                <p className="pt-2 border-t border-slate-700">Collection Total: <span className="text-violet-400 font-bold">{formatNumber(collectionStats.amount)}</span></p>
+              </div>
+            </div>
+          </div>
+          <div className="mt-6 p-4 bg-emerald-900/30 border-2 border-emerald-500 rounded-lg">
+            <p className="text-emerald-300 font-bold text-sm mb-2">💰 Actual Income Calculation:</p>
+            <p className="text-white">
+              Daily Income ({formatNumber(dailyIncome)}) + Collection ({formatNumber(collectionStats.amount)}) = <span className="text-emerald-400 font-bold text-base">{formatNumber(actualIncomeTotal)}</span>
+            </p>
+            <p className="text-slate-400 text-xs mt-2">
+              Daily Income = Actual Total Sale - Outstanding = {formatNumber(kpis.totalSales)} - {formatNumber(kpis.outstandingDebt)}
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -129,10 +129,16 @@ export default function BillsManagement() {
 
   async function handleDeleteAll() {
     setSaving(true)
-    const { error } = await supabase.from('ar_bills').delete().not('id', 'is', null)
+    // ລຶບທັງ ar_bills ແລະ ar_debt ທີ່ກ່ຽວຂ້ອງ
+    const { error: errorDebt } = await supabase.from('ar_debt').delete().not('id', 'is', null)
+    const { error: errorBills } = await supabase.from('ar_bills').delete().not('id', 'is', null)
     setSaving(false)
-    if (!error) { setDelAll(false); fetchRows(); fetchKpis() }
-    else alert('Error: ' + error.message)
+    if (!errorBills && !errorDebt) { 
+      logAction({ action: 'ລຶບຂໍ້ມູນທັງໝົດ', details: 'ລຶບທັງ ar_bills ແລະ ar_debt' })
+      setDelAll(false); fetchRows(); fetchKpis() 
+    } else {
+      alert('Error: ' + (errorBills?.message || errorDebt?.message || 'Unknown error'))
+    }
   }
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
