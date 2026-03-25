@@ -91,11 +91,33 @@ function StepIndicator({ current }) {
 
 async function upsertBatch(table, rows) {
   if (!rows.length) return
-  const { error } = await supabase.from(table).upsert(rows, {
-    onConflict: 'bill_no,date',
-    ignoreDuplicates: false,
-  })
-  if (error) throw new Error(`[${table}] ${error.message}`)
+  
+  // ແບ່ງເປັນກຸ່ມຍ່ອຍໆລະ 100 rows ເພື່ອຫຼີກລ່ຽງ conflict
+  const CHUNK_SIZE = 100
+  for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+    const chunk = rows.slice(i, i + CHUNK_SIZE)
+    
+    // ສຳລັບ ar_bills ໃຊ້ onConflict ທີ່ລວມ workload ນຳ
+    const conflictKey = table === 'ar_bills' 
+      ? 'bill_no,date,workload' 
+      : 'bill_no,date'
+    
+    const { error } = await supabase.from(table).upsert(chunk, {
+      onConflict: conflictKey,
+      ignoreDuplicates: false,
+    })
+    
+    if (error) {
+      // ຖ້າມີ conflict ອີກ ໃຫ້ລອງແບ່ງເຄິ່ງນຶ່ງອີກ
+      if (chunk.length > 10) {
+        const mid = Math.floor(chunk.length / 2)
+        await upsertBatch(table, chunk.slice(0, mid))
+        await upsertBatch(table, chunk.slice(mid))
+      } else {
+        throw new Error(`[${table}] ${error.message} - Row: ${JSON.stringify(chunk[0])}`)
+      }
+    }
+  }
 }
 
 export default function UploadExcel() {
