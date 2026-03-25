@@ -182,7 +182,10 @@ export default function DailySales() {
       }
 
       await html2pdf().set(opt).from(element).save()
+      
+      // Close modal after successful download
       setShowPdfModal(false)
+      alert('ດາວໂຫລດ PDF ສຳເລັດ!')
     } catch (err) {
       console.error('PDF download error:', err)
       alert('ເກີດຂໍ້ຜິດພາດໃນການດາວໂຫລດ PDF')
