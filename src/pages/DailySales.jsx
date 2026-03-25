@@ -114,6 +114,9 @@ export default function DailySales() {
   const [selectedPages, setSelectedPages] = useState(['daily'])
   const dashboardRef = useRef()
 
+  // For now, only daily page is available for PDF export
+  // Other pages would require fetching data from their respective routes
+
   const { data: rows,      loading }  = useARData(filters)
   const { data: debtRows }            = usePayoffData(filters)
 
@@ -161,90 +164,48 @@ export default function DailySales() {
   const downloadPDF = async () => {
     setDownloading(true)
 
-    const pages = {
-      daily: 'ລາຍງານປະຈຳວັນ',
-      customer: 'ລູກຄ້າ & ການບໍລິການ',
-      payment: 'ຊ່ອງທາງການຊຳລະ',
-      debt: 'ໜີ້ຄ້າງຊຳລະ',
-      aging: 'ລາຍງານອາຍຸໜີ້'
-    }
-
-    const filename = `AR_Report_${selectedPages.join('_')}_${new Date().toISOString().split('T')[0]}.pdf`
+    const filename = `AR_Report_Daily_${new Date().toISOString().split('T')[0]}.pdf`
 
     const opt = {
-      margin: [5, 10, 5, 10],
+      margin: [8, 8, 8, 8],
       filename: filename,
       image: { type: 'jpeg', quality: 1 },
       html2canvas: {
-        scale: 1.5,
+        scale: 1.2,
         useCORS: true,
         logging: false,
-        width: 1200,
-        height: 900,
-        windowWidth: 1200,
-        windowHeight: 900,
       },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
-      pagebreak: { mode: ['css', 'legacy'], avoid: ['.chart-card'] }
+      pagebreak: { mode: ['avoid-all', 'css'], avoid: ['.chart-card'] }
     }
 
     try {
       // Close modal first
       setShowPdfModal(false)
       
-      // Wait for charts and modal to close
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      // Wait for modal to close
+      await new Promise(resolve => setTimeout(resolve, 800))
 
-      // Get the dashboard content directly
-      const element = document.createElement('div')
-      element.style.padding = '15px'
+      // Clone the dashboard content
+      const element = dashboardRef.current.cloneNode(true)
+      element.style.padding = '10px'
       element.style.background = 'white'
-      element.style.width = '1150px'
-      element.style.maxWidth = '1150px'
+      element.style.width = '1000px'
+      element.style.maxWidth = '1000px'
       element.style.fontFamily = 'Noto Sans Lao, Inter, sans-serif'
-      element.style.fontSize = '12px'
-
-      // Add header
-      const header = document.createElement('div')
-      header.style.marginBottom = '20px'
-      header.innerHTML = `
-        <h1 style="font-size: 20px; font-weight: bold; margin-bottom: 8px; color: #1e293b;">AR Finance Report</h1>
-        <p style="color: #64748b; margin-bottom: 5px; font-size: 12px;">Generated: ${new Date().toLocaleString('lo-LA')}</p>
-        <p style="color: #64748b; margin-bottom: 15px; font-size: 12px;">Pages: ${selectedPages.map(p => pages[p]).join(', ')}</p>
-        <hr style="border: 1px solid #e2e8f0;" />
-      `
-      element.appendChild(header)
-
-      // Clone and add selected sections from visible dashboard
-      if (selectedPages.includes('daily') && dashboardRef.current) {
-        const dailyContent = dashboardRef.current.cloneNode(true)
-        dailyContent.style.marginBottom = '30px'
-        dailyContent.style.pageBreakAfter = 'always'
-        dailyContent.style.width = '1100px'
-        
-        // Remove interactive elements
-        const buttons = dailyContent.querySelectorAll('button')
-        buttons.forEach(btn => btn.remove())
-        
-        const selects = dailyContent.querySelectorAll('select')
-        selects.forEach(sel => sel.remove())
-        
-        const inputs = dailyContent.querySelectorAll('input')
-        inputs.forEach(inp => inp.remove())
-        
-        // Fix chart containers
-        const charts = dailyContent.querySelectorAll('.chart-card')
-        charts.forEach(chart => {
-          chart.style.pageBreakInside = 'avoid'
-          chart.style.breakInside = 'avoid'
-          chart.style.marginBottom = '20px'
-        })
-        
-        element.appendChild(dailyContent)
-      }
-
-      // Wait a bit more for content to render
-      await new Promise(resolve => setTimeout(resolve, 500))
+      element.style.fontSize = '11px'
+      
+      // Remove buttons and interactive elements
+      const interactiveElements = element.querySelectorAll('button, select, input')
+      interactiveElements.forEach(el => el.remove())
+      
+      // Fix chart containers for proper page breaks
+      const charts = element.querySelectorAll('.chart-card')
+      charts.forEach(chart => {
+        chart.style.pageBreakInside = 'avoid'
+        chart.style.breakInside = 'avoid'
+        chart.style.marginBottom = '15px'
+      })
 
       // Generate PDF
       await html2pdf().set(opt).from(element).save()
@@ -381,51 +342,26 @@ export default function DailySales() {
             </div>
 
             <div className="space-y-3 mb-6">
-              {[
-                { id: 'daily', label: 'ລາຍງານປະຈຳວັນ', icon: '📊' },
-                { id: 'customer', label: 'ລູກຄ້າ & ການບໍລິການ', icon: '👥' },
-                { id: 'payment', label: 'ຊ່ອງທາງການຊຳລະ', icon: '💳' },
-                { id: 'debt', label: 'ໜີ້ຄ້າງຊຳລະ', icon: '💰' },
-                { id: 'aging', label: 'ລາຍງານອາຍຸໜີ້', icon: '📅' },
-              ].map(page => (
-                <label
-                  key={page.id}
-                  className={`flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all ${
-                    selectedPages.includes(page.id)
-                      ? 'border-emerald-500 bg-emerald-50'
-                      : 'border-slate-200 hover:border-slate-300'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedPages.includes(page.id)}
-                    onChange={() => togglePage(page.id)}
-                    className="w-5 h-5 text-emerald-600 rounded focus:ring-emerald-500"
-                  />
-                  <span className="text-2xl">{page.icon}</span>
-                  <span className="font-medium text-slate-700 flex-1">{page.label}</span>
-                </label>
-              ))}
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={() => setSelectedPages(['daily', 'customer', 'payment', 'debt', 'aging'])}
-                className="flex-1 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition-colors"
-              >
-                ເລືອກທັງໝົດ
-              </button>
-              <button
-                onClick={() => setSelectedPages(['daily'])}
-                className="flex-1 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition-colors"
-              >
-                ຍົກເລີກ
-              </button>
+              <div className="flex items-center gap-3 p-3 rounded-lg border-2 border-emerald-500 bg-emerald-50">
+                <input
+                  type="checkbox"
+                  checked={true}
+                  className="w-5 h-5 text-emerald-600 rounded"
+                  disabled
+                />
+                <span className="text-2xl">📊</span>
+                <span className="font-medium text-slate-700 flex-1">ລາຍງານປະຈຳວັນ (Daily Sales)</span>
+              </div>
+              
+              <div className="text-xs text-slate-500 bg-amber-50 p-3 rounded-lg border border-amber-200">
+                <p className="font-semibold text-amber-800 mb-1">📝 ໝາຍເຫດ:</p>
+                <p>ການສົ່ງອອກ PDF ສະເພາະໜ້າ "ລາຍງານປະຈຳວັນ" ກ່ອນ. ໜ້າອື່ນໆຈະເພີ່ມໃນອະນາຄົດ.</p>
+              </div>
             </div>
 
             <button
               onClick={downloadPDF}
-              disabled={downloading || selectedPages.length === 0}
+              disabled={downloading}
               className="w-full mt-4 px-4 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white font-bold rounded-lg flex items-center justify-center gap-2 transition-colors"
             >
               {downloading ? (
@@ -441,7 +377,7 @@ export default function DailySales() {
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                   </svg>
-                  ດາວໂຫລດ ({selectedPages.length}) ໜ້າ
+                  ດາວໂຫລດ PDF
                 </>
               )}
             </button>
