@@ -142,7 +142,8 @@ function parseSheet(sheet, columnMap, addDebtStatus = false) {
     if (addDebtStatus) row.debt_status = (row.debt || 0) > 0 ? 'pending' : null
     return row
   }).filter(r => r.bill_no && r.date)
-  return deduplicateRows(parsed)
+  // ບໍ່ deduplicate - ຮັບທຸກ rows ຕາມຈຳນວນໃນ Excel
+  return parsed
 }
 
 export function parseExcelFile(file) {
