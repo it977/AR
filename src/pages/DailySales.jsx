@@ -172,18 +172,20 @@ export default function DailySales() {
     const filename = `AR_Report_${selectedPages.join('_')}_${new Date().toISOString().split('T')[0]}.pdf`
 
     const opt = {
-      margin: [10, 15, 10, 15],
+      margin: [5, 10, 5, 10],
       filename: filename,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { 
-        scale: 2, 
-        useCORS: true, 
+      image: { type: 'jpeg', quality: 1 },
+      html2canvas: {
+        scale: 1.5,
+        useCORS: true,
         logging: false,
-        windowWidth: 1400,
+        width: 1200,
+        height: 900,
+        windowWidth: 1200,
         windowHeight: 900,
       },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
-      pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+      pagebreak: { mode: ['css', 'legacy'], avoid: ['.chart-card'] }
     }
 
     try {
@@ -192,35 +194,47 @@ export default function DailySales() {
 
       // Create a temporary container for selected pages
       const element = document.createElement('div')
-      element.style.padding = '20px'
+      element.style.padding = '15px'
       element.style.background = 'white'
-      element.style.width = '1400px'
-      element.style.maxWidth = '1400px'
+      element.style.width = '1150px'
+      element.style.maxWidth = '1150px'
+      element.style.fontFamily = 'Noto Sans Lao, Inter, sans-serif'
+      element.style.fontSize = '12px'
 
       // Add header
       const header = document.createElement('div')
+      header.style.marginBottom = '20px'
       header.innerHTML = `
-        <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 10px; color: #1e293b;">AR Finance Report</h1>
-        <p style="color: #64748b; margin-bottom: 20px;">Generated: ${new Date().toLocaleString('lo-LA')}</p>
-        <p style="color: #64748b; margin-bottom: 20px;">Pages: ${selectedPages.map(p => pages[p]).join(', ')}</p>
-        <hr style="border: 1px solid #e2e8f0; margin-bottom: 20px;" />
+        <h1 style="font-size: 20px; font-weight: bold; margin-bottom: 8px; color: #1e293b;">AR Finance Report</h1>
+        <p style="color: #64748b; margin-bottom: 5px; font-size: 12px;">Generated: ${new Date().toLocaleString('lo-LA')}</p>
+        <p style="color: #64748b; margin-bottom: 15px; font-size: 12px;">Pages: ${selectedPages.map(p => pages[p]).join(', ')}</p>
+        <hr style="border: 1px solid #e2e8f0;" />
       `
       element.appendChild(header)
 
       // Clone and add selected sections
       if (selectedPages.includes('daily') && dashboardRef.current) {
         const dailyContent = dashboardRef.current.cloneNode(true)
-        dailyContent.style.marginBottom = '40px'
+        dailyContent.style.marginBottom = '30px'
         dailyContent.style.pageBreakAfter = 'always'
+        dailyContent.style.width = '1100px'
+        
+        // Remove debug button from cloned content
+        const debugBtn = dailyContent.querySelector('button')
+        if (debugBtn) debugBtn.remove()
+        
         // Fix chart containers
-        const charts = dailyContent.querySelectorAll('.chart-card, .recharts-wrapper')
+        const charts = dailyContent.querySelectorAll('.chart-card')
         charts.forEach(chart => {
           chart.style.pageBreakInside = 'avoid'
           chart.style.breakInside = 'avoid'
+          chart.style.marginBottom = '20px'
         })
+        
         element.appendChild(dailyContent)
       }
 
+      // Generate PDF
       await html2pdf().set(opt).from(element).save()
 
       // Close modal after successful download
