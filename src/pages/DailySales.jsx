@@ -1,9 +1,10 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import ReactApexChart from 'react-apexcharts'
 import DateFilter, { FilterSelect } from '../components/DateFilter'
 import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
 import { useARData, usePayoffData, computeKPIs, computeShiftData } from '../lib/useARData'
 import { formatLAK, formatNumber } from '../lib/excelParser'
+import html2pdf from 'html2pdf.js'
 
 const SHIFT_COLORS = ['#4f46e5', '#06b6d4', '#10b981']
 const SHIFTS = ['8AM-4PM', '4PM-12AM', '12AM-8AM']
@@ -107,6 +108,8 @@ function TopCard({ label, sublabel, value, isLAK = true, color = 'indigo' }) {
 
 export default function DailySales() {
   const [filters, setFilters] = useState({ dateFrom: '', dateTo: '' })
+  const [downloading, setDownloading] = useState(false)
+  const dashboardRef = useRef()
 
   const { data: rows,      loading }  = useARData(filters)
   const { data: debtRows }            = usePayoffData(filters)
@@ -128,6 +131,28 @@ export default function DailySales() {
   const shiftPcts    = SHIFTS.map(s =>
     totalRevenue > 0 ? ((shiftData[s]?.revenue || 0) / totalRevenue * 100).toFixed(2) : '0.00'
   )
+
+  // PDF Download Function
+  const downloadPDF = async () => {
+    setDownloading(true)
+    const element = dashboardRef.current
+    const opt = {
+      margin: 5,
+      filename: `Daily_Sales_Report_${new Date().toISOString().split('T')[0]}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
+    }
+
+    try {
+      await html2pdf().set(opt).from(element).save()
+    } catch (err) {
+      console.error('PDF download error:', err)
+      alert('ເກີດຂໍ້ຜິດພາດໃນການດາວໂຫລດ PDF')
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   // Chart options
   const revenueChartOpts = {
@@ -183,7 +208,7 @@ export default function DailySales() {
   if (loading) return <div className="p-6"><LoadingSpinner /></div>
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-6" ref={dashboardRef}>
 
       {/* ── Header ── */}
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -192,6 +217,29 @@ export default function DailySales() {
           <p className="text-sm text-slate-500 mt-0.5">Daily Sales Report • ໜ່ວຍ: LAK</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={downloadPDF}
+            disabled={downloading || loading}
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white text-sm font-semibold rounded-lg flex items-center gap-2 transition-colors"
+            title="ດາວໂຫລດ PDF"
+          >
+            {downloading ? (
+              <>
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                ກຳລັງດາວໂຫລດ...
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                ດາວໂຫລດ PDF
+              </>
+            )}
+          </button>
           <DateFilter filters={filters} onChange={f => setFilters(prev => ({ ...prev, ...f }))} />
           <FilterSelect label="ກະວຽກ" value={filters.workload}
             onChange={v => setFilters(f => ({ ...f, workload: v }))}

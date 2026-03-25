@@ -128,7 +128,7 @@ export default function Layout({ children }) {
               <span className="shrink-0">{item.icon}</span>
               {!collapsed && (
                 <div className="min-w-0">
-                  <p className="text-[13px] font-semibold leading-tight truncate">{item.label}</p>
+                  <p className="text-[13px] font-semibold leading-tight">{item.label}</p>
                   <p className="text-[10px] opacity-60 leading-tight">{item.sublabel}</p>
                 </div>
               )}

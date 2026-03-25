@@ -71,23 +71,33 @@ export default function DebtManagement() {
   const [kpis, setKpis] = useState({ total_debt: 0, total_paid: 0, total_balance: 0, records: 0 })
 
   const fetchKpis = useCallback(async () => {
-    const [{ data: billData }, { data: debtData }] = await Promise.all([
-      supabase.from('ar_bills').select('debt, debt_status').not('debt_status', 'is', null),
-      supabase.from('ar_debt').select('debt_amount, amount_paid, cash_paid, bcel_paid, bcel2_paid, ldb_paid, balance'),
-    ])
-    if (billData) {
-      const dr = debtData || []
-      const originalDebt = dr.reduce((s, r) => s + (r.debt_amount || 0), 0)
-      // ໃຊ້ channel sum ຕາມ Summary_CashFlow (cash+bcel+bcel2+ldb) ບໍ່ amount_paid
-      const collected    = dr.reduce((s, r) => s + (r.cash_paid || 0) + (r.bcel_paid || 0) + (r.bcel2_paid || 0) + (r.ldb_paid || 0), 0)
-      const remaining    = dr.reduce((s, r) => s + (r.balance    || 0), 0)  // remaining unpaid
-      setKpis({
-        total_debt:    originalDebt > 0 ? originalDebt : collected + remaining,
-        total_paid:    collected,
-        total_balance: remaining,   // ar_debt.balance (not ar_bills.debt)
-        records:       billData.length,
-      })
+    // Batch-fetch ar_bills (debt records) and ar_debt (payoff records) — bypass 1000-row limit
+    async function fetchAll(buildQuery) {
+      const PAGE = 1000
+      let all = [], from = 0, total = null
+      while (true) {
+        const { data, count, error } = await buildQuery(from, from + PAGE - 1)
+        if (error) break
+        if (total === null && count != null) total = count
+        if (data?.length) all = all.concat(data)
+        if (!data?.length || all.length >= (total ?? Infinity) || data.length < PAGE) break
+        from += PAGE
+      }
+      return all
     }
+    const [billData, debtData] = await Promise.all([
+      fetchAll((f, t) => supabase.from('ar_bills').select('debt, debt_status', { count: 'exact' }).not('debt_status', 'is', null).range(f, t)),
+      fetchAll((f, t) => supabase.from('ar_debt').select('debt_amount, cash_paid, bcel_paid, bcel2_paid, ldb_paid, balance', { count: 'exact' }).range(f, t)),
+    ])
+    const originalDebt = debtData.reduce((s, r) => s + (r.debt_amount || 0), 0)
+    const collected    = debtData.reduce((s, r) => s + (r.cash_paid || 0) + (r.bcel_paid || 0) + (r.bcel2_paid || 0) + (r.ldb_paid || 0), 0)
+    const remaining    = debtData.reduce((s, r) => s + (r.balance    || 0), 0)
+    setKpis({
+      total_debt:    originalDebt > 0 ? originalDebt : collected + remaining,
+      total_paid:    collected,
+      total_balance: remaining,
+      records:       billData.length,
+    })
   }, [])
 
   const fetchRows = useCallback(async () => {

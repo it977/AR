@@ -74,20 +74,28 @@ export default function BillsManagement() {
     setLoading(false)
   }, [search, dateFrom, dateTo, page])
 
-  // Separate KPI fetch — sums ALL matching bills, not just current page
+  // Separate KPI fetch — sums ALL matching bills with batch pagination (bypass 1000-row limit)
   const fetchKpis = useCallback(async () => {
-    let q = supabase.from('ar_bills').select('grand_total, cash, bcel, bcel2, ldb, debt')
-    if (search)   q = q.or(`bill_no.ilike.%${search}%,patient_name.ilike.%${search}%`)
-    if (dateFrom) q = q.gte('date', dateFrom)
-    if (dateTo)   q = q.lte('date', dateTo)
-    const { data } = await q
-    if (data) {
-      setKpis({
-        total_grand:     data.reduce((s, r) => s + (r.grand_total || 0), 0),
-        total_collected: data.reduce((s, r) => s + (r.cash || 0) + (r.bcel || 0) + (r.bcel2 || 0) + (r.ldb || 0), 0),
-        total_debt:      data.reduce((s, r) => s + (r.debt || 0), 0),
-      })
+    const PAGE = 1000
+    let allData = [], from = 0, total = null
+    while (true) {
+      let q = supabase.from('ar_bills')
+        .select('grand_total, cash, bcel, bcel2, ldb, debt', { count: 'exact' })
+      if (search)   q = q.or(`bill_no.ilike.%${search}%,patient_name.ilike.%${search}%`)
+      if (dateFrom) q = q.gte('date', dateFrom)
+      if (dateTo)   q = q.lte('date', dateTo)
+      const { data, count, error } = await q.range(from, from + PAGE - 1)
+      if (error) break
+      if (total === null && count != null) total = count
+      if (data?.length) allData = allData.concat(data)
+      if (!data?.length || allData.length >= (total ?? Infinity) || data.length < PAGE) break
+      from += PAGE
     }
+    setKpis({
+      total_grand:     allData.reduce((s, r) => s + (r.grand_total || 0), 0),
+      total_collected: allData.reduce((s, r) => s + (r.cash || 0) + (r.bcel || 0) + (r.bcel2 || 0) + (r.ldb || 0), 0),
+      total_debt:      allData.reduce((s, r) => s + (r.debt || 0), 0),
+    })
   }, [search, dateFrom, dateTo])
 
   useEffect(() => { fetchRows() }, [fetchRows])

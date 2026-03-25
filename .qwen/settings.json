@@ -4,7 +4,10 @@
       "Read(C:\\Users\\KVL COMPUTER\\Downloads/**)",
       "Bash(npm run *)",
       "Bash(git config *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(npm install *)"
     ]
   }
 }
