@@ -27,8 +27,6 @@ function downloadTemplate() {
   XLSX.writeFile(wb, 'AR_Debt_Template_LXH.xlsx')
 }
 
-const PAGE_SIZE = 20
-
 function fmt(v) { return new Intl.NumberFormat().format(v || 0) }
 
 function calcAging(dateStr) {
@@ -53,6 +51,7 @@ export default function DebtManagement() {
   const [rows, setRows]       = useState([])
   const [total, setTotal]     = useState(0)
   const [page, setPage]       = useState(0)
+  const [pageSize, setPageSize] = useState(50)  // ເພີ່ມ: ເລືອກຈຳນວນແຖວ
   const [loading, setLoading] = useState(false)
   const [saving, setSaving]   = useState(false)
 
@@ -121,11 +120,11 @@ export default function DebtManagement() {
     const { data, count, error } = await q
       .order('date', { ascending: false })
       .order('bill_no', { ascending: false })
-      .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1)
+      .range(page * pageSize, page * pageSize + pageSize - 1)
 
     if (!error) { setRows(data || []); setTotal(count || 0) }
     setLoading(false)
-  }, [search, aging, statusFilter, dateFrom, dateTo, page])
+  }, [search, aging, statusFilter, dateFrom, dateTo, page, pageSize])
 
   useEffect(() => { fetchRows(); fetchKpis() }, [fetchRows, fetchKpis])
 
@@ -232,6 +231,17 @@ export default function DebtManagement() {
           <label className="block text-xs font-semibold text-slate-500 mb-1">ຫາວັນທີ</label>
           <input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setPage(0) }}
             className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400" />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-slate-500 mb-1">ຈຳນວນແຖວ</label>
+          <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(0) }}
+            className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            <option value={20}>20 ແຖວ</option>
+            <option value={50}>50 ແຖວ</option>
+            <option value={100}>100 ແຖວ</option>
+            <option value={200}>200 ແຖວ</option>
+            <option value={500}>500 ແຖວ</option>
+          </select>
         </div>
         {(search || aging || statusFilter || dateFrom || dateTo) && (
           <button onClick={() => { setSearch(''); setAging(''); setStatusFilter(''); setDateFrom(''); setDateTo(''); setPage(0) }}
@@ -377,7 +387,7 @@ export default function DebtManagement() {
         {totalPages > 1 && (
           <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between">
             <p className="text-xs text-slate-500">
-              ສະແດງ {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} ຈາກ {fmt(total)}
+              ສະແດງ {page * pageSize + 1}–{Math.min((page + 1) * pageSize, total)} ຈາກ {fmt(total)}
             </p>
             <div className="flex gap-2">
               <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
