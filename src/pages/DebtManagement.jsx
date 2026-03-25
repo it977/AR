@@ -57,6 +57,7 @@ export default function DebtManagement() {
 
   const [search, setSearch]     = useState('')
   const [aging, setAging]       = useState('')
+  const [statusFilter, setStatusFilter] = useState('pending')  // ເລີ່ມດ້ວຍຍັງຄ້າງ
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo]     = useState('')
 
@@ -102,10 +103,13 @@ export default function DebtManagement() {
 
   const fetchRows = useCallback(async () => {
     setLoading(true)
-    // ດຶງຂໍ້ມູນຈາກ ar_debt (Pay off) ແທນ ar_bills
+    // ດຶງຂໍ້ມູນຈາກ ar_debt (Pay off)
     let q = supabase.from('ar_debt').select('*', { count: 'exact' })
 
     if (search)       q = q.or(`bill_no.ilike.%${search}%,patient_name.ilike.%${search}%`)
+    // ກັ່ນຕອງຕາມສະຖານະ: pending = balance > 0, paid = balance <= 0
+    if (statusFilter === 'pending') q = q.gt('balance', 0)
+    if (statusFilter === 'paid')    q = q.lte('balance', 0)
     if (aging) {
       const today = new Date()
       const dayAgo = (n) => new Date(today.getTime() - n * 86400000).toISOString().split('T')[0]
@@ -125,7 +129,7 @@ export default function DebtManagement() {
 
     if (!error) { setRows(data || []); setTotal(count || 0) }
     setLoading(false)
-  }, [search, aging, dateFrom, dateTo, page, pageSize])
+  }, [search, aging, statusFilter, dateFrom, dateTo, page, pageSize])
 
   useEffect(() => { fetchRows(); fetchKpis() }, [fetchRows, fetchKpis])
 
@@ -208,6 +212,15 @@ export default function DebtManagement() {
           />
         </div>
         <div>
+          <label className="block text-xs font-semibold text-slate-500 mb-1">ສະຖານະ</label>
+          <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(0) }}
+            className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            <option value="">ທັງໝົດ</option>
+            <option value="pending">ຍັງຄ້າງ</option>
+            <option value="paid">ຊຳລະແລ້ວ</option>
+          </select>
+        </div>
+        <div>
           <label className="block text-xs font-semibold text-slate-500 mb-1">Aging</label>
           <select value={aging} onChange={e => { setAging(e.target.value); setPage(0) }}
             className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
@@ -235,8 +248,8 @@ export default function DebtManagement() {
             <option value={500}>500 ແຖວ</option>
           </select>
         </div>
-        {(search || aging || dateFrom || dateTo) && (
-          <button onClick={() => { setSearch(''); setAging(''); setDateFrom(''); setDateTo(''); setPage(0) }}
+        {(search || aging || statusFilter || dateFrom || dateTo) && (
+          <button onClick={() => { setSearch(''); setAging(''); setStatusFilter('pending'); setDateFrom(''); setDateTo(''); setPage(0) }}
             className="text-xs text-slate-500 hover:text-slate-800 underline">
             ລ້າງ
           </button>
