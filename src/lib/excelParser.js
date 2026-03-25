@@ -114,10 +114,14 @@ function parseRow(row, columnMap) {
 }
 
 function deduplicateRows(rows) {
-  // Keep last occurrence of each (bill_no, date) pair
+  // Keep last occurrence of each (bill_no, date, workload) triplet
+  // ອະນຸຍາດໃຫ້ມີບີນດຽວກັນແຕ່ຕ່າງກະວຽກໄດ້
   const seen = new Map()
   rows.forEach(r => {
-    if (r.bill_no && r.date) seen.set(`${r.bill_no}__${r.date}`, r)
+    if (r.bill_no && r.date) {
+      const key = `${r.bill_no}__${r.date}__${r.workload || 'ALL'}`
+      seen.set(key, r)
+    }
   })
   return Array.from(seen.values())
 }
