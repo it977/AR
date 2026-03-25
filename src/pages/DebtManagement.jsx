@@ -167,7 +167,7 @@ export default function DebtManagement() {
     else alert('Error: ' + error.message)
   }
 
-  const totalPages = Math.ceil(total / PAGE_SIZE)
+  const totalPages = Math.ceil(total / pageSize)
   const AGING_OPTS = ['', 'N', '0-15 Days', '16-30 Days', '31-45 Days', '46-60+ Days']
 
   return (
