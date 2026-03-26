@@ -202,12 +202,12 @@ export default function DailySales() {
     const filename = `AR_Finance_Full_Report_${new Date().toISOString().split('T')[0]}.pdf`
 
     const opt = {
-      margin: [5, 5, 5, 5],
+      margin: [8, 8, 8, 8],
       filename: filename,
       image: { type: 'jpeg', quality: 1 },
-      html2canvas: { scale: 1.2, useCORS: true, logging: false },
+      html2canvas: { scale: 1, useCORS: true, logging: false },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
-      pagebreak: { mode: ['avoid-all'] }
+      pagebreak: { mode: ['avoid-all', 'css'] }
     }
 
     try {
@@ -217,19 +217,20 @@ export default function DailySales() {
       // Create main container
       const element = document.createElement('div')
       element.style.background = 'white'
-      element.style.padding = '15px'
-      element.style.width = '1000px'
+      element.style.padding = '10px'
+      element.style.width = '1050px'
       element.style.fontFamily = 'Noto Sans Lao, Inter, sans-serif'
 
       // Header
       const header = document.createElement('div')
-      header.style.marginBottom = '25px'
+      header.style.marginBottom = '20px'
       header.style.borderBottom = '3px solid #4f46e5'
-      header.style.paddingBottom = '15px'
+      header.style.paddingBottom = '12px'
+      header.style.pageBreakAfter = 'always'
       header.innerHTML = `
-        <h1 style="font-size: 26px; font-weight: bold; color: #4f46e5; margin-bottom: 8px;">AR Finance Dashboard - LXH</h1>
-        <p style="color: #64748b; font-size: 13px; margin: 0;">Generated: ${new Date().toLocaleString('lo-LA')}</p>
-        <p style="color: #64748b; font-size: 12px; margin-top: 6px;">Pages: ${pages.map(p => p.title).join(', ')}</p>
+        <h1 style="font-size: 24px; font-weight: bold; color: #4f46e5; margin-bottom: 6px;">AR Finance Dashboard - LXH</h1>
+        <p style="color: #64748b; font-size: 12px; margin: 0;">Generated: ${new Date().toLocaleString('lo-LA')}</p>
+        <p style="color: #64748b; font-size: 11px; margin-top: 4px;">Pages: ${pages.map(p => p.title).join(', ')}</p>
       `
       element.appendChild(header)
 
@@ -237,42 +238,56 @@ export default function DailySales() {
       const currentPage = location.pathname
 
       // Navigate to each page and capture
-      for (const page of pages) {
+      for (let i = 0; i < pages.length; i++) {
+        const page = pages[i]
+        
         // Navigate to page
         navigate(page.path)
         
         // Wait for page to load and render
-        await new Promise(resolve => setTimeout(resolve, 2000))
+        await new Promise(resolve => setTimeout(resolve, 2500))
         
         // Capture content
         const contentEl = document.querySelector(page.selector)
         if (contentEl) {
           const section = document.createElement('div')
-          section.style.marginBottom = '30px'
-          section.style.pageBreakAfter = 'always'
+          section.style.marginBottom = '20px'
+          if (i < pages.length - 1) {
+            section.style.pageBreakAfter = 'always'
+          }
+          section.style.padding = '10px'
           
           const cloned = contentEl.cloneNode(true)
-          cloned.style.width = '970px'
+          cloned.style.width = '1030px'
+          cloned.style.maxWidth = '1030px'
           
           // Remove interactive elements
           const toRemove = cloned.querySelectorAll('button, select, input, [role="button"]')
           toRemove.forEach(el => el.remove())
           
-          // Style cards for print
+          // Add spacing between cards
           const cards = cloned.querySelectorAll('[class*="bg-gradient"]')
           cards.forEach(card => {
             card.style.border = '1px solid #e2e8f0'
             card.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)'
+            card.style.marginBottom = '10px'
           })
           
           // Style charts
           const charts = cloned.querySelectorAll('.chart-card')
-          charts.forEach(chart => {
+          charts.forEach((chart, idx) => {
             chart.style.pageBreakInside = 'avoid'
             chart.style.breakInside = 'avoid'
             chart.style.marginBottom = '15px'
             chart.style.border = '1px solid #e2e8f0'
             chart.style.borderRadius = '12px'
+            chart.style.padding = '12px'
+          })
+          
+          // Style grids to prevent overlap
+          const grids = cloned.querySelectorAll('[class*="grid"]')
+          grids.forEach(grid => {
+            grid.style.gap = '12px'
           })
           
           section.appendChild(cloned)
@@ -285,7 +300,7 @@ export default function DailySales() {
       await new Promise(resolve => setTimeout(resolve, 1000))
 
       // Wait for charts to render in cloned content
-      await new Promise(resolve => setTimeout(resolve, 1500))
+      await new Promise(resolve => setTimeout(resolve, 2000))
 
       // Generate PDF
       await html2pdf().set(opt).from(element).save()
