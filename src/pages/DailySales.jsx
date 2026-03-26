@@ -187,17 +187,25 @@ export default function DailySales() {
     totalRevenue > 0 ? ((shiftData[s]?.revenue || 0) / totalRevenue * 100).toFixed(2) : '0.00'
   )
 
-  // PDF Download Function - FIXED LAYOUT
+  // PDF Download Function - ALL PAGES
   const downloadPDF = async () => {
     setDownloading(true)
 
-    const filename = `AR_Finance_Report_${new Date().toISOString().split('T')[0]}.pdf`
+    const pages = [
+      { path: '/', title: 'ລາຍງານປະຈຳວັນ' },
+      { path: '/customer-service', title: 'ລູກຄ້າ & ການບໍລິການ' },
+      { path: '/payment-channel', title: 'ຊ່ອງທາງການຊຳລະ' },
+      { path: '/outstanding-debt', title: 'ໜີ້ຄ້າງຊຳລະ' },
+      { path: '/aging-report', title: 'ລາຍງານອາຍຸໜີ້' }
+    ]
+
+    const filename = `AR_Finance_Full_Report_${new Date().toISOString().split('T')[0]}.pdf`
 
     const opt = {
       margin: [5, 5, 5, 5],
       filename: filename,
       image: { type: 'jpeg', quality: 1 },
-      html2canvas: { scale: 1, useCORS: true, logging: false },
+      html2canvas: { scale: 0.8, useCORS: true, logging: false },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
       pagebreak: { mode: ['css'] }
     }
@@ -206,52 +214,87 @@ export default function DailySales() {
       setShowPdfModal(false)
       await new Promise(resolve => setTimeout(resolve, 500))
 
-      // Get current page content
-      const contentEl = document.querySelector('.p-6.space-y-6')
-      if (!contentEl) {
-        alert('ບໍ່ພົບຂໍ້ມູນ')
-        setDownloading(false)
-        return
-      }
-
-      // Create clean container - sized for A4 landscape
+      // Create main container
       const element = document.createElement('div')
       element.style.background = 'white'
       element.style.padding = '10px'
-      element.style.width = '1123px'  // A4 landscape at 96 DPI
+      element.style.width = '1000px'
       element.style.fontFamily = 'Noto Sans Lao, Inter, sans-serif'
 
-      // Clone content
-      const cloned = contentEl.cloneNode(true)
-      cloned.style.width = '1100px'
-      cloned.style.maxWidth = '1100px'
-      
-      // Remove interactive elements
-      const toRemove = cloned.querySelectorAll('button, select, input, [role="button"]')
-      toRemove.forEach(el => el.remove())
-      
-      // Keep original layout - just clean up
-      const cards = cloned.querySelectorAll('[class*="bg-gradient"]')
-      cards.forEach(card => {
-        card.style.border = '1px solid #e2e8f0'
-        card.style.marginBottom = '8px'
-      })
-      
-      // Style charts
-      const charts = cloned.querySelectorAll('.chart-card')
-      charts.forEach(chart => {
-        chart.style.pageBreakInside = 'avoid'
-        chart.style.marginBottom = '12px'
-        chart.style.border = '1px solid #e2e8f0'
-      })
-      
-      element.appendChild(cloned)
+      // Header
+      const header = document.createElement('div')
+      header.style.marginBottom = '20px'
+      header.style.borderBottom = '3px solid #4f46e5'
+      header.style.paddingBottom = '15px'
+      header.innerHTML = `
+        <h1 style="font-size: 24px; font-weight: bold; color: #4f46e5; margin-bottom: 8px;">AR Finance Dashboard - LXH</h1>
+        <p style="color: #64748b; font-size: 13px; margin: 0;">Generated: ${new Date().toLocaleString('lo-LA')}</p>
+        <p style="color: #64748b; font-size: 12px; margin-top: 6px;">All Pages Report</p>
+      `
+      element.appendChild(header)
 
+      // Store current page
+      const currentPage = location.pathname
+
+      // Navigate to each page and capture
+      for (let i = 0; i < pages.length; i++) {
+        const page = pages[i]
+        
+        // Navigate
+        navigate(page.path)
+        await new Promise(resolve => setTimeout(resolve, 3000))
+        
+        // Add page title
+        const titleEl = document.createElement('div')
+        titleEl.style.fontSize = '20px'
+        titleEl.style.fontWeight = 'bold'
+        titleEl.style.color = '#4f46e5'
+        titleEl.style.marginBottom = '15px'
+        titleEl.style.marginTop = i === 0 ? '0' : '20px'
+        titleEl.style.pageBreakBefore = i === 0 ? 'auto' : 'always'
+        titleEl.textContent = page.title
+        element.appendChild(titleEl)
+        
+        // Capture content
+        const contentEl = document.querySelector('.p-6.space-y-6')
+        if (contentEl) {
+          const cloned = contentEl.cloneNode(true)
+          cloned.style.width = '980px'
+          cloned.style.maxWidth = '980px'
+          
+          // Remove interactive elements
+          const toRemove = cloned.querySelectorAll('button, select, input, [role="button"]')
+          toRemove.forEach(el => el.remove())
+          
+          // Clean up styling
+          const cards = cloned.querySelectorAll('[class*="bg-gradient"]')
+          cards.forEach(card => {
+            card.style.border = '1px solid #e2e8f0'
+            card.style.marginBottom = '8px'
+          })
+          
+          const charts = cloned.querySelectorAll('.chart-card')
+          charts.forEach(chart => {
+            chart.style.pageBreakInside = 'avoid'
+            chart.style.marginBottom = '12px'
+            chart.style.border = '1px solid #e2e8f0'
+          })
+          
+          element.appendChild(cloned)
+        }
+      }
+
+      // Return to original page
+      navigate(currentPage)
+      await new Promise(resolve => setTimeout(resolve, 1000))
+
+      // Wait for rendering
       await new Promise(resolve => setTimeout(resolve, 2000))
 
+      // Generate PDF
       await html2pdf().set(opt).from(element).save()
 
-      alert('ດາວໂຫລດ PDF ສຳເລັດ!')
+      alert('ດາວໂຫລດ PDF ສຳເລັດ!\n\nPDF ປະກອບມີທັງ 5 ໜ້າ')
     } catch (err) {
       console.error('PDF download error:', err)
       alert('ເກີດຂໍ້ຜິດພາດໃນການດາວໂຫລດ PDF')
