@@ -15,7 +15,8 @@
       "Bash(taskkill *)",
       "Bash(timeout *)",
       "Bash(node *)",
-      "Bash(move *)"
+      "Bash(move *)",
+      "Bash(sed *)"
     ]
   },
   "$version": 3

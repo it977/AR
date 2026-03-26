@@ -5,6 +5,7 @@ import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
 import { useARData, usePayoffData, computeKPIs, computeShiftData } from '../lib/useARData'
 import { formatLAK, formatNumber } from '../lib/excelParser'
 import html2pdf from 'html2pdf.js'
+import { useGlobalFilters } from '../context/FilterContext'
 
 const SHIFT_COLORS = ['#4f46e5', '#06b6d4', '#10b981']
 const SHIFTS = ['8AM-4PM', '4PM-12AM', '12AM-8AM']
@@ -107,7 +108,7 @@ function TopCard({ label, sublabel, value, isLAK = true, color = 'indigo' }) {
 }
 
 export default function DailySales() {
-  const [filters, setFilters] = useState({ dateFrom: '', dateTo: '' })
+  const { filters, updateFilters } = useGlobalFilters()
   const [downloading, setDownloading] = useState(false)
   const [showPdfModal, setShowPdfModal] = useState(false)
   const [selectedPages, setSelectedPages] = useState(['daily', 'customer', 'payment', 'debt', 'aging'])
@@ -352,23 +353,12 @@ export default function DailySales() {
           <p className="text-sm text-slate-500 mt-0.5">Daily Sales Report • ໜ່ວຍ: LAK</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => setShowPdfModal(true)}
-            disabled={downloading || loading}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white text-sm font-semibold rounded-lg flex items-center gap-2 transition-colors shadow-sm"
-            title="ດາວໂຫລດ PDF"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            ດາວໂຫລດ PDF
-          </button>
-          <DateFilter filters={filters} onChange={f => setFilters(prev => ({ ...prev, ...f }))} />
+          <DateFilter filters={filters} onChange={updateFilters} />
           <FilterSelect label="ກະວຽກ" value={filters.workload}
-            onChange={v => setFilters(f => ({ ...f, workload: v }))}
+            onChange={v => updateFilters({ workload: v })}
             options={['8AM-4PM','4PM-12AM','12AM-8AM']} />
           <FilterSelect label="ປະເພດລູກຄ້າ" value={filters.customerType}
-            onChange={v => setFilters(f => ({ ...f, customerType: v }))}
+            onChange={v => updateFilters({ customerType: v })}
             options={['GN','INS','B2B']} />
         </div>
       </div>
