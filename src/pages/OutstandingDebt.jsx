@@ -5,9 +5,10 @@ import DateFilter, { FilterSelect } from '../components/DateFilter'
 import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
 import { useARData, usePayoffData } from '../lib/useARData'
 import { formatLAK, formatNumber } from '../lib/excelParser'
+import { useGlobalFilters } from '../context/FilterContext'
 
 export default function OutstandingDebt() {
-  const [filters, setFilters] = useState({ dateFrom: '', dateTo: '' })
+  const { filters, updateFilters } = useGlobalFilters()
   const [page, setPage] = useState(1)
   const PAGE_SIZE = 15
 
@@ -96,12 +97,12 @@ export default function OutstandingDebt() {
           <p className="text-sm text-slate-500">Outstanding Debt Report</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <DateFilter filters={filters} onChange={f => setFilters(prev => ({ ...prev, ...f }))} />
+          <DateFilter filters={filters} onChange={updateFilters} />
           <FilterSelect label="ປະເພດລູກຄ້າ" value={filters.customerType}
-            onChange={v => setFilters(f => ({ ...f, customerType: v }))}
+            onChange={v => updateFilters({ customerType: v })}
             options={['GN','INS','B2B']} />
           <FilterSelect label="OPD/IPD" value={filters.opdIpd}
-            onChange={v => setFilters(f => ({ ...f, opdIpd: v }))}
+            onChange={v => updateFilters({ opdIpd: v })}
             options={['OPD','IPD']} />
         </div>
       </div>

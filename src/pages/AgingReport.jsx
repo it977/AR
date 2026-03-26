@@ -5,6 +5,7 @@ import DateFilter, { FilterSelect } from '../components/DateFilter'
 import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
 import { usePayoffData, computeAgingData } from '../lib/useARData'
 import { formatLAK, formatNumber } from '../lib/excelParser'
+import { useGlobalFilters } from '../context/FilterContext'
 
 const AGING_CONFIG = [
   { key: '0-15 Days', label: '0–15 ວັນ', color: '#10b981', bg: 'bg-emerald-50', border: 'border-emerald-100', text: 'text-emerald-700', badgeBg: 'bg-emerald-100 text-emerald-700' },
@@ -14,7 +15,7 @@ const AGING_CONFIG = [
 ]
 
 export default function AgingReport() {
-  const [filters, setFilters] = useState({ dateFrom: '', dateTo: '' })
+  const { filters, updateFilters } = useGlobalFilters()
   const [search, setSearch] = useState('')
 
   const { data: debtRows, loading } = usePayoffData(filters)
@@ -101,9 +102,9 @@ export default function AgingReport() {
           <p className="text-sm text-slate-500">Debt Aging Report</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <DateFilter filters={filters} onChange={f => setFilters(prev => ({ ...prev, ...f }))} />
+          <DateFilter filters={filters} onChange={updateFilters} />
           <FilterSelect label="ປະເພດລູກຄ້າ" value={filters.customerType}
-            onChange={v => setFilters(f => ({ ...f, customerType: v }))}
+            onChange={v => updateFilters({ customerType: v })}
             options={['GN','INS','B2B']} />
           <input
             type="text"

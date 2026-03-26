@@ -5,6 +5,7 @@ import DateFilter, { FilterSelect } from '../components/DateFilter'
 import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
 import { useARData, usePayoffData, computeKPIs } from '../lib/useARData'
 import { formatLAK, formatNumber } from '../lib/excelParser'
+import { useGlobalFilters } from '../context/FilterContext'
 
 const METHODS = [
   { key: 'cash',  label: 'ເງິນສົດ', sublabel: 'Cash',               color: '#10b981', bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-100' },
@@ -76,7 +77,7 @@ const BankIcon = ({ method }) => {
 }
 
 export default function PaymentChannel() {
-  const [filters, setFilters] = useState({ dateFrom: '', dateTo: '' })
+  const { filters, updateFilters } = useGlobalFilters()
 
   const { data: rows, loading } = useARData(filters)
   const { data: debtRows } = usePayoffData(filters)
@@ -171,12 +172,12 @@ export default function PaymentChannel() {
           <p className="text-sm text-slate-500 mt-0.5">Payment Channel Analysis • ໜ່ວຍ: LAK</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <DateFilter filters={filters} onChange={f => setFilters(prev => ({ ...prev, ...f }))} />
+          <DateFilter filters={filters} onChange={updateFilters} />
           <FilterSelect label="ປະເພດລູກຄ້າ" value={filters.customerType}
-            onChange={v => setFilters(f => ({ ...f, customerType: v }))}
+            onChange={v => updateFilters({ customerType: v })}
             options={['GN','INS','B2B']} />
           <FilterSelect label="ກະວຽກ" value={filters.workload}
-            onChange={v => setFilters(f => ({ ...f, workload: v }))}
+            onChange={v => updateFilters({ workload: v })}
             options={['8AM-4PM','4PM-12AM','12AM-8AM']} />
         </div>
       </div>
