@@ -4,7 +4,6 @@ import DateFilter, { FilterSelect } from '../components/DateFilter'
 import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
 import { useARData, usePayoffData, computeKPIs, computeShiftData } from '../lib/useARData'
 import { formatLAK, formatNumber } from '../lib/excelParser'
-import html2pdf from 'html2pdf.js'
 import { useGlobalFilters } from '../context/FilterContext'
 
 const SHIFT_COLORS = ['#4f46e5', '#06b6d4', '#10b981']
@@ -188,85 +187,18 @@ export default function DailySales() {
   const downloadPDF = async () => {
     setDownloading(true)
 
-    const filename = `AR_Daily_Report_${new Date().toISOString().split('T')[0]}.pdf`
-
-    const opt = {
-      margin: [5, 5, 5, 5],
-      filename: filename,
-      image: { type: 'jpeg', quality: 1 },
-      html2canvas: {
-        scale: 1.5,
-        useCORS: true,
-        logging: false,
-        scrollX: 0,
-        scrollY: 0,
-      },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
-      pagebreak: { mode: ['avoid-all'] }
-    }
-
     try {
       // Close modal first
       setShowPdfModal(false)
       
-      // Wait for modal to close and content to render
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      // Wait for modal to close
+      await new Promise(resolve => setTimeout(resolve, 500))
 
-      // Create clean container with proper sizing
-      const element = document.createElement('div')
-      element.style.background = 'white'
-      element.style.padding = '15px'
-      element.style.width = '1100px'
-      element.style.fontFamily = 'Noto Sans Lao, Inter, sans-serif'
-      
-      // Add header
-      const header = document.createElement('div')
-      header.style.marginBottom = '20px'
-      header.style.borderBottom = '2px solid #4f46e5'
-      header.style.paddingBottom = '15px'
-      header.innerHTML = `
-        <h1 style="font-size: 24px; font-weight: bold; color: #4f46e5; margin-bottom: 5px;">AR Finance Dashboard</h1>
-        <p style="color: #64748b; font-size: 13px; margin: 0;">Daily Sales Report</p>
-        <p style="color: #94a3b8; font-size: 11px; margin-top: 8px;">Generated: ${new Date().toLocaleString('lo-LA')}</p>
-      `
-      element.appendChild(header)
+      // For now, use browser print which handles multi-page better
+      // User can select "Save as PDF" in print dialog
+      window.print()
 
-      // Clone dashboard content
-      if (dashboardRef.current) {
-        const content = dashboardRef.current.cloneNode(true)
-        content.style.width = '1070px'
-        
-        // Remove interactive elements
-        const toRemove = content.querySelectorAll('button, select, input, [role="button"]')
-        toRemove.forEach(el => el.remove())
-        
-        // Style cards for PDF
-        const cards = content.querySelectorAll('[class*="bg-gradient"]')
-        cards.forEach(card => {
-          card.style.border = '1px solid #e2e8f0'
-          card.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)'
-        })
-        
-        // Ensure charts have time to render
-        const chartContainers = content.querySelectorAll('.chart-card')
-        chartContainers.forEach(chart => {
-          chart.style.pageBreakInside = 'avoid'
-          chart.style.breakInside = 'avoid'
-          chart.style.marginBottom = '15px'
-          chart.style.border = '1px solid #e2e8f0'
-          chart.style.borderRadius = '12px'
-        })
-        
-        element.appendChild(content)
-      }
-
-      // Wait for images and charts
-      await new Promise(resolve => setTimeout(resolve, 2000))
-
-      // Generate PDF
-      await html2pdf().set(opt).from(element).save()
-
-      alert('ດາວໂຫລດ PDF ສຳເລັດ!')
+      alert('ໃຫ້ເລືອກ "Save as PDF" ໃນປ່ອງຢ້ຽມ Print ເພື່ອບັນທຶກ PDF')
     } catch (err) {
       console.error('PDF download error:', err)
       alert('ເກີດຂໍ້ຜິດພາດໃນການດາວໂຫລດ PDF')
