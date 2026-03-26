@@ -194,12 +194,12 @@ export default function DailySales() {
     const filename = `AR_Finance_Report_${new Date().toISOString().split('T')[0]}.pdf`
 
     const opt = {
-      margin: [3, 3, 3, 3],
+      margin: [5, 5, 5, 5],
       filename: filename,
       image: { type: 'jpeg', quality: 1 },
-      html2canvas: { scale: 0.6, useCORS: true, logging: false },
+      html2canvas: { scale: 1, useCORS: true, logging: false },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
-      pagebreak: { mode: ['avoid-all'] }
+      pagebreak: { mode: ['css'] }
     }
 
     try {
@@ -217,43 +217,24 @@ export default function DailySales() {
       // Create clean container - sized for A4 landscape
       const element = document.createElement('div')
       element.style.background = 'white'
-      element.style.padding = '5px'
-      element.style.width = '900px'  // Fits A4 landscape perfectly
+      element.style.padding = '10px'
+      element.style.width = '1123px'  // A4 landscape at 96 DPI
       element.style.fontFamily = 'Noto Sans Lao, Inter, sans-serif'
 
       // Clone content
       const cloned = contentEl.cloneNode(true)
-      cloned.style.width = '890px'
-      cloned.style.maxWidth = '890px'
+      cloned.style.width = '1100px'
+      cloned.style.maxWidth = '1100px'
       
-      // CRITICAL: Remove ALL interactive elements
+      // Remove interactive elements
       const toRemove = cloned.querySelectorAll('button, select, input, [role="button"]')
       toRemove.forEach(el => el.remove())
       
-      // CRITICAL: Force block layout to prevent overlaps
-      const allElements = cloned.querySelectorAll('*')
-      allElements.forEach(el => {
-        el.style.cssFloat = 'none'
-        el.style.clear = 'both'
-        el.style.position = 'relative'
-        el.style.display = 'block'
-      })
-      
-      // Force cards to stack
+      // Keep original layout - just clean up
       const cards = cloned.querySelectorAll('[class*="bg-gradient"]')
       cards.forEach(card => {
-        card.style.marginBottom = '8px'
         card.style.border = '1px solid #e2e8f0'
-        card.style.width = '100%'
-        card.style.boxSizing = 'border-box'
-      })
-      
-      // Force grids to stack vertically
-      const grids = cloned.querySelectorAll('[class*="grid"]')
-      grids.forEach(grid => {
-        grid.style.display = 'block'
-        grid.style.grid = 'none'
-        grid.style.gap = '8px'
+        card.style.marginBottom = '8px'
       })
       
       // Style charts
@@ -262,8 +243,6 @@ export default function DailySales() {
         chart.style.pageBreakInside = 'avoid'
         chart.style.marginBottom = '12px'
         chart.style.border = '1px solid #e2e8f0'
-        chart.style.width = '100%'
-        chart.style.boxSizing = 'border-box'
       })
       
       element.appendChild(cloned)
