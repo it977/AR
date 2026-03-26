@@ -21,7 +21,9 @@
       "WebFetch(domain:)",
       "Bash(python -c \"import pandas as pd; df = pd.read_excel\\(''C:/Users/KVL COMPUTER/Downloads/AR test.xlsx''\\); print\\(''Columns:'', df.columns.tolist\\(\\)\\); print\\(''\\\\nFirst 5 rows:''\\); print\\(df.head\\(\\)\\); print\\(''\\\\nData types:''\\); print\\(df.dtypes\\)\")",
       "Bash(python:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "mcp__ide__getDiagnostics",
+      "mcp__ide__executeCode"
     ]
   }
 }

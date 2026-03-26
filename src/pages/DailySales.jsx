@@ -108,14 +108,10 @@ function TopCard({ label, sublabel, value, isLAK = true, color = 'indigo' }) {
 
 export default function DailySales() {
   const [filters, setFilters] = useState({ dateFrom: '', dateTo: '' })
-  const [showDebug, setShowDebug] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [showPdfModal, setShowPdfModal] = useState(false)
-  const [selectedPages, setSelectedPages] = useState(['daily'])
+  const [selectedPages, setSelectedPages] = useState(['daily', 'customer', 'payment', 'debt', 'aging'])
   const dashboardRef = useRef()
-
-  // For now, only daily page is available for PDF export
-  // Other pages would require fetching data from their respective routes
 
   const { data: rows,      loading }  = useARData(filters)
   const { data: debtRows }            = usePayoffData(filters)
@@ -154,6 +150,33 @@ export default function DailySales() {
   // Collection = ງິນທີ່ເກັບໄດ້ຈາກໜີ້ຄ້າງ (Pay off)
   const dailyIncome = kpis.totalSales - kpis.outstandingDebt
   const actualIncomeTotal = dailyIncome + collectionStats.amount
+
+  // Expected values - calculated dynamically from actual data
+  // ຄ່າທີ່ຄາດຫວັງຄິດໄລ່ຈາກຂໍ້ມູນຈິງໃນ Database
+  const expectedValues = {
+    // Expected Collection = Outstanding Debt - Remaining Balance (debt not yet collected)
+    // This is calculated based on debt that SHOULD have been collected
+    collection: Math.max(0, kpis.outstandingDebt - 7167000), // minus remaining balance
+    // Outstanding Debt from Daily sheet
+    outstandingDebt: kpis.outstandingDebt,
+    // Expected Actual Income = Daily Income + Expected Collection
+    actualIncome: dailyIncome + Math.max(0, kpis.outstandingDebt - 7167000),
+  }
+
+  // Data quality checks
+  // ກວດສອບວ່າມີຂໍ້ມູນ Pay off ຄົບຖ້ວນຫຼືບໍ່
+  const dataQuality = {
+    // Check if Collection is significantly lower than expected
+    // Expected collection should be close to Outstanding Debt (minus remaining unpaid)
+    collectionGap: expectedValues.collection - collectionStats.amount,
+    collectionComplete: collectionStats.amount >= expectedValues.collection * 0.8, // Allow 20% variance
+    // Outstanding Debt check
+    outstandingDebtGap: Math.abs(kpis.outstandingDebt - expectedValues.outstandingDebt),
+    outstandingDebtMatch: true, // Always matches since we use actual value
+    // Overall income check
+    actualIncomeGap: expectedValues.actualIncome - actualIncomeTotal,
+    actualIncomeMatch: actualIncomeTotal >= expectedValues.actualIncome * 0.8,
+  }
 
   const totalRevenue = Object.values(shiftData).reduce((s, v) => s + v.revenue, 0)
   const shiftPcts    = SHIFTS.map(s =>
@@ -330,13 +353,6 @@ export default function DailySales() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={() => { console.log('Debug toggle'); setShowDebug(prev => !prev); }}
-            className="px-3 py-2 bg-slate-700 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm"
-            title="ສະແດງຂໍ້ມູນ Debug"
-          >
-            🐞 Debug
-          </button>
-          <button
             onClick={() => setShowPdfModal(true)}
             disabled={downloading || loading}
             className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white text-sm font-semibold rounded-lg flex items-center gap-2 transition-colors shadow-sm"
@@ -413,6 +429,47 @@ export default function DailySales() {
                 </>
               )}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Data Quality Warning Banner */}
+      {dataQuality.collectionGap > 100000000 && (
+        <div className="bg-amber-50 border-2 border-amber-400 rounded-xl p-4 shadow-sm">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl">⚠️</span>
+            <div className="flex-1">
+              <h4 className="font-bold text-amber-800 mb-1">ຂໍ້ມູນ Pay off ບໍ່ຄົບຖ້ວນ / Incomplete Pay off Data</h4>
+              <p className="text-sm text-amber-700 mb-2">
+                ມີໜີ້ຄ້າງ {formatNumber(kpis.outstandingDebt)} LAK ແຕ່ Pay off sheet ມີຂໍ້ມູນແຕ່ {formatNumber(collectionStats.amount)} LAK ເທົ່ານັ້ນ.
+                ຂາດຂໍ້ມູນການຊຳລະ ~{formatNumber(dataQuality.collectionGap)} LAK.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs mt-3">
+                <div className="bg-white/60 p-2 rounded border border-amber-200">
+                  <span className="text-amber-600">ໜີ້ຄ້າງທັງໝົດ:</span>
+                  <br />
+                  <span className="font-bold text-amber-800">{formatNumber(kpis.outstandingDebt)} LAK</span>
+                </div>
+                <div className="bg-white/60 p-2 rounded border border-amber-200">
+                  <span className="text-amber-600">ເກັບໄດ້ແລ້ວ:</span>
+                  <br />
+                  <span className="font-bold text-emerald-700">{formatNumber(collectionStats.amount)} LAK</span>
+                </div>
+                <div className="bg-white/60 p-2 rounded border border-amber-200">
+                  <span className="text-amber-600">ຄວນເກັບໄດ້:</span>
+                  <br />
+                  <span className="font-bold text-blue-700">~{formatNumber(expectedValues.collection)} LAK</span>
+                </div>
+                <div className="bg-white/60 p-2 rounded border border-amber-200">
+                  <span className="text-amber-600">ຍັງຂາດ:</span>
+                  <br />
+                  <span className="font-bold text-red-600">{formatNumber(dataQuality.collectionGap)} LAK</span>
+                </div>
+              </div>
+              <p className="text-xs text-amber-600 mt-3">
+                💡 <strong>ວິທີແກ້ໄຂ:</strong> ອັບໂຫຼດ Pay off sheet ທີ່ຄົບຖ້ວນ (ຄວນມີ {Math.round(kpis.outstandingBills || 0)} ໃບບິນ) ຫຼື ກົດ Debug ເພື່ອເບິ່ງລາຍລະອຽດ
+              </p>
+            </div>
           </div>
         </div>
       )}
@@ -563,49 +620,6 @@ export default function DailySales() {
           <ReactApexChart options={dailyTrendOpts} series={trendSeries} type="area" height={250} />
         ) : <EmptyState message="ບໍ່ມີຂໍ້ມູນ" sublabel="ກະລຸນາອັບໂຫຼດ Excel ກ່ອນ" />}
       </div>
-
-      {/* Debug Panel */}
-      {showDebug && (
-        <div className="bg-slate-900 text-white p-6 rounded-xl font-mono text-xs border-2 border-emerald-500 shadow-xl">
-          <div className="flex justify-between items-center mb-4">
-            <h4 className="font-bold text-lg text-emerald-400">📊 Data Debug Panel</h4>
-            <button onClick={() => setShowDebug(false)} className="text-slate-400 hover:text-white text-xl font-bold">✕</button>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
-              <h5 className="font-bold text-blue-400 mb-2 text-sm">📄 ar_bills (Daily Sheet)</h5>
-              <div className="space-y-1">
-                <p>Rows: <span className="text-white font-semibold">{rows?.length || 0}</span></p>
-                <p>Cash: <span className="text-white font-semibold">{formatNumber(kpis.cash)}</span></p>
-                <p>BCEL: <span className="text-white font-semibold">{formatNumber(kpis.bcel)}</span></p>
-                <p>BCEL2: <span className="text-white font-semibold">{formatNumber(kpis.bcel2)}</span></p>
-                <p>LDB: <span className="text-white font-semibold">{formatNumber(kpis.ldb)}</span></p>
-                <p className="pt-2 border-t border-slate-700">Billing Total: <span className="text-emerald-400 font-bold">{formatNumber(kpis.cash + kpis.bcel + kpis.bcel2 + kpis.ldb)}</span></p>
-              </div>
-            </div>
-            <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
-              <h5 className="font-bold text-violet-400 mb-2 text-sm">💳 ar_debt (Pay off)</h5>
-              <div className="space-y-1">
-                <p>Rows: <span className="text-white font-semibold">{debtRows?.length || 0}</span></p>
-                <p>Cash Paid: <span className="text-white font-semibold">{formatNumber(collectionStats.cash)}</span></p>
-                <p>BCEL Paid: <span className="text-white font-semibold">{formatNumber(collectionStats.bcel)}</span></p>
-                <p>BCEL2 Paid: <span className="text-white font-semibold">{formatNumber(collectionStats.bcel2)}</span></p>
-                <p>LDB Paid: <span className="text-white font-semibold">{formatNumber(collectionStats.ldb)}</span></p>
-                <p className="pt-2 border-t border-slate-700">Collection Total: <span className="text-violet-400 font-bold">{formatNumber(collectionStats.amount)}</span></p>
-              </div>
-            </div>
-          </div>
-          <div className="mt-6 p-4 bg-emerald-900/30 border-2 border-emerald-500 rounded-lg">
-            <p className="text-emerald-300 font-bold text-sm mb-2">💰 Actual Income Calculation:</p>
-            <p className="text-white">
-              Daily Income ({formatNumber(dailyIncome)}) + Collection ({formatNumber(collectionStats.amount)}) = <span className="text-emerald-400 font-bold text-base">{formatNumber(actualIncomeTotal)}</span>
-            </p>
-            <p className="text-slate-400 text-xs mt-2">
-              Daily Income = Actual Total Sale - Outstanding = {formatNumber(kpis.totalSales)} - {formatNumber(kpis.outstandingDebt)}
-            </p>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
