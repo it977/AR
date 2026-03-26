@@ -187,7 +187,7 @@ export default function DailySales() {
     totalRevenue > 0 ? ((shiftData[s]?.revenue || 0) / totalRevenue * 100).toFixed(2) : '0.00'
   )
 
-  // PDF Download Function - ALL PAGES
+  // PDF Download Function - ALL PAGES (FIXED LAYOUT)
   const downloadPDF = async () => {
     setDownloading(true)
 
@@ -205,7 +205,7 @@ export default function DailySales() {
       margin: [5, 5, 5, 5],
       filename: filename,
       image: { type: 'jpeg', quality: 1 },
-      html2canvas: { scale: 0.8, useCORS: true, logging: false },
+      html2canvas: { scale: 0.7, useCORS: true, logging: false },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
       pagebreak: { mode: ['css'] }
     }
@@ -218,7 +218,7 @@ export default function DailySales() {
       const element = document.createElement('div')
       element.style.background = 'white'
       element.style.padding = '10px'
-      element.style.width = '1000px'
+      element.style.width = '950px'
       element.style.fontFamily = 'Noto Sans Lao, Inter, sans-serif'
 
       // Header
@@ -227,9 +227,8 @@ export default function DailySales() {
       header.style.borderBottom = '3px solid #4f46e5'
       header.style.paddingBottom = '15px'
       header.innerHTML = `
-        <h1 style="font-size: 24px; font-weight: bold; color: #4f46e5; margin-bottom: 8px;">AR Finance Dashboard - LXH</h1>
-        <p style="color: #64748b; font-size: 13px; margin: 0;">Generated: ${new Date().toLocaleString('lo-LA')}</p>
-        <p style="color: #64748b; font-size: 12px; margin-top: 6px;">All Pages Report</p>
+        <h1 style="font-size: 22px; font-weight: bold; color: #4f46e5; margin-bottom: 8px;">AR Finance Dashboard - LXH</h1>
+        <p style="color: #64748b; font-size: 12px; margin: 0;">Generated: ${new Date().toLocaleString('lo-LA')}</p>
       `
       element.appendChild(header)
 
@@ -242,45 +241,91 @@ export default function DailySales() {
         
         // Navigate
         navigate(page.path)
-        await new Promise(resolve => setTimeout(resolve, 3000))
+        await new Promise(resolve => setTimeout(resolve, 3500))
         
         // Add page title
         const titleEl = document.createElement('div')
-        titleEl.style.fontSize = '20px'
+        titleEl.style.fontSize = '18px'
         titleEl.style.fontWeight = 'bold'
         titleEl.style.color = '#4f46e5'
-        titleEl.style.marginBottom = '15px'
-        titleEl.style.marginTop = i === 0 ? '0' : '20px'
-        titleEl.style.pageBreakBefore = i === 0 ? 'auto' : 'always'
+        titleEl.style.margin = '15px 0 10px 0'
+        if (i > 0) titleEl.style.pageBreakBefore = 'always'
         titleEl.textContent = page.title
         element.appendChild(titleEl)
         
         // Capture content
         const contentEl = document.querySelector('.p-6.space-y-6')
         if (contentEl) {
+          const wrapper = document.createElement('div')
+          wrapper.style.width = '930px'
+          wrapper.style.position = 'relative'
+          wrapper.style.clear = 'both'
+          
           const cloned = contentEl.cloneNode(true)
-          cloned.style.width = '980px'
-          cloned.style.maxWidth = '980px'
+          cloned.style.width = '930px'
+          cloned.style.maxWidth = '930px'
+          cloned.style.position = 'relative'
           
           // Remove interactive elements
           const toRemove = cloned.querySelectorAll('button, select, input, [role="button"]')
           toRemove.forEach(el => el.remove())
           
-          // Clean up styling
-          const cards = cloned.querySelectorAll('[class*="bg-gradient"]')
-          cards.forEach(card => {
-            card.style.border = '1px solid #e2e8f0'
-            card.style.marginBottom = '8px'
+          // CRITICAL: Force all grids to block layout
+          const grids = cloned.querySelectorAll('[class*="grid"]')
+          grids.forEach(grid => {
+            grid.style.display = 'block'
+            grid.style.grid = 'none'
+            grid.style.gap = '10px'
           })
           
+          // Force all flex containers to block
+          const flexContainers = cloned.querySelectorAll('[class*="flex"]')
+          flexContainers.forEach(flex => {
+            if (flex.className.includes('grid')) {
+              flex.style.display = 'block'
+            }
+          })
+          
+          // Force cards to full width and block
+          const cards = cloned.querySelectorAll('[class*="bg-gradient"]')
+          cards.forEach(card => {
+            card.style.display = 'block'
+            card.style.width = '100%'
+            card.style.boxSizing = 'border-box'
+            card.style.marginBottom = '8px'
+            card.style.border = '1px solid #e2e8f0'
+            card.style.clear = 'both'
+            card.style.float = 'none'
+          })
+          
+          // Force charts to block
           const charts = cloned.querySelectorAll('.chart-card')
           charts.forEach(chart => {
+            chart.style.display = 'block'
+            chart.style.width = '100%'
+            chart.style.boxSizing = 'border-box'
             chart.style.pageBreakInside = 'avoid'
             chart.style.marginBottom = '12px'
             chart.style.border = '1px solid #e2e8f0'
+            chart.style.clear = 'both'
+            chart.style.float = 'none'
           })
           
-          element.appendChild(cloned)
+          // Force all elements to clear
+          const allElements = cloned.querySelectorAll('*')
+          allElements.forEach(el => {
+            el.style.clear = 'both'
+            el.style.float = 'none'
+          })
+          
+          // Add clearfix
+          const clearfix = document.createElement('div')
+          clearfix.style.clear = 'both'
+          clearfix.style.height = '0'
+          
+          wrapper.appendChild(cloned)
+          wrapper.appendChild(clearfix)
+          element.appendChild(wrapper)
         }
       }
 
@@ -289,7 +334,7 @@ export default function DailySales() {
       await new Promise(resolve => setTimeout(resolve, 1000))
 
       // Wait for rendering
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      await new Promise(resolve => setTimeout(resolve, 2500))
 
       // Generate PDF
       await html2pdf().set(opt).from(element).save()
