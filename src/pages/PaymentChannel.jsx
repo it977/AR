@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import ReactApexChart from 'react-apexcharts'
 import KPICard from '../components/KPICard'
 import DateFilter, { FilterSelect } from '../components/DateFilter'
@@ -81,16 +81,6 @@ export default function PaymentChannel() {
   const { data: rows, loading } = useARData(filters)
   const { data: debtRows } = usePayoffData(filters)
   const kpis = useMemo(() => computeKPIs(rows || []), [rows])
-
-  // Auto-scroll to content when filters change
-  useEffect(() => {
-    if (!loading) {
-      const contentArea = document.querySelector('.p-6.space-y-6')
-      if (contentArea) {
-        contentArea.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      }
-    }
-  }, [filters, loading])
 
   // Collection stats from ar_debt — channel-by-channel (ຕາມ Summary_CashFlow)
   const collectionStats = useMemo(() => {

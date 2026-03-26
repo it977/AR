@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import ReactApexChart from 'react-apexcharts'
 import KPICard, { CountCard } from '../components/KPICard'
 import DateFilter, { FilterSelect } from '../components/DateFilter'
@@ -10,16 +10,6 @@ export default function CustomerService() {
   const [filters, setFilters] = useState({ dateFrom: '', dateTo: '' })
 
   const { data: rows, loading, refetch } = useARData(filters)
-
-  // Auto-scroll to content when filters change
-  useEffect(() => {
-    if (!loading) {
-      const contentArea = document.querySelector('.p-6.space-y-6')
-      if (contentArea) {
-        contentArea.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      }
-    }
-  }, [filters, loading])
 
   const stats = useMemo(() => {
     if (!rows?.length) return {}

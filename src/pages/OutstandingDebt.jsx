@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import ReactApexChart from 'react-apexcharts'
 import KPICard from '../components/KPICard'
 import DateFilter, { FilterSelect } from '../components/DateFilter'
@@ -13,16 +13,6 @@ export default function OutstandingDebt() {
 
   const { data: rows, loading } = useARData(filters)
   const { data: debtRows } = usePayoffData(filters)
-
-  // Auto-scroll to content when filters change
-  useEffect(() => {
-    if (!loading) {
-      const contentArea = document.querySelector('.p-6.space-y-6')
-      if (contentArea) {
-        contentArea.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      }
-    }
-  }, [filters, loading])
 
   const outstanding = useMemo(() => (rows || []).filter(r => r.debt > 0), [rows])
   const totalOutstanding = useMemo(() => outstanding.reduce((s, r) => s + (r.debt || 0), 0), [outstanding])
