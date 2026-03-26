@@ -5,11 +5,12 @@ import DateFilter, { FilterSelect } from '../components/DateFilter'
 import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
 import { useARData, computeServiceData } from '../lib/useARData'
 import { formatLAK, formatNumber } from '../lib/excelParser'
+import { useGlobalFilters } from '../context/FilterContext'
 
 export default function CustomerService() {
-  const [filters, setFilters] = useState({ dateFrom: '', dateTo: '' })
+  const { filters, updateFilters } = useGlobalFilters()
 
-  const { data: rows, loading, refetch } = useARData(filters)
+  const { data: rows, loading } = useARData(filters)
 
   const stats = useMemo(() => {
     if (!rows?.length) return {}
@@ -93,18 +94,21 @@ export default function CustomerService() {
           <p className="text-sm text-slate-500">Customer & Service Analysis</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <DateFilter filters={filters} onChange={f => setFilters(prev => ({ ...prev, ...f }))} />
+          <DateFilter filters={filters} onChange={updateFilters} />
+          <FilterSelect label="ກະວຽກ" value={filters.workload}
+            onChange={v => updateFilters({ workload: v })}
+            options={['8AM-4PM','4PM-12AM','12AM-8AM']} />
           <FilterSelect label="ປະເພດລູກຄ້າ" value={filters.customerType}
-            onChange={v => setFilters(f => ({ ...f, customerType: v }))}
+            onChange={v => updateFilters({ customerType: v })}
             options={['GN','INS','B2B']} />
           <FilterSelect label="ເພດ" value={filters.gender}
-            onChange={v => setFilters(f => ({ ...f, gender: v }))}
+            onChange={v => updateFilters({ gender: v })}
             options={['Male','Female']} />
           <FilterSelect label="Insite/Onsite" value={filters.insiteOnsite}
-            onChange={v => setFilters(f => ({ ...f, insiteOnsite: v }))}
+            onChange={v => updateFilters({ insiteOnsite: v })}
             options={['Insite','Onsite']} />
           <FilterSelect label="OPD/IPD" value={filters.opdIpd}
-            onChange={v => setFilters(f => ({ ...f, opdIpd: v }))}
+            onChange={v => updateFilters({ opdIpd: v })}
             options={['OPD','IPD']} />
         </div>
       </div>
