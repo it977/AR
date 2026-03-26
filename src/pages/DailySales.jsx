@@ -4,7 +4,9 @@ import DateFilter, { FilterSelect } from '../components/DateFilter'
 import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
 import { useARData, usePayoffData, computeKPIs, computeShiftData } from '../lib/useARData'
 import { formatLAK, formatNumber } from '../lib/excelParser'
+import html2pdf from 'html2pdf.js'
 import { useGlobalFilters } from '../context/FilterContext'
+import { useNavigate, useLocation } from 'react-router-dom'
 
 const SHIFT_COLORS = ['#4f46e5', '#06b6d4', '#10b981']
 const SHIFTS = ['8AM-4PM', '4PM-12AM', '12AM-8AM']
@@ -108,6 +110,8 @@ function TopCard({ label, sublabel, value, isLAK = true, color = 'indigo' }) {
 
 export default function DailySales() {
   const { filters, updateFilters } = useGlobalFilters()
+  const navigate = useNavigate()
+  const location = useLocation()
   const [downloading, setDownloading] = useState(false)
   const [showPdfModal, setShowPdfModal] = useState(false)
   const [selectedPages, setSelectedPages] = useState(['daily', 'customer', 'payment', 'debt', 'aging'])
@@ -187,18 +191,106 @@ export default function DailySales() {
   const downloadPDF = async () => {
     setDownloading(true)
 
+    const pages = [
+      { path: '/', title: 'ລາຍງານປະຈຳວັນ', selector: '.p-6.space-y-6' },
+      { path: '/customer-service', title: 'ລູກຄ້າ & ການບໍລິການ', selector: '.p-6.space-y-6' },
+      { path: '/payment-channel', title: 'ຊ່ອງທາງການຊຳລະ', selector: '.p-6.space-y-6' },
+      { path: '/outstanding-debt', title: 'ໜີ້ຄ້າງຊຳລະ', selector: '.p-6.space-y-6' },
+      { path: '/aging-report', title: 'ລາຍງານອາຍຸໜີ້', selector: '.p-6.space-y-6' }
+    ]
+
+    const filename = `AR_Finance_Full_Report_${new Date().toISOString().split('T')[0]}.pdf`
+
+    const opt = {
+      margin: [5, 5, 5, 5],
+      filename: filename,
+      image: { type: 'jpeg', quality: 1 },
+      html2canvas: { scale: 1.2, useCORS: true, logging: false },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
+      pagebreak: { mode: ['avoid-all'] }
+    }
+
     try {
-      // Close modal first
       setShowPdfModal(false)
-      
-      // Wait for modal to close
       await new Promise(resolve => setTimeout(resolve, 500))
 
-      // For now, use browser print which handles multi-page better
-      // User can select "Save as PDF" in print dialog
-      window.print()
+      // Create main container
+      const element = document.createElement('div')
+      element.style.background = 'white'
+      element.style.padding = '15px'
+      element.style.width = '1000px'
+      element.style.fontFamily = 'Noto Sans Lao, Inter, sans-serif'
 
-      alert('ໃຫ້ເລືອກ "Save as PDF" ໃນປ່ອງຢ້ຽມ Print ເພື່ອບັນທຶກ PDF')
+      // Header
+      const header = document.createElement('div')
+      header.style.marginBottom = '25px'
+      header.style.borderBottom = '3px solid #4f46e5'
+      header.style.paddingBottom = '15px'
+      header.innerHTML = `
+        <h1 style="font-size: 26px; font-weight: bold; color: #4f46e5; margin-bottom: 8px;">AR Finance Dashboard - LXH</h1>
+        <p style="color: #64748b; font-size: 13px; margin: 0;">Generated: ${new Date().toLocaleString('lo-LA')}</p>
+        <p style="color: #64748b; font-size: 12px; margin-top: 6px;">Pages: ${pages.map(p => p.title).join(', ')}</p>
+      `
+      element.appendChild(header)
+
+      // Store current page to return to
+      const currentPage = location.pathname
+
+      // Navigate to each page and capture
+      for (const page of pages) {
+        // Navigate to page
+        navigate(page.path)
+        
+        // Wait for page to load and render
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        
+        // Capture content
+        const contentEl = document.querySelector(page.selector)
+        if (contentEl) {
+          const section = document.createElement('div')
+          section.style.marginBottom = '30px'
+          section.style.pageBreakAfter = 'always'
+          
+          const cloned = contentEl.cloneNode(true)
+          cloned.style.width = '970px'
+          
+          // Remove interactive elements
+          const toRemove = cloned.querySelectorAll('button, select, input, [role="button"]')
+          toRemove.forEach(el => el.remove())
+          
+          // Style cards for print
+          const cards = cloned.querySelectorAll('[class*="bg-gradient"]')
+          cards.forEach(card => {
+            card.style.border = '1px solid #e2e8f0'
+            card.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)'
+          })
+          
+          // Style charts
+          const charts = cloned.querySelectorAll('.chart-card')
+          charts.forEach(chart => {
+            chart.style.pageBreakInside = 'avoid'
+            chart.style.breakInside = 'avoid'
+            chart.style.marginBottom = '15px'
+            chart.style.border = '1px solid #e2e8f0'
+            chart.style.borderRadius = '12px'
+          })
+          
+          section.appendChild(cloned)
+          element.appendChild(section)
+        }
+      }
+
+      // Navigate back to original page
+      navigate(currentPage)
+      await new Promise(resolve => setTimeout(resolve, 1000))
+
+      // Wait for charts to render in cloned content
+      await new Promise(resolve => setTimeout(resolve, 1500))
+
+      // Generate PDF
+      await html2pdf().set(opt).from(element).save()
+
+      alert('ດາວໂຫລດ PDF ສຳເລັດ!\n\nPDF ປະກອບມີທຸກໜ້າ: ' + pages.map(p => p.title).join(', '))
     } catch (err) {
       console.error('PDF download error:', err)
       alert('ເກີດຂໍ້ຜິດພາດໃນການດາວໂຫລດ PDF')
