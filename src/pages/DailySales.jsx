@@ -187,7 +187,7 @@ export default function DailySales() {
     totalRevenue > 0 ? ((shiftData[s]?.revenue || 0) / totalRevenue * 100).toFixed(2) : '0.00'
   )
 
-  // PDF Download Function - ALL PAGES (FIXED LAYOUT)
+  // PDF Download Function - ALL PAGES (BEAUTIFUL LAYOUT)
   const downloadPDF = async () => {
     setDownloading(true)
 
@@ -202,10 +202,10 @@ export default function DailySales() {
     const filename = `AR_Finance_Full_Report_${new Date().toISOString().split('T')[0]}.pdf`
 
     const opt = {
-      margin: [5, 5, 5, 5],
+      margin: [8, 8, 8, 8],
       filename: filename,
       image: { type: 'jpeg', quality: 1 },
-      html2canvas: { scale: 0.7, useCORS: true, logging: false },
+      html2canvas: { scale: 0.75, useCORS: true, logging: false },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
       pagebreak: { mode: ['css'] }
     }
@@ -216,19 +216,23 @@ export default function DailySales() {
 
       // Create main container
       const element = document.createElement('div')
-      element.style.background = 'white'
-      element.style.padding = '10px'
-      element.style.width = '950px'
+      element.style.background = 'linear-gradient(135deg, #f8fafc 0%, #ffffff 100%)'
+      element.style.padding = '15px'
+      element.style.width = '1000px'
       element.style.fontFamily = 'Noto Sans Lao, Inter, sans-serif'
 
-      // Header
+      // Beautiful Header
       const header = document.createElement('div')
-      header.style.marginBottom = '20px'
-      header.style.borderBottom = '3px solid #4f46e5'
-      header.style.paddingBottom = '15px'
+      header.style.background = 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)'
+      header.style.color = 'white'
+      header.style.padding = '25px'
+      header.style.borderRadius = '12px'
+      header.style.marginBottom = '25px'
+      header.style.boxShadow = '0 4px 15px rgba(79, 70, 229, 0.3)'
       header.innerHTML = `
-        <h1 style="font-size: 22px; font-weight: bold; color: #4f46e5; margin-bottom: 8px;">AR Finance Dashboard - LXH</h1>
-        <p style="color: #64748b; font-size: 12px; margin: 0;">Generated: ${new Date().toLocaleString('lo-LA')}</p>
+        <h1 style="font-size: 28px; font-weight: bold; margin-bottom: 8px; text-shadow: 0 2px 4px rgba(0,0,0,0.2);">AR Finance Dashboard - LXH</h1>
+        <p style="font-size: 14px; opacity: 0.95; margin: 0;">Generated: ${new Date().toLocaleString('lo-LA')}</p>
+        <p style="font-size: 13px; opacity: 0.85; margin-top: 6px;">Complete Financial Report</p>
       `
       element.appendChild(header)
 
@@ -243,88 +247,73 @@ export default function DailySales() {
         navigate(page.path)
         await new Promise(resolve => setTimeout(resolve, 3500))
         
-        // Add page title
+        // Add beautiful page title
         const titleEl = document.createElement('div')
+        titleEl.style.background = 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)'
+        titleEl.style.color = 'white'
+        titleEl.style.padding = '12px 20px'
+        titleEl.style.borderRadius = '8px'
         titleEl.style.fontSize = '18px'
         titleEl.style.fontWeight = 'bold'
-        titleEl.style.color = '#4f46e5'
-        titleEl.style.margin = '15px 0 10px 0'
+        titleEl.style.margin = i === 0 ? '0 0 20px 0' : '25px 0 20px 0'
         if (i > 0) titleEl.style.pageBreakBefore = 'always'
-        titleEl.textContent = page.title
+        titleEl.style.boxShadow = '0 2px 8px rgba(79, 70, 229, 0.2)'
+        titleEl.textContent = `${i + 1}. ${page.title}`
         element.appendChild(titleEl)
         
         // Capture content
         const contentEl = document.querySelector('.p-6.space-y-6')
         if (contentEl) {
           const wrapper = document.createElement('div')
-          wrapper.style.width = '930px'
-          wrapper.style.position = 'relative'
-          wrapper.style.clear = 'both'
+          wrapper.style.background = 'white'
+          wrapper.style.padding = '20px'
+          wrapper.style.borderRadius = '10px'
+          wrapper.style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)'
+          wrapper.style.width = '960px'
+          wrapper.style.marginBottom = '15px'
           
           const cloned = contentEl.cloneNode(true)
-          cloned.style.width = '930px'
-          cloned.style.maxWidth = '930px'
-          cloned.style.position = 'relative'
+          cloned.style.width = '920px'
+          cloned.style.maxWidth = '920px'
           
           // Remove interactive elements
           const toRemove = cloned.querySelectorAll('button, select, input, [role="button"]')
           toRemove.forEach(el => el.remove())
           
-          // CRITICAL: Force all grids to block layout
+          // Style KPI cards beautifully
+          const kpiCards = cloned.querySelectorAll('[class*="bg-gradient"]')
+          kpiCards.forEach(card => {
+            card.style.borderRadius = '10px'
+            card.style.boxShadow = '0 2px 6px rgba(0,0,0,0.08)'
+            card.style.marginBottom = '10px'
+            card.style.border = 'none'
+          })
+          
+          // Style chart cards
+          const charts = cloned.querySelectorAll('.chart-card')
+          charts.forEach(chart => {
+            chart.style.borderRadius = '10px'
+            chart.style.boxShadow = '0 2px 6px rgba(0,0,0,0.08)'
+            chart.style.padding = '15px'
+            chart.style.marginBottom = '15px'
+            chart.style.pageBreakInside = 'avoid'
+            chart.style.border = '1px solid #e2e8f0'
+          })
+          
+          // Force block layout to prevent overlaps
           const grids = cloned.querySelectorAll('[class*="grid"]')
           grids.forEach(grid => {
             grid.style.display = 'block'
             grid.style.grid = 'none'
-            grid.style.gap = '10px'
           })
           
-          // Force all flex containers to block
-          const flexContainers = cloned.querySelectorAll('[class*="flex"]')
-          flexContainers.forEach(flex => {
-            if (flex.className.includes('grid')) {
-              flex.style.display = 'block'
-            }
-          })
-          
-          // Force cards to full width and block
-          const cards = cloned.querySelectorAll('[class*="bg-gradient"]')
-          cards.forEach(card => {
-            card.style.display = 'block'
-            card.style.width = '100%'
-            card.style.boxSizing = 'border-box'
-            card.style.marginBottom = '8px'
-            card.style.border = '1px solid #e2e8f0'
-            card.style.clear = 'both'
-            card.style.float = 'none'
-          })
-          
-          // Force charts to block
-          const charts = cloned.querySelectorAll('.chart-card')
-          charts.forEach(chart => {
-            chart.style.display = 'block'
-            chart.style.width = '100%'
-            chart.style.boxSizing = 'border-box'
-            chart.style.pageBreakInside = 'avoid'
-            chart.style.marginBottom = '12px'
-            chart.style.border = '1px solid #e2e8f0'
-            chart.style.clear = 'both'
-            chart.style.float = 'none'
-          })
-          
-          // Force all elements to clear
           const allElements = cloned.querySelectorAll('*')
           allElements.forEach(el => {
             el.style.clear = 'both'
             el.style.float = 'none'
           })
           
-          // Add clearfix
-          const clearfix = document.createElement('div')
-          clearfix.style.clear = 'both'
-          clearfix.style.height = '0'
-          
           wrapper.appendChild(cloned)
-          wrapper.appendChild(clearfix)
           element.appendChild(wrapper)
         }
       }
@@ -339,7 +328,7 @@ export default function DailySales() {
       // Generate PDF
       await html2pdf().set(opt).from(element).save()
 
-      alert('ດາວໂຫລດ PDF ສຳເລັດ!\n\nPDF ປະກອບມີທັງ 5 ໜ້າ')
+      alert('ດາວໂຫລດ PDF ສຳເລັດ!\n\n✨ PDF ປະກອບມີທັງ 5 ໜ້າ ພ້ອມການອອກແບບທີ່ງາມງາມ')
     } catch (err) {
       console.error('PDF download error:', err)
       alert('ເກີດຂໍ້ຜິດພາດໃນການດາວໂຫລດ PDF')
