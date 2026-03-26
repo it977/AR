@@ -433,47 +433,6 @@ export default function DailySales() {
         </div>
       )}
 
-      {/* Data Quality Warning Banner */}
-      {dataQuality.collectionGap > 100000000 && (
-        <div className="bg-amber-50 border-2 border-amber-400 rounded-xl p-4 shadow-sm">
-          <div className="flex items-start gap-3">
-            <span className="text-2xl">⚠️</span>
-            <div className="flex-1">
-              <h4 className="font-bold text-amber-800 mb-1">ຂໍ້ມູນ Pay off ບໍ່ຄົບຖ້ວນ / Incomplete Pay off Data</h4>
-              <p className="text-sm text-amber-700 mb-2">
-                ມີໜີ້ຄ້າງ {formatNumber(kpis.outstandingDebt)} LAK ແຕ່ Pay off sheet ມີຂໍ້ມູນແຕ່ {formatNumber(collectionStats.amount)} LAK ເທົ່ານັ້ນ.
-                ຂາດຂໍ້ມູນການຊຳລະ ~{formatNumber(dataQuality.collectionGap)} LAK.
-              </p>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs mt-3">
-                <div className="bg-white/60 p-2 rounded border border-amber-200">
-                  <span className="text-amber-600">ໜີ້ຄ້າງທັງໝົດ:</span>
-                  <br />
-                  <span className="font-bold text-amber-800">{formatNumber(kpis.outstandingDebt)} LAK</span>
-                </div>
-                <div className="bg-white/60 p-2 rounded border border-amber-200">
-                  <span className="text-amber-600">ເກັບໄດ້ແລ້ວ:</span>
-                  <br />
-                  <span className="font-bold text-emerald-700">{formatNumber(collectionStats.amount)} LAK</span>
-                </div>
-                <div className="bg-white/60 p-2 rounded border border-amber-200">
-                  <span className="text-amber-600">ຄວນເກັບໄດ້:</span>
-                  <br />
-                  <span className="font-bold text-blue-700">~{formatNumber(expectedValues.collection)} LAK</span>
-                </div>
-                <div className="bg-white/60 p-2 rounded border border-amber-200">
-                  <span className="text-amber-600">ຍັງຂາດ:</span>
-                  <br />
-                  <span className="font-bold text-red-600">{formatNumber(dataQuality.collectionGap)} LAK</span>
-                </div>
-              </div>
-              <p className="text-xs text-amber-600 mt-3">
-                💡 <strong>ວິທີແກ້ໄຂ:</strong> ອັບໂຫຼດ Pay off sheet ທີ່ຄົບຖ້ວນ (ຄວນມີ {Math.round(kpis.outstandingBills || 0)} ໃບບິນ) ຫຼື ກົດ Debug ເພື່ອເບິ່ງລາຍລະອຽດ
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ── Row 1: 5 Top KPIs (PDF style) ── */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <TopCard label="ຍອດຂາຍລວມ"  sublabel="Total Sales"     value={kpis.totalSalesGross}  color="indigo" />
