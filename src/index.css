@@ -1,0 +1,276 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    @apply bg-slate-50 text-slate-800;
+    font-family: 'Noto Sans Lao', 'Inter', system-ui, sans-serif;
+  }
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-slate-100;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-300 rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-400;
+  }
+}
+
+@layer components {
+  .kpi-card {
+    @apply bg-white rounded-2xl p-5 shadow-sm border border-slate-100 flex flex-col gap-2 hover:shadow-md transition-shadow;
+  }
+  .kpi-value {
+    @apply text-2xl font-bold text-slate-800;
+  }
+  .kpi-label {
+    @apply text-xs font-medium text-slate-500 uppercase tracking-wider;
+  }
+  .kpi-badge {
+    @apply inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full;
+  }
+  .chart-card {
+    @apply bg-white rounded-2xl p-5 shadow-sm border border-slate-100;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .chart-card > * {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  /* PDF Export styles */
+  .pdf-export {
+    width: 1400px;
+    max-width: 1400px;
+  }
+  .pdf-export .chart-card {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .pdf-export .recharts-wrapper {
+    page-break-inside: avoid;
+  }
+  .nav-item {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 cursor-pointer;
+  }
+  .nav-item-active {
+    @apply bg-primary-600 text-white shadow-lg shadow-primary-600/30;
+  }
+  .nav-item-inactive {
+    @apply text-slate-400 hover:bg-slate-800 hover:text-white;
+  }
+  .section-title {
+    @apply text-lg font-bold text-slate-800;
+  }
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold;
+  }
+  .table-th {
+    @apply px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50;
+  }
+  .table-td {
+    @apply px-4 py-3 text-sm text-slate-700 whitespace-nowrap;
+  }
+  .btn-primary {
+    @apply inline-flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-sm;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 text-sm font-semibold rounded-xl border border-slate-200 transition-colors;
+  }
+
+  /* Report Styles */
+  .report-container {
+    @apply bg-white;
+  }
+
+  .report-header {
+    @apply bg-gradient-to-r from-slate-50 to-white border-b-2 border-primary-600 p-6 mb-6 rounded-xl;
+  }
+
+  .report-section {
+    @apply mb-8 page-break-inside-avoid;
+  }
+
+  .report-section-title {
+    @apply text-lg font-bold text-slate-800 mb-4 pb-2 border-b border-slate-200;
+  }
+
+  .report-summary-grid {
+    @apply grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6;
+  }
+
+  .report-summary-item {
+    @apply bg-slate-50 rounded-xl p-4 border border-slate-100;
+  }
+
+  .report-summary-item.primary {
+    @apply bg-primary-50 border-primary-100;
+  }
+
+  .report-summary-item.success {
+    @apply bg-emerald-50 border-emerald-100;
+  }
+
+  .report-summary-item.warning {
+    @apply bg-amber-50 border-amber-100;
+  }
+
+  .report-summary-item.info {
+    @apply bg-blue-50 border-blue-100;
+  }
+
+  .report-summary-label {
+    @apply text-xs text-slate-500 uppercase tracking-wide mb-1;
+  }
+
+  .report-summary-value {
+    @apply text-xl font-bold text-slate-800;
+  }
+
+  .report-summary-unit {
+    @apply text-xs text-slate-400;
+  }
+
+  .report-table {
+    @apply w-full text-sm border-collapse;
+  }
+
+  .report-table th {
+    @apply px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider bg-slate-100 border-b border-slate-200;
+  }
+
+  .report-table td {
+    @apply px-4 py-3 border-b border-slate-100 text-slate-700;
+  }
+
+  .report-table tr:hover {
+    @apply bg-slate-50;
+  }
+
+  .report-grid-2 {
+    @apply grid grid-cols-1 xl:grid-cols-2 gap-6;
+  }
+
+  .report-chart-container {
+    @apply bg-slate-50 rounded-xl p-4;
+  }
+
+  .report-footer {
+    @apply mt-8 pt-6 border-t-2 border-slate-200;
+  }
+}
+
+/* Print Styles */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 15mm 10mm;
+  }
+
+  body {
+    @apply bg-white text-slate-900;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Hide sidebar and navigation */
+  aside,
+  .print\:hidden {
+    display: none !important;
+  }
+
+  /* Full width content */
+  .flex-1 {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  main {
+    overflow: visible !important;
+  }
+
+  /* Report specific styles */
+  .report-container {
+    @apply p-0;
+  }
+
+  .report-header {
+    @apply border-b-2 border-slate-800 mb-4 p-4;
+    background: none !important;
+  }
+
+  .report-section {
+    page-break-inside: avoid;
+    break-inside: avoid;
+    margin-bottom: 20px;
+  }
+
+  .report-section-title {
+    @apply text-base border-b-2 border-slate-800 mb-3;
+  }
+
+  .report-summary-grid {
+    @apply gap-2;
+  }
+
+  .report-summary-item {
+    @apply border border-slate-300 p-3;
+    background: none !important;
+  }
+
+  .report-summary-value {
+    @apply text-lg;
+  }
+
+  /* Tables */
+  .report-table {
+    @apply text-xs;
+    page-break-inside: auto;
+  }
+
+  .report-table tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  .report-table th {
+    @apply bg-slate-200 text-slate-800;
+    background-color: #e2e8f0 !important;
+  }
+
+  /* Charts */
+  .report-chart-container {
+    @apply border border-slate-200;
+    background: none !important;
+  }
+
+  /* Ensure charts are visible */
+  .apexcharts-canvas {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Footer */
+  .report-footer {
+    @apply border-t border-slate-400 mt-6 pt-4;
+  }
+
+  /* Page breaks */
+  .page-break {
+    page-break-before: always;
+  }
+
+  .page-break-inside-avoid {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+}
