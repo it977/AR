@@ -120,12 +120,10 @@ export default function BillsManagement() {
   useEffect(() => { fetchKpis() }, [fetchKpis])
 
   async function upsertArDebt(bill) {
+    const sourceKey = `bill:${bill.bill_no}`
     const debtRecord = {
       date: bill.date,
-      week: bill.week,
       bill_no: bill.bill_no,
-      insite_onsite: bill.insite_onsite,
-      opd_ipd: bill.opd_ipd,
       customer_type: bill.customer_type,
       insurance: bill.insurance,
       hn: bill.hn,
@@ -134,6 +132,7 @@ export default function BillsManagement() {
       workload: bill.workload,
       grand_total: bill.grand_total,
       debt_amount: bill.debt,
+      date_paid: bill.date,
       submit_date: new Date().toISOString().split('T')[0],
       amount_paid: (bill.cash || 0) + (bill.bcel || 0) + (bill.bcel2 || 0) + (bill.ldb || 0),
       cash_paid: bill.cash || 0,
@@ -141,11 +140,13 @@ export default function BillsManagement() {
       bcel2_paid: bill.bcel2 || 0,
       ldb_paid: bill.ldb || 0,
       balance: bill.debt,
+      due_date: bill.date ? new Date(new Date(bill.date).getTime() + 30 * 86400000).toISOString().split('T')[0] : null,
       aging_group: bill.aging_group || calcAgingGroup(bill.date),
+      source_key: sourceKey,
     }
-    const { data: existing } = await supabase.from('ar_debt').select('id').eq('bill_no', bill.bill_no).maybeSingle()
-    if (existing) {
-      await supabase.from('ar_debt').update(debtRecord).eq('id', existing.id)
+    const { data: existing } = await supabase.from('ar_debt').select('id').eq('source_key', sourceKey).limit(1)
+    if (existing && existing.length > 0) {
+      await supabase.from('ar_debt').update(debtRecord).eq('id', existing[0].id)
     } else {
       await supabase.from('ar_debt').insert(debtRecord)
     }
@@ -168,7 +169,7 @@ export default function BillsManagement() {
         try { await upsertArDebt(form) } catch (e) {}
       } else if (modal.mode === 'edit') {
         // ຖ້າແກ້ໄຂໃຫ້ໜີ້ = 0 ໃຫ້ລຶບອອກຈາກ ar_debt
-        try { await supabase.from('ar_debt').delete().eq('bill_no', form.bill_no) } catch (e) {}
+        try { await supabase.from('ar_debt').delete().eq('source_key', `bill:${form.bill_no}`) } catch (e) {}
       }
       try {
         await logAction({ action: modal.mode === 'add' ? 'ເພີ່ມໃບບິນ' : 'ແກ້ໄຂໃບບິນ', bill_no: form.bill_no, patient_name: form.patient_name, amount: form.grand_total, recorder: form.recorded_by })
@@ -189,7 +190,7 @@ export default function BillsManagement() {
     const { error } = await supabase.from('ar_bills').delete().eq('id', delTarget.id)
     if (!error) {
       // ລຶບອອກຈາກ ar_debt ນຳ
-      try { await supabase.from('ar_debt').delete().eq('bill_no', delTarget.bill_no) } catch (e) {}
+      try { await supabase.from('ar_debt').delete().eq('source_key', `bill:${delTarget.bill_no}`) } catch (e) {}
     }
     setSaving(false)
     if (!error) {
