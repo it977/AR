@@ -58,6 +58,7 @@ export default function BillsManagement() {
   const [kpis, setKpis] = useState({ total_grand: 0, total_collected: 0, total_debt: 0 })
 
   const [modal, setModal]         = useState(null)  // null | { mode: 'add'|'edit', row?: {} }
+  const [submitError, setSubmitError] = useState('')
   const [delTarget, setDelTarget] = useState(null)
   const [delAll, setDelAll]       = useState(false)
   const navigate = useNavigate()
@@ -120,6 +121,7 @@ export default function BillsManagement() {
 
   async function handleSubmit(form) {
     setSaving(true)
+    setSubmitError('')
     const payload = { ...form, debt_status: (form.debt || 0) > 0 ? 'pending' : null }
     let error
     if (modal.mode === 'add') {
@@ -131,9 +133,16 @@ export default function BillsManagement() {
     if (!error) {
       try {
         await logAction({ action: modal.mode === 'add' ? 'ເພີ່ມໃບບິນ' : 'ແກ້ໄຂໃບບິນ', bill_no: form.bill_no, patient_name: form.patient_name, amount: form.grand_total, recorder: form.recorded_by })
-      } catch (logErr) {      }
+      } catch (logErr) {
+      }
       setModal(null); fetchRows(); fetchKpis()
-    } else alert('Error: ' + error.message)
+    } else {
+      if (error.message?.includes('duplicate key') || error.code === '23505') {
+        setSubmitError('ໃບບິນເລກ "' + form.bill_no + '" ວັນທີ "' + form.date + '" ກະວຽກ "' + form.workload + '" ມີຢູ່ໃນລະບົບແລ້ວ — ກວດສອບຂໍ້ມູນຄືນ')
+      } else {
+        setSubmitError('ເກີດຂໍ້ຜິດພາດ: ' + error.message)
+      }
+    }
   }
 
   async function handleDelete() {
@@ -143,9 +152,16 @@ export default function BillsManagement() {
     if (!error) {
       try {
         await logAction({ action: 'ລົບໃບບິນ', bill_no: delTarget.bill_no, patient_name: delTarget.patient_name, amount: delTarget.grand_total })
-      } catch (logErr) {      }
+      } catch (logErr) {
+      }
       setDelTarget(null); fetchRows(); fetchKpis()
-    } else alert('Error: ' + error.message)
+    } else {
+      if (error.message?.includes('duplicate key') || error.code === '23505') {
+        setSubmitError('ໃບບິນເລກ "' + form.bill_no + '" ວັນທີ "' + form.date + '" ກະວຽກ "' + form.workload + '" ມີຢູ່ໃນລະບົບແລ້ວ — ກວດສອບຂໍ້ມູນຄືນ')
+      } else {
+        setSubmitError('ເກີດຂໍ້ຜິດພາດ: ' + error.message)
+      }
+    }
   }
 
   async function handleDeleteAll() {
@@ -157,7 +173,8 @@ export default function BillsManagement() {
     if (!errorBills && !errorDebt) {
       try {
         await logAction({ action: 'ລຶບຂໍ້ມູນທັງໝົດ', details: 'ລຶບທັງ ar_bills ແລະ ar_debt' })
-      } catch (logErr) {      }
+      } catch (logErr) {
+      }
       setDelAll(false); fetchRows(); fetchKpis()
     } else {
       alert('Error: ' + (errorBills?.message || errorDebt?.message || 'Unknown error'))
@@ -172,7 +189,8 @@ export default function BillsManagement() {
         .from('ar_bills')
         .select('*')
         .gt('debt', 0)
-        .eq('debt_status', 'pending') // ເອົາສະເພາະຍັງບໍ່ທັນສົ່ງໄປ ar_debt      if (fetchError) throw fetchError
+        .eq('debt_status', 'pending') // ເອົາສະເພາະຍັງບໍ່ທັນສົ່ງໄປ ar_debt
+      if (fetchError) throw fetchError
 
       if (!billsWithDebt || billsWithDebt.length === 0) {
         alert('ບໍ່ມີໃບບິນທີ່ມີໜີ້ຄ້າງທີ່ຍັງບໍ່ທັນສົ່ງ')
@@ -211,14 +229,16 @@ export default function BillsManagement() {
         .in('bill_no', billsWithDebt.map(b => b.bill_no))
       
       const existingBillNos = new Set(existingDebt?.map(d => d.bill_no) || [])
-      const newRecords = debtRecords.filter(r => !existingBillNos.has(r.bill_no))      if (newRecords.length === 0) {
+      const newRecords = debtRecords.filter(r => !existingBillNos.has(r.bill_no))
+      if (newRecords.length === 0) {
         alert('ໃບບິນທັງໝົດຖືກສົ່ງໄປ Debt Management ແລ້ວ')
         setSaving(false)
         return
       }
 
       // ບັນທກລົງ ar_debt
-      const { error: insertError } = await supabase.from('ar_debt').insert(newRecords)      if (insertError) throw insertError
+      const { error: insertError } = await supabase.from('ar_debt').insert(newRecords)
+      if (insertError) throw insertError
 
       try {
         await logAction({
@@ -226,12 +246,14 @@ export default function BillsManagement() {
           details: `ສົ່ງ ${newRecords.length} ໃບບິນ`,
           amount: newRecords.reduce((s, r) => s + (r.debt_amount || 0), 0)
         })
-      } catch (logErr) {      }
+      } catch (logErr) {
+      }
 
       alert(`ສົ່ງ ${newRecords.length} ໃບບິນ ໄປ Debt Management ສຳເລັດ!`)
       fetchRows()
       fetchKpis()
-    } catch (err) {      alert('ຜິດພາດ: ' + err.message)
+    } catch (err) {
+      alert('ຜິດພາດ: ' + err.message)
     } finally {
       setSaving(false)
     }
@@ -474,7 +496,7 @@ export default function BillsManagement() {
       {/* Add / Edit Modal */}
       <Modal
         open={!!modal}
-        onClose={() => setModal(null)}
+        onClose={() => { setModal(null); setSubmitError('') }}
         title={modal?.mode === 'edit' ? `ແກ້ໄຂ: ${modal.row?.bill_no}` : 'ເພີ່ມໃບບິນໃໝ່'}
         subtitle={modal?.mode === 'edit' ? `${modal.row?.patient_name} · ${modal.row?.date}` : 'ກະລຸນາໃສ່ຂໍ້ມູນໃຫ້ຄົບຖ້ວນ'}
         size="xl"
@@ -482,8 +504,9 @@ export default function BillsManagement() {
         <BillForm
           initial={modal?.mode === 'edit' ? modal.row : {}}
           onSubmit={handleSubmit}
-          onCancel={() => setModal(null)}
+          onCancel={() => { setModal(null); setSubmitError('') }}
           loading={saving}
+          submitError={submitError}
         />
       </Modal>
 

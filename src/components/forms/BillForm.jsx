@@ -35,7 +35,7 @@ function Field({ label, required, children, hint }) {
 const inputCls = 'w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100 transition-all'
 const numCls   = inputCls + ' text-right font-mono'
 
-export default function BillForm({ initial, onSubmit, onCancel, loading }) {
+export default function BillForm({ initial, onSubmit, onCancel, loading, submitError }) {
   const [form, setForm]       = useState({ ...EMPTY, ...initial })
   const [showSvc, setShowSvc] = useState(true)
 
@@ -219,12 +219,22 @@ export default function BillForm({ initial, onSubmit, onCancel, loading }) {
           Grand Total: <span className="font-bold text-slate-700">{new Intl.NumberFormat().format(form.grand_total)}</span> LAK  |
           Debt: <span className="font-bold text-red-600">{new Intl.NumberFormat().format(form.debt)}</span> LAK
         </div>
-        <div className="flex gap-3">
-          <button type="button" onClick={onCancel} className="btn-secondary">ຍົກເລີກ</button>
-          <button type="submit" disabled={loading} className="btn-primary px-6 disabled:opacity-50">
-            {loading && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
-            {isEdit ? 'ບັນທຶກການແກ້ໄຂ' : 'ເພີ່ມໃບບິນ'}
-          </button>
+        <div className="flex flex-col gap-2 items-end">
+          {submitError && (
+            <div className="w-full flex items-start gap-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+              <svg className="w-4 h-4 text-red-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              {submitError}
+            </div>
+          )}
+          <div className="flex gap-3">
+            <button type="button" onClick={onCancel} className="btn-secondary">ຍົກເລີກ</button>
+            <button type="submit" disabled={loading} className="btn-primary px-6 disabled:opacity-50">
+              {loading && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+              {isEdit ? 'ບັນທຶກການແກ້ໄຂ' : 'ເພີ່ມໃບບິນ'}
+            </button>
+          </div>
         </div>
       </div>
     </form>
