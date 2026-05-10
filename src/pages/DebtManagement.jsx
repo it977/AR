@@ -92,7 +92,8 @@ export default function DebtManagement() {
 
     const debtData = await fetchAll((f, t) =>
       supabase.from('ar_debt').select('debt_amount, cash_paid, bcel_paid, bcel2_paid, ldb_paid, balance', { count: 'exact' }).range(f, t)
-    )
+    )
+
     const originalDebt = debtData.reduce((s, r) => s + (r.debt_amount || 0), 0)
     const collected    = debtData.reduce((s, r) => s + (r.cash_paid || 0) + (r.bcel_paid || 0) + (r.bcel2_paid || 0) + (r.ldb_paid || 0), 0)
     const remaining    = debtData.reduce((s, r) => s + (r.balance    || 0), 0)
@@ -130,7 +131,8 @@ export default function DebtManagement() {
     const { data, count, error } = await q
       .order('date', { ascending: false })
       .order('bill_no', { ascending: false })
-      .range(page * pageSize, page * pageSize + pageSize - 1)    if (!error) { setRows(data || []); setTotal(count || 0) }
+      .range(page * pageSize, page * pageSize + pageSize - 1)
+    if (!error) { setRows(data || []); setTotal(count || 0) }
     setLoading(false)
   }, [search, aging, statusFilter, workload, dateFrom, dateTo, page, pageSize])
 
@@ -138,20 +140,77 @@ export default function DebtManagement() {
 
   async function handleSubmit(form) {
     setSaving(true)
-    const { error } = await supabase.from('ar_bills').update(form).eq('id', form.id)
+    const collected = (form.cash||0)+(form.bcel||0)+(form.bcel2||0)+(form.ldb||0)
+    const today = new Date().toISOString().split('T')[0]
+
+    // 1) Update ar_debt (form.id ແມ່ນ ar_debt id)
+    const debtUpdate = {
+      cash_paid: form.cash || 0,
+      bcel_paid: form.bcel || 0,
+      bcel2_paid: form.bcel2 || 0,
+      ldb_paid: form.ldb || 0,
+      amount_paid: collected,
+      balance: form.debt || 0,
+      date_paid: today,
+      aging_group: form.aging_group,
+    }
+    const { error: debtErr } = await supabase.from('ar_debt').update(debtUpdate).eq('id', form.id)
+
+    // 2) Update ar_bills (ຫາໂດຍ bill_no)
+    if (!debtErr) {
+      const billUpdate = {
+        cash: form.cash || 0,
+        bcel: form.bcel || 0,
+        bcel2: form.bcel2 || 0,
+        ldb: form.ldb || 0,
+        debt: form.debt || 0,
+        debt_status: form.debt_status,
+        aging_group: form.aging_group,
+        note: form.note,
+      }
+      // ຢ່າເພີ່ມ recorded_by_debt ຖ້າ schema ບໍ່ມີ — ໃສ່ໃນ try
+      try {
+        await supabase.from('ar_bills').update({ ...billUpdate, recorded_by_debt: form.recorded_by_debt }).eq('bill_no', form.bill_no)
+      } catch (e) {
+        await supabase.from('ar_bills').update(billUpdate).eq('bill_no', form.bill_no)
+      }
+    }
+
     setSaving(false)
-    if (!error) {
-      logAction({ action: 'ຊຳລະໜີ້', bill_no: form.bill_no, patient_name: form.patient_name, amount: (form.cash||0)+(form.bcel||0)+(form.bcel2||0)+(form.ldb||0), details: (form.debt||0)===0 ? 'ຊຳລະຄົບ' : 'ຊຳລະບາງສ່ວນ', recorder: form.recorded_by_debt })
+    if (!debtErr) {
+      logAction({ action: 'ຊຳລະໜີ້', bill_no: form.bill_no, patient_name: form.patient_name, amount: collected, details: (form.debt||0)===0 ? 'ຊຳລະຄົບ' : 'ຊຳລະບາງສ່ວນ', recorder: form.recorded_by_debt })
       setModal(null); fetchRows(); fetchKpis()
-    } else alert('Error: ' + error.message)
+    } else alert('Error: ' + debtErr.message)
   }
 
   async function handleEditSubmit(form) {
     setSaving(true)
     const newDebt = form.debt || 0
     const debt_status = newDebt > 0 ? 'pending' : (form.debt_status || 'paid')
-    const payload = { ...form, debt_status }
-    const { error } = await supabase.from('ar_bills').update(payload).eq('id', form.id)
+    // ກັ່ນຕອງເອົາແຕ່ ar_bills columns
+    const billCols = ['date','week','workload','bill_no','customer_type','insite_onsite','opd_ipd',
+      'insurance','hn','patient_name','gender',
+      'svc_opd','svc_diag_image','svc_ipd','svc_surg_ot','svc_emergency','svc_chronic','svc_pharma','svc_support','svc_admin','svc_homecare',
+      'total','discounts','grand_total','cash','bcel','bcel2','ldb','debt','prepayment','note','aging_group']
+    const payload = { debt_status }
+    for (const k of billCols) if (form[k] !== undefined) payload[k] = form[k]
+    const { error } = await supabase.from('ar_bills').update(payload).eq('bill_no', form.bill_no)
+
+    // Sync ar_debt ໃຫ້ຕົງກັນ
+    if (!error) {
+      const collected = (form.cash||0)+(form.bcel||0)+(form.bcel2||0)+(form.ldb||0)
+      try {
+        await supabase.from('ar_debt').update({
+          date: form.date, customer_type: form.customer_type, insurance: form.insurance,
+          hn: form.hn, patient_name: form.patient_name, gender: form.gender, workload: form.workload,
+          grand_total: form.grand_total, debt_amount: form.debt,
+          amount_paid: collected, cash_paid: form.cash||0, bcel_paid: form.bcel||0,
+          bcel2_paid: form.bcel2||0, ldb_paid: form.ldb||0,
+          balance: form.debt, aging_group: form.aging_group,
+        }).eq('bill_no', form.bill_no)
+      } catch (e) {}
+    }
+
     setSaving(false)
     if (!error) { setEditModal(null); fetchRows(); fetchKpis() }
     else alert('Error: ' + error.message)
