@@ -261,16 +261,21 @@ export default function DailySales() {
   }
 
   const dailyTrendOpts = {
-    chart: { type: 'area', toolbar: { show: false }, fontFamily: 'Inter, Noto Sans Lao, sans-serif' },
+    chart: { type: 'bar', toolbar: { show: false }, fontFamily: 'Inter, Noto Sans Lao, sans-serif', stacked: false },
     colors: ['#4f46e5', '#ef4444'],
-    stroke: { curve: 'smooth', width: 2 },
-    fill: { type: 'gradient', gradient: { opacityFrom: 0.3, opacityTo: 0.05 } },
-    xaxis: { type: 'datetime', labels: { style: { colors: '#94a3b8', fontSize: '10px' } } },
+    plotOptions: { bar: { borderRadius: 6, columnWidth: '55%', dataLabels: { position: 'top' } } },
+    stroke: { width: 0 },
+    xaxis: { type: 'category', labels: { style: { colors: '#94a3b8', fontSize: '11px' } } },
     yaxis: { labels: { formatter: v => formatLAK(v), style: { colors: '#94a3b8', fontSize: '10px' } } },
     grid: { borderColor: '#f1f5f9', strokeDashArray: 4 },
     legend: { labels: { colors: '#64748b' } },
-    tooltip: { x: { format: 'dd MMM yyyy' }, y: { formatter: v => `${formatNumber(v)} LAK` } },
-    dataLabels: { enabled: false },
+    tooltip: { y: { formatter: v => `${formatNumber(v)} LAK` } },
+    dataLabels: {
+      enabled: true,
+      formatter: v => formatLAK(v),
+      offsetY: -22,
+      style: { fontSize: '11px', colors: ['#64748b'], fontWeight: 600 },
+    },
   }
 
   const dailyByDate = useMemo(() => {
@@ -286,8 +291,8 @@ export default function DailySales() {
   }, [rows])
 
   const trendSeries = [
-    { name: 'Total Sales',  data: dailyByDate.map(r => [new Date(r.date).getTime(), r.income]) },
-    { name: 'Outstanding',  data: dailyByDate.map(r => [new Date(r.date).getTime(), r.debt])   },
+    { name: 'Total Sales',  data: dailyByDate.map(r => ({ x: r.date, y: r.income })) },
+    { name: 'Outstanding',  data: dailyByDate.map(r => ({ x: r.date, y: r.debt }))   },
   ]
 
   if (loading) return <div className="p-6"><LoadingSpinner /></div>
@@ -456,7 +461,7 @@ export default function DailySales() {
         <h3 className="section-title mb-1">ທ່າອ່ຽງຍອດຂາຍລາຍວັນ</h3>
         <p className="text-xs text-slate-400 mb-4">Daily Sales Trend</p>
         {dailyByDate.length > 0 ? (
-          <ReactApexChart options={dailyTrendOpts} series={trendSeries} type="area" height={250} />
+          <ReactApexChart options={dailyTrendOpts} series={trendSeries} type="bar" height={280} />
         ) : <EmptyState message="ບໍ່ມີຂໍ້ມູນ" sublabel="ກະລຸນາອັບໂຫຼດ Excel ກ່ອນ" />}
       </div>
     </div>
