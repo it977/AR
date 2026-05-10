@@ -232,7 +232,7 @@ export default function Layout({ children }) {
           {!collapsed && (
             <div>
               <p className="text-white font-bold text-sm leading-tight">ລະບົບ AR Finance</p>
-              <p className="text-slate-400 text-xs">LXH Dashboard</p>
+              <p className="text-slate-400 text-xs">OneMeds Dashboard</p>
             </div>
           )}
         </div>

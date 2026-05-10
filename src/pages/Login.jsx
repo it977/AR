@@ -61,8 +61,8 @@ export default function Login() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 11h.01M12 11h.01M15 11h.01M4 19h16a2 2 0 002-2V7a2 2 0 00-2-2H4a2 2 0 00-2 2v10a2 2 0 002 2z" />
               </svg>
             </div>
-            <p className="mt-8 text-sm font-semibold uppercase tracking-[0.28em] text-primary-200">LXH Dashboard</p>
-            <h1 className="mt-3 text-4xl font-black tracking-tight md:text-5xl">AR Finance System</h1>
+            <p className="mt-8 text-sm font-semibold uppercase tracking-[0.28em] text-primary-200">OneMeds Dashboard</p>
+            <h1 className="mt-3 text-4xl font-black tracking-tight md:text-5xl">AR Finance System by No V1</h1>
             <p className="mt-5 max-w-lg text-sm leading-7 text-slate-300">
               Sign in to access finance dashboards, bill management, debt collection, Excel uploads, and PDF exports according to your role.
             </p>
