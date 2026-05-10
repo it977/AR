@@ -1,6 +1,5 @@
 import * as XLSX from 'xlsx'
 
-// Excel column → Supabase column mapping for ar_bills (Daily sheet)
 const MAP_BILLS = {
   'Date': 'date',
   'Week': 'week',
@@ -36,7 +35,6 @@ const MAP_BILLS = {
   'Aging Group': 'aging_group',
 }
 
-// Excel column → Supabase column mapping for ar_debt (Pay off sheet)
 const MAP_DEBT = {
   'Date': 'date',
   'Workload': 'workload',
@@ -53,7 +51,7 @@ const MAP_DEBT = {
   'Amount Paid': 'amount_paid',
   'Cash Received Debt': 'cash_paid',
   'Transfer Payment by BCEL Debt': 'bcel_paid',
-  'Transfer Payment by BCEL2 Debt':   'bcel2_paid',
+  'Transfer Payment by BCEL2 Debt': 'bcel2_paid',
   'Transfer Payment by BCEL 2 Debt': 'bcel2_paid',
   'Transfer Payment by LDB Debt': 'ldb_paid',
   'Balance': 'balance',
@@ -61,45 +59,81 @@ const MAP_DEBT = {
   'Aging Group': 'aging_group',
 }
 
+const MAP_CASHFLOW = {
+  'Date': 'date',
+  'Workload': 'workload',
+  'Total Actual Income': 'total_actual_income',
+  'Balance': 'balance',
+  'Cash Received': 'cash',
+  'Transfer Payment by BCEL': 'bcel',
+  'Transfer Payment by BCEL2': 'bcel2',
+  'Transfer Payment by LDB': 'ldb',
+  'Outstanding Debt': 'outstanding_debt',
+}
+
 const DATE_COLS = new Set(['date', 'date_paid', 'submit_date', 'due_date'])
 
-// Numeric columns in ar_bills and ar_debt
 const NUMERIC_COLS = new Set([
   'svc_opd','svc_diag_image','svc_ipd','svc_surg_ot','svc_emergency',
   'svc_chronic','svc_pharma','svc_support','svc_admin','svc_homecare',
   'total','discounts','grand_total','cash','bcel','bcel2','ldb',
   'debt','prepayment',
   'debt_amount','amount_paid','cash_paid','bcel_paid','bcel2_paid','ldb_paid','balance',
+  'total_actual_income','outstanding_debt',
 ])
+
+function normalizeKeys(row) {
+  const out = {}
+  for (const [k, v] of Object.entries(row)) {
+    out[k.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()] = v
+  }
+  return out
+}
+
+function toIsoDate(val) {
+  if (val instanceof Date) {
+    const y = val.getFullYear()
+    const m = String(val.getMonth() + 1).padStart(2, '0')
+    const d = String(val.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }
+
+  if (typeof val === 'number') {
+    const parsed = XLSX.SSF.parse_date_code(val)
+    if (parsed?.y && parsed?.m && parsed?.d) {
+      return `${parsed.y}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`
+    }
+  }
+
+  const s = String(val).trim()
+  const slash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (slash) {
+    return `${slash[3]}-${slash[2].padStart(2, '0')}-${slash[1].padStart(2, '0')}`
+  }
+
+  const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
+  if (iso) {
+    return `${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`
+  }
+
+  const d = new Date(s)
+  if (!d || isNaN(d.getTime())) return null
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 function parseRow(row, columnMap) {
   const out = {}
   for (const [excelCol, dbCol] of Object.entries(columnMap)) {
     const raw = row[excelCol]
-    // Normalize: treat null/undefined/blank/whitespace-only as null
-    const val = (raw === null || raw === undefined) ? null
+    const val = raw === null || raw === undefined
+      ? null
       : (typeof raw === 'string' ? raw.trim() : raw)
 
-    if (val === null || val === '' ) {
+    if (val === null || val === '') {
       out[dbCol] = NUMERIC_COLS.has(dbCol) ? 0 : null
     } else if (DATE_COLS.has(dbCol)) {
-      let d
-      if (val instanceof Date) {
-        // raw:true + cellDates → real JS Date object from Excel serial (always correct)
-        d = val
-      } else {
-        const s = String(val).trim()
-        // ALWAYS try DD/MM/YYYY first — avoids JS mis-parsing "12/02/2026" as December
-        const slash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
-        if (slash) {
-          d = new Date(`${slash[3]}-${slash[2].padStart(2,'0')}-${slash[1].padStart(2,'0')}`)
-        } else {
-          d = new Date(s)  // ISO "YYYY-MM-DD" or other unambiguous formats
-        }
-      }
-      out[dbCol] = (!d || isNaN(d.getTime())) ? null : d.toISOString().split('T')[0]
+      out[dbCol] = toIsoDate(val)
     } else if (NUMERIC_COLS.has(dbCol)) {
-      // Always coerce numeric cols — never send strings to Postgres numeric
       if (typeof val === 'number') {
         out[dbCol] = isNaN(val) ? 0 : val
       } else {
@@ -113,36 +147,26 @@ function parseRow(row, columnMap) {
   return out
 }
 
-function deduplicateRows(rows) {
-  // Keep last occurrence of each (bill_no, date, workload) triplet
-  // ອະນຸຍາດໃຫ້ມີບີນດຽວກັນແຕ່ຕ່າງກະວຽກໄດ້
-  const seen = new Map()
-  rows.forEach(r => {
-    if (r.bill_no && r.date) {
-      const key = `${r.bill_no}__${r.date}__${r.workload || 'ALL'}`
-      seen.set(key, r)
-    }
-  })
-  return Array.from(seen.values())
+function makeSourceKey(sheetName, rowNumber, row) {
+  return [
+    sheetName,
+    rowNumber,
+    row.bill_no || '',
+    row.date || '',
+    row.workload || '',
+  ].map(v => String(v).replace(/\s+/g, ' ').trim()).join('__')
 }
 
-function normalizeKeys(row) {
-  const out = {}
-  for (const [k, v] of Object.entries(row)) {
-    // ລຶບ newline, collapse double-spaces, trim
-    out[k.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()] = v
-  }
-  return out
-}
-
-function parseSheet(sheet, columnMap, addDebtStatus = false) {
-  const rows = XLSX.utils.sheet_to_json(sheet, { defval: null, raw: true })
-  const parsed = rows.map(r => {
+function parseSheet(sheet, columnMap, addDebtStatus = false, sheetName = 'Sheet') {
+  // Use formatted cell values so Google Sheets exported dates stay on their displayed day.
+  const rows = XLSX.utils.sheet_to_json(sheet, { defval: null, raw: false })
+  const parsed = rows.map((r, index) => {
     const row = parseRow(normalizeKeys(r), columnMap)
+    row.source_key = makeSourceKey(sheetName, index + 2, row)
     if (addDebtStatus) row.debt_status = (row.debt || 0) > 0 ? 'pending' : null
     return row
   }).filter(r => r.bill_no && r.date)
-  // ບໍ່ deduplicate - ຮັບທຸກ rows ຕາມຈຳນວນໃນ Excel
+
   return parsed
 }
 
@@ -152,7 +176,7 @@ export function parseExcelFile(file) {
     reader.onload = (e) => {
       try {
         const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: true })
-        const result = { sheets: wb.SheetNames, bills: [], debt: [], rawSheets: {} }
+        const result = { sheets: wb.SheetNames, bills: [], debt: [], cashflow: [], rawSheets: {} }
 
         wb.SheetNames.forEach(name => {
           const sheet = wb.Sheets[name]
@@ -161,19 +185,28 @@ export function parseExcelFile(file) {
 
           const lower = name.toLowerCase()
           if (lower.includes('daily')) {
-            result.bills = parseSheet(sheet, MAP_BILLS, true)
+            result.bills = parseSheet(sheet, MAP_BILLS, true, name)
           } else if (lower.includes('pay')) {
-            const debtRows = parseSheet(sheet, MAP_DEBT)
+            const debtRows = parseSheet(sheet, MAP_DEBT, false, name)
             result.debt = debtRows
-            // After Pay off upload, update debt_status ONLY — do NOT overwrite debt
-            // ar_bills.debt must keep original outstanding from Daily sheet for KPI accuracy
             result.billUpdates = debtRows
               .filter(r => r.bill_no && r.date)
               .map(d => ({
-                bill_no:     d.bill_no,
-                date:        d.date,
+                bill_no: d.bill_no,
+                date: d.date,
                 debt_status: (d.balance ?? 0) > 0 ? 'pending' : 'paid',
               }))
+          } else if (lower.includes('summary_cashflow')) {
+            result.cashflow = parseSheet(sheet, MAP_CASHFLOW, false, name)
+              .filter(r =>
+                r.total_actual_income ||
+                r.balance ||
+                r.cash ||
+                r.bcel ||
+                r.bcel2 ||
+                r.ldb ||
+                r.outstanding_debt
+              )
           }
         })
 
@@ -198,7 +231,7 @@ export function formatNumber(num, decimals = 0) {
 export function formatLAK(num) {
   if (!num) return '0'
   if (num >= 1_000_000_000) return `${(num / 1_000_000_000).toFixed(2)}B`
-  if (num >= 1_000_000)     return `${(num / 1_000_000).toFixed(1)}M`
-  if (num >= 1_000)         return `${(num / 1_000).toFixed(0)}K`
+  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`
+  if (num >= 1_000) return `${(num / 1_000).toFixed(0)}K`
   return formatNumber(num)
 }

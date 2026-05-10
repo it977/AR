@@ -3,9 +3,16 @@ import ReactApexChart from 'react-apexcharts'
 import KPICard, { CountCard } from '../components/KPICard'
 import DateFilter, { FilterSelect } from '../components/DateFilter'
 import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
+import PDFButton from '../components/PDFButton'
 import { useARData, computeServiceData } from '../lib/useARData'
 import { formatLAK, formatNumber } from '../lib/excelParser'
 import { useGlobalFilters } from '../context/FilterContext'
+
+const SHIFT_OPTIONS = [
+  { value: '8AM-4PM', label: '08:00AM-16:00PM' },
+  { value: '4PM-12AM', label: '16:00PM-21:00PM' },
+  { value: '12AM-8AM', label: '21:00PM-08:00AM' },
+]
 
 export default function CustomerService() {
   const { filters, updateFilters } = useGlobalFilters()
@@ -86,18 +93,19 @@ export default function CustomerService() {
   if (loading) return <div className="p-6"><LoadingSpinner /></div>
 
   return (
-    <div className="p-6 space-y-6">
+    <div id="customer-service-content" className="p-6 space-y-6">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="section-title">ການວິເຄາະລູກຄ້າ & ການບໍລິການ</h2>
           <p className="text-sm text-slate-500">Customer & Service Analysis</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2" data-pdf-hidden="true">
+          <PDFButton elementId="full-report-export" filename="AR_Finance_LXH_Report" label="ດາວໂຫລດ PDF" />
           <DateFilter filters={filters} onChange={updateFilters} />
           <FilterSelect label="ກະວຽກ" value={filters.workload}
             onChange={v => updateFilters({ workload: v })}
-            options={['8AM-4PM','4PM-12AM','12AM-8AM']} />
+            options={SHIFT_OPTIONS} />
           <FilterSelect label="ປະເພດລູກຄ້າ" value={filters.customerType}
             onChange={v => updateFilters({ customerType: v })}
             options={['GN','INS','B2B']} />

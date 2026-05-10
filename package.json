@@ -1,5 +1,6 @@
 {
-  "name": "ar-dashboard",
+  "name": "ar-finance-system",
+  "description": "AR-only finance dashboard for bills, debt, aging, and Excel uploads",
   "private": true,
   "version": "1.0.0",
   "type": "module",

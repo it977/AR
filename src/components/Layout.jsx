@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
+import { PERMISSIONS } from '../lib/rbac'
 
 // AR Items (ລາຍຮັບ) - ຈັດລຽງໃໝ່: ຈັດການໃບບິນ ແລະ ຈັດການໜີ້ ໄວ້ເທິງ
 const arItems = [
@@ -7,6 +9,7 @@ const arItems = [
     label: 'ຈັດການໃບບິນ',
     sublabel: 'Bills Management',
     path: '/bills',
+    permission: PERMISSIONS.PAGE_BILLS,
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -17,6 +20,7 @@ const arItems = [
     label: 'ຈັດການໜີ້',
     sublabel: 'Debt Management',
     path: '/debt',
+    permission: PERMISSIONS.PAGE_DEBT,
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
@@ -27,6 +31,7 @@ const arItems = [
     label: 'ລາຍງານປະຈຳວັນ',
     sublabel: 'Daily Sales',
     path: '/',
+    permission: PERMISSIONS.PAGE_DAILY_SALES,
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -37,6 +42,7 @@ const arItems = [
     label: 'ລູກຄ້າ & ການບໍລິການ',
     sublabel: 'Customer & Service',
     path: '/customer-service',
+    permission: PERMISSIONS.PAGE_CUSTOMER_SERVICE,
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -47,6 +53,7 @@ const arItems = [
     label: 'ຊ່ອງທາງການຊຳລະ',
     sublabel: 'Payment Channel',
     path: '/payment-channel',
+    permission: PERMISSIONS.PAGE_PAYMENT_CHANNEL,
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
@@ -57,6 +64,7 @@ const arItems = [
     label: 'ໜີ້ຄ້າງຊຳລະ',
     sublabel: 'Outstanding Debt',
     path: '/outstanding-debt',
+    permission: PERMISSIONS.PAGE_OUTSTANDING_DEBT,
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -67,93 +75,10 @@ const arItems = [
     label: 'ລາຍງານອາຍຸໜີ້',
     sublabel: 'Aging Report',
     path: '/aging-report',
+    permission: PERMISSIONS.PAGE_AGING_REPORT,
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
-    ),
-  },
-]
-
-// AP Items (ລາຍຈ່າຍ) - ຈັດລຽງໃໝ່: ຈັດການໃບເກັບເງິນ ແລະ ່າຍໜີ້ຄ້າງ ໄວ້ເທິງ
-const apItems = [
-  {
-    label: 'ຈັດການໃບເກັບເງິນ',
-    sublabel: 'AP Management',
-    path: '/ap-management',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-      </svg>
-    ),
-  },
-  {
-    label: 'ຈ່າຍໜີ້ຄ້າງ',
-    sublabel: 'AP Debt Payment',
-    path: '/ap-debt',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
-      </svg>
-    ),
-  },
-  {
-    label: 'AP Dashboard',
-    sublabel: 'AP Summary',
-    path: '/ap',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-      </svg>
-    ),
-  },
-  {
-    label: 'Total PO Breakdown',
-    sublabel: 'PO Analysis',
-    path: '/ap-po-breakdown',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-      </svg>
-    ),
-  },
-  {
-    label: 'AP Balance Breakdown',
-    sublabel: 'Balance Analysis',
-    path: '/ap-balance-breakdown',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 3.055A3.005 3.005 0 0121 6v12a3 3 0 01-6 0v-1.344c-2.031.97-4.686.97-6.718 0V18a3 3 0 01-6 0V6c0-.293.04-.577.113-.852" />
-      </svg>
-    ),
-  },
-  {
-    label: 'AP Paid Breakdown',
-    sublabel: 'Paid Analysis',
-    path: '/ap-paid-breakdown',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
-    ),
-  },
-  {
-    label: 'Outstanding AP Breakdown',
-    sublabel: 'Outstanding Analysis',
-    path: '/ap-outstanding-breakdown',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-      </svg>
-    ),
-  },
-  {
-    label: 'Cash Need / Payment Plan',
-    sublabel: 'Payment Planning',
-    path: '/ap-cash-plan',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
       </svg>
     ),
   },
@@ -165,6 +90,7 @@ const otherItems = [
     label: 'ອັບໂຫຼດ Excel',
     sublabel: 'Upload Data',
     path: '/upload',
+    permission: PERMISSIONS.PAGE_UPLOAD,
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
@@ -173,65 +99,29 @@ const otherItems = [
   },
 ]
 
-// PDF Download Items - AR
-const pdfArItems = [
-  { 
-    label: 'ລາຍງານປະຈຳວັນ', 
-    sublabel: 'Daily Sales', 
-    path: '/', 
-    filename: 'Daily_Sales',
+const adminItems = [
+  {
+    label: 'ຕັ້ງຄ່າທົ່ວໄປ',
+    sublabel: 'General Settings',
+    path: '/settings',
+    permission: PERMISSIONS.PAGE_SETTINGS,
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+      </svg>
+    ),
   },
-  { 
-    label: 'ຈັດການໃບບິນ', 
-    sublabel: 'Bills Management', 
-    path: '/bills', 
-    filename: 'AR_Bills_Management',
-  },
-  { 
-    label: 'ຈັດການໜີ້', 
-    sublabel: 'Debt Management', 
-    path: '/debt', 
-    filename: 'AR_Debt_Management',
-  },
-]
-
-// PDF Download Items - AP
-const pdfApItems = [
-  { 
-    label: 'AP Dashboard', 
-    sublabel: 'AP Summary', 
-    path: '/ap', 
-    filename: 'AP_Daily_Summary',
-  },
-  { 
-    label: 'Total PO Breakdown', 
-    sublabel: 'PO Analysis', 
-    path: '/ap-po-breakdown', 
-    filename: 'AP_PO_Breakdown',
-  },
-  { 
-    label: 'AP Balance Breakdown', 
-    sublabel: 'Balance Analysis', 
-    path: '/ap-balance-breakdown', 
-    filename: 'AP_Balance_Breakdown',
-  },
-  { 
-    label: 'AP Paid Breakdown', 
-    sublabel: 'Paid Analysis', 
-    path: '/ap-paid-breakdown', 
-    filename: 'AP_Paid_Breakdown',
-  },
-  { 
-    label: 'Outstanding AP Breakdown', 
-    sublabel: 'Outstanding Analysis', 
-    path: '/ap-outstanding-breakdown', 
-    filename: 'AP_Outstanding_Breakdown',
-  },
-  { 
-    label: 'Cash Need / Payment Plan', 
-    sublabel: 'Payment Planning', 
-    path: '/ap-cash-plan', 
-    filename: 'AP_CashNeed_PaymentPlan',
+  {
+    label: 'RBAC',
+    sublabel: 'Users & Permissions',
+    path: '/rbac',
+    permission: PERMISSIONS.PAGE_RBAC,
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.031 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+      </svg>
+    ),
   },
 ]
 
@@ -319,8 +209,10 @@ function NavGroup({ label, items, collapsed, defaultOpen = false, isSubgroup = f
 
 export default function Layout({ children }) {
   const [collapsed, setCollapsed] = useState(false)
-  const location = useLocation()
-  const today = new Date().toLocaleDateString('lo-LA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+  const { profile, roleLabel, signOut, can } = useAuth()
+  const visibleArItems = arItems.filter(item => !item.permission || can(item.permission))
+  const visibleOtherItems = otherItems.filter(item => !item.permission || can(item.permission))
+  const visibleAdminItems = adminItems.filter(item => !item.permission || can(item.permission))
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
@@ -339,7 +231,7 @@ export default function Layout({ children }) {
           </div>
           {!collapsed && (
             <div>
-              <p className="text-white font-bold text-sm leading-tight">ລະບົບ AR-AP Finance</p>
+              <p className="text-white font-bold text-sm leading-tight">ລະບົບ AR Finance</p>
               <p className="text-slate-400 text-xs">LXH Dashboard</p>
             </div>
           )}
@@ -350,92 +242,46 @@ export default function Layout({ children }) {
           {/* AR Group */}
           <NavGroup
             label="AR Finance"
-            items={arItems}
+            items={visibleArItems}
             collapsed={collapsed}
             defaultOpen={true}
           />
-
-          {/* AP Group */}
-          <NavGroup
-            label="AP Finance"
-            items={apItems}
-            collapsed={collapsed}
-            defaultOpen={true}
-          />
-
-          {/* PDF Download Button */}
-          {!collapsed && (
-            <div className="mt-4 mb-2 px-3">
-              <button
-                onClick={async () => {
-                  const html2pdf = (await import('html2pdf.js')).default
-                  
-                  const pages = [
-                    { path: '/', name: 'Daily_Sales', elementId: 'daily-sales-content' },
-                    { path: '/bills', name: 'AR_Bills_Management', elementId: 'ar-bills-content' },
-                    { path: '/debt', name: 'AR_Debt_Management', elementId: 'ar-debt-content' },
-                    { path: '/ap', name: 'AP_Daily_Summary', elementId: 'ap-dashboard-content' },
-                    { path: '/ap-po-breakdown', name: 'AP_PO_Breakdown', elementId: 'ap-po-content' },
-                    { path: '/ap-balance-breakdown', name: 'AP_Balance_Breakdown', elementId: 'ap-balance-content' },
-                    { path: '/ap-paid-breakdown', name: 'AP_Paid_Breakdown', elementId: 'ap-paid-content' },
-                    { path: '/ap-outstanding-breakdown', name: 'AP_Outstanding_Breakdown', elementId: 'ap-outstanding-content' },
-                    { path: '/ap-cash-plan', name: 'AP_CashNeed_PaymentPlan', elementId: 'ap-cash-plan-content' },
-                  ]
-                  
-                  const opt = {
-                    margin: 0.3,
-                    image: { type: 'jpeg', quality: 0.98 },
-                    html2canvas: { scale: 2, useCORS: true, letterRendering: true },
-                    jsPDF: { unit: 'in', format: 'a4', orientation: 'landscape', compress: true },
-                    pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
-                  }
-                  
-                  for (const page of pages) {
-                    try {
-                      // ນຳທາງໄປໜ້ານັ້ນ
-                      window.location.href = page.path
-                      
-                      // ລໍຖ້າໃຫ້ໜ້າຫຼດ
-                      await new Promise(resolve => setTimeout(resolve, 1000))
-                      
-                      // ດາວໂຫຼດ PDF
-                      const element = document.getElementById(page.elementId) || document.body
-                      await html2pdf().set(opt).from(element).save()
-                      
-                      // ລໍຖ້າກ່ອນໄປໜ້າັດໄປ
-                      await new Promise(resolve => setTimeout(resolve, 500))
-                    } catch (error) {
-                      console.error(`Error downloading ${page.name}:`, error)
-                    }
-                  }
-                  
-                  // ກັບມາໜ້າເກົ່າ
-                  alert('ດາວໂຫຼດ PDF ທັງໝົດສຳເລັດ!')
-                }}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-500 hover:bg-red-600 text-white text-sm font-bold rounded-xl transition-colors shadow-lg"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                ດາວໂຫຼດ PDF ທັງໝົດ (10 ໜ້າ)
-              </button>
-              <p className="text-[9px] text-slate-400 mt-2 text-center">
-                ກົດແລ້ວຈະດາວໂຫຼດທຸກໜ້າ AR-AP ພ້ອມກັນ
-              </p>
-            </div>
-          )}
 
           {/* Other Group */}
-          <NavGroup
-            label="ອື່ນໆ"
-            items={otherItems}
-            collapsed={collapsed}
-            defaultOpen={false}
-          />
+          {visibleOtherItems.length > 0 && (
+            <NavGroup
+              label="ອື່ນໆ"
+              items={visibleOtherItems}
+              collapsed={collapsed}
+              defaultOpen={false}
+            />
+          )}
+
+          {visibleAdminItems.length > 0 && (
+            <NavGroup
+              label="Admin"
+              items={visibleAdminItems}
+              collapsed={collapsed}
+              defaultOpen={false}
+            />
+          )}
         </nav>
 
         {/* Collapse toggle */}
         <div className="px-2 py-3 border-t border-slate-700/50">
+          {!collapsed && (
+            <div className="mb-3 rounded-xl border border-slate-700/70 bg-slate-900/50 px-3 py-2">
+              <p className="truncate text-xs font-semibold text-white">{profile?.full_name || profile?.email || 'User'}</p>
+              <div className="mt-1 flex items-center justify-between gap-2">
+                <span className="rounded-full bg-primary-600/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary-200">
+                  {roleLabel}
+                </span>
+                <button onClick={signOut} className="text-[10px] font-semibold text-slate-400 hover:text-white">
+                  Logout
+                </button>
+              </div>
+            </div>
+          )}
           <button
             onClick={() => setCollapsed(!collapsed)}
             className="nav-item nav-item-inactive w-full justify-center"

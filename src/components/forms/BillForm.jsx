@@ -37,7 +37,7 @@ const numCls   = inputCls + ' text-right font-mono'
 
 export default function BillForm({ initial, onSubmit, onCancel, loading }) {
   const [form, setForm]       = useState({ ...EMPTY, ...initial })
-  const [showSvc, setShowSvc] = useState(false)
+  const [showSvc, setShowSvc] = useState(true)
 
   useEffect(() => { setForm({ ...EMPTY, ...initial }) }, [initial])
 

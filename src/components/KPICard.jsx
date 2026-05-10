@@ -1,4 +1,4 @@
-import { formatLAK } from '../lib/excelParser'
+import { formatLAK, formatNumber } from '../lib/excelParser'
 
 const colorMap = {
   blue: { bg: 'bg-blue-50', icon: 'bg-blue-100 text-blue-600', text: 'text-blue-700', border: 'border-blue-100' },
@@ -11,9 +11,11 @@ const colorMap = {
   amber: { bg: 'bg-amber-50', icon: 'bg-amber-100 text-amber-600', text: 'text-amber-700', border: 'border-amber-100' },
 }
 
-export default function KPICard({ label, sublabel, value, isLAK = true, color = 'blue', icon, badge, badgeColor, trend }) {
+export default function KPICard({ label, sublabel, value, isLAK = true, fullNumber = false, color = 'blue', icon, badge, badgeColor, trend }) {
   const c = colorMap[color] || colorMap.blue
-  const display = isLAK ? formatLAK(value) : new Intl.NumberFormat('en-US').format(value || 0)
+  const display = isLAK
+    ? (fullNumber ? formatNumber(value) : formatLAK(value))
+    : new Intl.NumberFormat('en-US').format(value || 0)
 
   return (
     <div className={`kpi-card ${c.bg} border ${c.border}`}>

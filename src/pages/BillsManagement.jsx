@@ -6,6 +6,8 @@ import { logAction } from '../lib/log'
 import Modal, { ConfirmDialog } from '../components/Modal'
 import BillForm from '../components/forms/BillForm'
 import LoadingSpinner from '../components/LoadingSpinner'
+import Can from '../components/Can'
+import { PERMISSIONS } from '../lib/rbac'
 
 const DAILY_HEADERS = [
   'Date','Week','Workload','Bill No','Insite-Onsite','OPD-IPD',
@@ -29,7 +31,8 @@ function downloadTemplate() {
   XLSX.writeFile(wb, 'AR_Bills_Template_LXH.xlsx')
 }
 
-const PAGE_SIZE = 20
+const DEFAULT_PAGE_SIZE = 50
+const WORKLOADS = ['8AM-4PM', '4PM-12AM', '12AM-8AM']
 
 function fmt(v) { return new Intl.NumberFormat().format(v || 0) }
 
@@ -43,12 +46,14 @@ export default function BillsManagement() {
   const [rows, setRows]       = useState([])
   const [total, setTotal]     = useState(0)
   const [page, setPage]       = useState(0)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving]   = useState(false)
 
   const [search, setSearch]   = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo]   = useState('')
+  const [workload, setWorkload] = useState('')
 
   const [kpis, setKpis] = useState({ total_grand: 0, total_collected: 0, total_debt: 0 })
 
@@ -74,15 +79,16 @@ export default function BillsManagement() {
     if (search)   q = q.or(`bill_no.ilike.%${search}%,patient_name.ilike.%${search}%`)
     if (dateFrom) q = q.gte('date', dateFrom)
     if (dateTo)   q = q.lte('date', dateTo)
+    if (workload) q = q.eq('workload', workload)
 
     const { data, count, error } = await q
       .order('date', { ascending: false })
       .order('bill_no', { ascending: false })
-      .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1)
+      .range(page * pageSize, page * pageSize + pageSize - 1)
 
     if (!error) { setRows(data || []); setTotal(count || 0) }
     setLoading(false)
-  }, [search, dateFrom, dateTo, page])
+  }, [search, dateFrom, dateTo, workload, page, pageSize])
 
   // Separate KPI fetch — sums ALL matching bills with batch pagination (bypass 1000-row limit)
   const fetchKpis = useCallback(async () => {
@@ -94,6 +100,7 @@ export default function BillsManagement() {
       if (search)   q = q.or(`bill_no.ilike.%${search}%,patient_name.ilike.%${search}%`)
       if (dateFrom) q = q.gte('date', dateFrom)
       if (dateTo)   q = q.lte('date', dateTo)
+      if (workload) q = q.eq('workload', workload)
       const { data, count, error } = await q.range(from, from + PAGE - 1)
       if (error) break
       if (total === null && count != null) total = count
@@ -106,7 +113,7 @@ export default function BillsManagement() {
       total_collected: allData.reduce((s, r) => s + (r.cash || 0) + (r.bcel || 0) + (r.bcel2 || 0) + (r.ldb || 0), 0),
       total_debt:      allData.reduce((s, r) => s + (r.debt || 0), 0),
     })
-  }, [search, dateFrom, dateTo])
+  }, [search, dateFrom, dateTo, workload])
 
   useEffect(() => { fetchRows() }, [fetchRows])
   useEffect(() => { fetchKpis() }, [fetchKpis])
@@ -124,9 +131,7 @@ export default function BillsManagement() {
     if (!error) {
       try {
         await logAction({ action: modal.mode === 'add' ? 'ເພີ່ມໃບບິນ' : 'ແກ້ໄຂໃບບິນ', bill_no: form.bill_no, patient_name: form.patient_name, amount: form.grand_total, recorder: form.recorded_by })
-      } catch (logErr) {
-        console.warn('⚠️ Log action failed:', logErr)
-      }
+      } catch (logErr) {      }
       setModal(null); fetchRows(); fetchKpis()
     } else alert('Error: ' + error.message)
   }
@@ -138,9 +143,7 @@ export default function BillsManagement() {
     if (!error) {
       try {
         await logAction({ action: 'ລົບໃບບິນ', bill_no: delTarget.bill_no, patient_name: delTarget.patient_name, amount: delTarget.grand_total })
-      } catch (logErr) {
-        console.warn('⚠️ Log action failed:', logErr)
-      }
+      } catch (logErr) {      }
       setDelTarget(null); fetchRows(); fetchKpis()
     } else alert('Error: ' + error.message)
   }
@@ -154,9 +157,7 @@ export default function BillsManagement() {
     if (!errorBills && !errorDebt) {
       try {
         await logAction({ action: 'ລຶບຂໍ້ມູນທັງໝົດ', details: 'ລຶບທັງ ar_bills ແລະ ar_debt' })
-      } catch (logErr) {
-        console.warn('⚠️ Log action failed:', logErr)
-      }
+      } catch (logErr) {      }
       setDelAll(false); fetchRows(); fetchKpis()
     } else {
       alert('Error: ' + (errorBills?.message || errorDebt?.message || 'Unknown error'))
@@ -171,11 +172,7 @@ export default function BillsManagement() {
         .from('ar_bills')
         .select('*')
         .gt('debt', 0)
-        .eq('debt_status', 'pending') // ເອົາສະເພາະຍັງບໍ່ທັນສົ່ງໄປ ar_debt
-
-      console.log('📊 Sync - Bills with debt:', { count: billsWithDebt?.length, error: fetchError })
-
-      if (fetchError) throw fetchError
+        .eq('debt_status', 'pending') // ເອົາສະເພາະຍັງບໍ່ທັນສົ່ງໄປ ar_debt      if (fetchError) throw fetchError
 
       if (!billsWithDebt || billsWithDebt.length === 0) {
         alert('ບໍ່ມີໃບບິນທີ່ມີໜີ້ຄ້າງທີ່ຍັງບໍ່ທັນສົ່ງ')
@@ -214,27 +211,14 @@ export default function BillsManagement() {
         .in('bill_no', billsWithDebt.map(b => b.bill_no))
       
       const existingBillNos = new Set(existingDebt?.map(d => d.bill_no) || [])
-      const newRecords = debtRecords.filter(r => !existingBillNos.has(r.bill_no))
-
-      console.log('📊 Sync - Records to insert:', { 
-        totalBillsWithDebt: billsWithDebt.length, 
-        existingCount: existingBillNos.size,
-        newRecordsCount: newRecords.length,
-        newRecords 
-      })
-
-      if (newRecords.length === 0) {
+      const newRecords = debtRecords.filter(r => !existingBillNos.has(r.bill_no))      if (newRecords.length === 0) {
         alert('ໃບບິນທັງໝົດຖືກສົ່ງໄປ Debt Management ແລ້ວ')
         setSaving(false)
         return
       }
 
       // ບັນທກລົງ ar_debt
-      const { error: insertError } = await supabase.from('ar_debt').insert(newRecords)
-
-      console.log('📊 Sync - Insert result:', { error: insertError })
-
-      if (insertError) throw insertError
+      const { error: insertError } = await supabase.from('ar_debt').insert(newRecords)      if (insertError) throw insertError
 
       try {
         await logAction({
@@ -242,34 +226,31 @@ export default function BillsManagement() {
           details: `ສົ່ງ ${newRecords.length} ໃບບິນ`,
           amount: newRecords.reduce((s, r) => s + (r.debt_amount || 0), 0)
         })
-      } catch (logErr) {
-        console.warn('⚠️ Log action failed:', logErr)
-      }
+      } catch (logErr) {      }
 
       alert(`ສົ່ງ ${newRecords.length} ໃບບິນ ໄປ Debt Management ສຳເລັດ!`)
       fetchRows()
       fetchKpis()
-    } catch (err) {
-      console.error('Sync error:', err)
-      alert('ຜິດພາດ: ' + err.message)
+    } catch (err) {      alert('ຜິດພາດ: ' + err.message)
     } finally {
       setSaving(false)
     }
   }
 
-  const totalPages = Math.ceil(total / PAGE_SIZE)
+  const totalPages = Math.ceil(total / pageSize)
 
   if (loading) return <div className="p-6"><LoadingSpinner /></div>
 
   return (
-    <div id="ar-bills-content" className="p-6 space-y-5">
+    <div id="ar-bills-content" className="p-5 space-y-4 text-sm">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="section-title">ຈັດການໃບບິນ</h2>
           <p className="text-xs text-slate-500 mt-0.5">ທັງໝົດ {fmt(total)} ໃບ</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" data-pdf-hidden="true">
+          <Can permission={PERMISSIONS.RECORDS_WRITE}>
           <button onClick={syncDebtToArDebt}
             className="inline-flex items-center gap-2 px-4 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 text-sm font-semibold rounded-xl border border-amber-200 transition-colors">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -277,6 +258,8 @@ export default function BillsManagement() {
             </svg>
             ສົ່ງໜີ້ຄ້າງ
           </button>
+          </Can>
+          <Can permission={PERMISSIONS.RECORDS_DELETE}>
           <button onClick={() => setDelAll(true)}
             className="inline-flex items-center gap-2 px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-sm font-semibold rounded-xl border border-red-200 transition-colors">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -284,6 +267,7 @@ export default function BillsManagement() {
             </svg>
             ລົບທັງໝົດ
           </button>
+          </Can>
           <button onClick={downloadTemplate}
             className="inline-flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 text-sm font-semibold rounded-xl border border-slate-200 transition-colors">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -291,6 +275,7 @@ export default function BillsManagement() {
             </svg>
             Template
           </button>
+          <Can permission={PERMISSIONS.DATA_UPLOAD}>
           <button onClick={() => navigate('/upload')}
             className="inline-flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 text-sm font-semibold rounded-xl border border-slate-200 transition-colors">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -298,33 +283,36 @@ export default function BillsManagement() {
             </svg>
             ອັບໂຫຼດ Excel
           </button>
+          </Can>
+          <Can permission={PERMISSIONS.RECORDS_WRITE}>
           <button onClick={() => setModal({ mode: 'add' })} className="btn-primary">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
             ເພີ່ມໃບບິນ
           </button>
+          </Can>
         </div>
       </div>
 
       {/* KPI Summary Boxes */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
           { label: 'ຍອດຂາຍລວມ', value: kpis.total_grand, color: 'text-slate-700', bg: 'bg-white border-slate-200' },
           { label: 'ເງິນທີ່ຮັບແລ້ວ', value: kpis.total_collected, color: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-200' },
           { label: 'ໜີ້ຄ້າງຊຳລະ', value: kpis.total_debt, color: 'text-red-600', bg: 'bg-red-50 border-red-200' },
           { label: 'ຈຳນວນໃບບິນ', value: total, color: 'text-slate-700', bg: 'bg-white border-slate-200', isCount: true },
         ].map(k => (
-          <div key={k.label} className={`rounded-xl p-4 border ${k.bg}`}>
+          <div key={k.label} className={`rounded-xl p-3 border ${k.bg}`}>
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">{k.label}</p>
-            <p className={`text-xl font-bold mt-1 font-mono ${k.color}`}>{fmt(k.value)}</p>
+            <p className={`text-lg font-bold mt-1 font-mono ${k.color}`}>{fmt(k.value)}</p>
             {!k.isCount && <p className="text-[10px] text-slate-400 mt-0.5">LAK</p>}
           </div>
         ))}
       </div>
 
       {/* Filters */}
-      <div className="bg-white rounded-xl border border-slate-100 p-4 flex flex-wrap gap-3 items-end">
+      <div className="bg-white rounded-xl border border-slate-100 p-3 flex flex-wrap gap-2 items-end" data-pdf-hidden="true">
         <div className="flex-1 min-w-[200px]">
           <label className="block text-xs font-semibold text-slate-500 mb-1">ຄົ້ນຫາ</label>
           <input
@@ -334,17 +322,35 @@ export default function BillsManagement() {
           />
         </div>
         <div>
+          <label className="block text-xs font-semibold text-slate-500 mb-1">ກະ</label>
+          <select value={workload} onChange={e => { setWorkload(e.target.value); setPage(0) }}
+            className="text-xs border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            <option value="">ທັງໝົດ</option>
+            {WORKLOADS.map(w => <option key={w} value={w}>{w}</option>)}
+          </select>
+        </div>
+        <div>
           <label className="block text-xs font-semibold text-slate-500 mb-1">ຈາກວັນທີ</label>
           <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setPage(0) }}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400" />
+            className="text-xs border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400" />
         </div>
         <div>
           <label className="block text-xs font-semibold text-slate-500 mb-1">ຫາວັນທີ</label>
           <input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setPage(0) }}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400" />
+            className="text-xs border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400" />
         </div>
-        {(search || dateFrom || dateTo) && (
-          <button onClick={() => { setSearch(''); setDateFrom(''); setDateTo(''); setPage(0) }}
+        <div>
+          <label className="block text-xs font-semibold text-slate-500 mb-1">ຈຳນວນແຖວ</label>
+          <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(0) }}
+            className="text-xs border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            <option value={20}>20 ແຖວ</option>
+            <option value={50}>50 ແຖວ</option>
+            <option value={100}>100 ແຖວ</option>
+            <option value={200}>200 ແຖວ</option>
+          </select>
+        </div>
+        {(search || dateFrom || dateTo || workload) && (
+          <button onClick={() => { setSearch(''); setDateFrom(''); setDateTo(''); setWorkload(''); setPage(0) }}
             className="text-xs text-slate-500 hover:text-slate-800 underline">
             ລ້າງ
           </button>
@@ -354,7 +360,7 @@ export default function BillsManagement() {
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full min-w-[1280px]">
             <thead>
               <tr className="border-b border-slate-100">
                 <th className="table-th">ເລກໃບບິນ</th>
@@ -387,13 +393,13 @@ export default function BillsManagement() {
                   </td>
                   <td className="table-td text-xs">{row.opd_ipd}</td>
                   <td className="table-td">
-                    <div className="flex flex-wrap gap-1">
+                    <div className="flex items-center gap-1 overflow-hidden whitespace-nowrap max-w-[360px]">
                       {[
                         ['OPD', row.svc_opd], ['Diag', row.svc_diag_image], ['IPD', row.svc_ipd],
                         ['Surg', row.svc_surg_ot], ['ER', row.svc_emergency], ['Chronic', row.svc_chronic],
                         ['Pharma', row.svc_pharma], ['Support', row.svc_support], ['Admin', row.svc_admin], ['Home', row.svc_homecare],
                       ].filter(([, v]) => v > 0).map(([lbl, v]) => (
-                        <span key={lbl} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-primary-50 text-primary-700 text-[10px] font-semibold rounded">
+                        <span key={lbl} className="inline-flex shrink-0 items-center gap-0.5 px-1.5 py-0.5 bg-primary-50 text-primary-700 text-[10px] font-semibold rounded">
                           {lbl}: {fmt(v)}
                         </span>
                       ))}
@@ -414,6 +420,7 @@ export default function BillsManagement() {
                   <td className="table-td text-xs text-slate-600">{row.recorded_by || <span className="text-slate-300">—</span>}</td>
                   <td className="table-td">
                     <div className="flex items-center gap-1">
+                      <Can permission={PERMISSIONS.RECORDS_WRITE}>
                       <button
                         onClick={() => setModal({ mode: 'edit', row })}
                         className="p-1.5 text-slate-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
@@ -423,6 +430,8 @@ export default function BillsManagement() {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                         </svg>
                       </button>
+                      </Can>
+                      <Can permission={PERMISSIONS.RECORDS_DELETE}>
                       <button
                         onClick={() => setDelTarget(row)}
                         className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
@@ -432,6 +441,7 @@ export default function BillsManagement() {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                         </svg>
                       </button>
+                      </Can>
                     </div>
                   </td>
                 </tr>
@@ -442,9 +452,9 @@ export default function BillsManagement() {
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between">
+          <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between" data-pdf-hidden="true">
             <p className="text-xs text-slate-500">
-              ສະແດງ {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} ຈາກ {fmt(total)}
+              ສະແດງ {page * pageSize + 1}–{Math.min((page + 1) * pageSize, total)} ຈາກ {fmt(total)}
             </p>
             <div className="flex gap-2">
               <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}

@@ -31,7 +31,7 @@ export function useARData(filters = {}) {
     setLoading(true)
     setError(null)
     try {
-      const { rows, total } = await fetchAllRows((from, to) => {
+      const { rows } = await fetchAllRows((from, to) => {
         let q = supabase.from('ar_bills').select('*', { count: 'exact' }).order('date', { ascending: false })
         if (filters.dateFrom)     q = q.gte('date', filters.dateFrom)
         if (filters.dateTo)       q = q.lte('date', filters.dateTo)
@@ -42,10 +42,8 @@ export function useARData(filters = {}) {
         if (filters.opdIpd)       q = q.eq('opd_ipd', filters.opdIpd)
         return q.range(from, to)
       })
-      console.log('✅ AR Data fetched:', rows.length, '/ Total in DB:', total)
       setData(rows)
     } catch (err) {
-      console.error('AR data error:', err)
       setError(err.message)
       setData([])
     } finally {
@@ -80,6 +78,33 @@ export function usePayoffData(filters = {}) {
     }
     load()
   }, [filters.dateFrom, filters.dateTo, filters.agingGroup, filters.customerType, filters.insurance])
+
+  return { data, loading }
+}
+
+export function useCashflowData(filters = {}) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true)
+      try {
+        const { rows } = await fetchAllRows((from, to) => {
+          let q = supabase.from('ar_cashflow').select('*', { count: 'exact' }).order('date', { ascending: false })
+          if (filters.dateFrom) q = q.gte('date', filters.dateFrom)
+          if (filters.dateTo) q = q.lte('date', filters.dateTo)
+          if (filters.workload) q = q.eq('workload', filters.workload)
+          return q.range(from, to)
+        })
+        setData(rows)
+      } catch {
+        setData([])
+      }
+      setLoading(false)
+    }
+    load()
+  }, [filters.dateFrom, filters.dateTo, filters.workload])
 
   return { data, loading }
 }
@@ -120,7 +145,7 @@ export function computeKPIs(rows = []) {
   const totalDiscounts  = rows.reduce((s, r) => s + (r.discounts  || 0), 0)
   // totalSales = sum of "Grand Total" (AFTER discounts) = totalSalesGross - totalDiscounts
   const totalSales      = rows.reduce((s, r) => s + (r.grand_total || 0), 0)
-  const totalBills      = rows.length
+  const totalBills      = new Set(rows.map(r => r.bill_no).filter(Boolean)).size
   // uniqueCustomers = total patient visits (matches PDF "Total Customers" = row count, not unique HN)
   const uniqueCustomers = rows.length
   const cash   = rows.reduce((s, r) => s + (r.cash  || 0), 0)
@@ -153,12 +178,18 @@ export function computeShiftData(rows = []) {
     '8AM-4PM':  { revenue: 0, bills: 0 },
     '4PM-12AM': { revenue: 0, bills: 0 },
     '12AM-8AM': { revenue: 0, bills: 0 },
+    '12PM-8AM': { revenue: 0, bills: 0 },
   }
+  const billsByShift = {}
   rows.forEach(r => {
     if (shifts[r.workload]) {
       shifts[r.workload].revenue += r.grand_total || 0
-      shifts[r.workload].bills   += 1
+      if (!billsByShift[r.workload]) billsByShift[r.workload] = new Set()
+      if (r.bill_no) billsByShift[r.workload].add(r.bill_no)
     }
+  })
+  Object.keys(shifts).forEach(shift => {
+    shifts[shift].bills = billsByShift[shift]?.size || 0
   })
   return shifts
 }

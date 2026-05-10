@@ -12,7 +12,7 @@ export default function RecorderSelect({ value, onChange, disabled }) {
   const ref = useRef(null)
 
   useEffect(() => {
-    supabase.from('recorders_list').select('*').order('name')
+    supabase.from('ar_recorders_list').select('*').order('name')
       .then(({ data }) => setList(data || []))
   }, [])
 
@@ -30,7 +30,7 @@ export default function RecorderSelect({ value, onChange, disabled }) {
     const name = newName.trim()
     if (!name) return
     setAdding(true)
-    const { data, error } = await supabase.from('recorders_list').insert({ name }).select().single()
+    const { data, error } = await supabase.from('ar_recorders_list').insert({ name }).select().single()
     if (!error && data) {
       setList(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
       onChange(name)
@@ -44,7 +44,7 @@ export default function RecorderSelect({ value, onChange, disabled }) {
   async function saveEdit(id) {
     const name = editName.trim()
     if (!name) return
-    const { error } = await supabase.from('recorders_list').update({ name }).eq('id', id)
+    const { error } = await supabase.from('ar_recorders_list').update({ name }).eq('id', id)
     if (!error) {
       setList(prev => prev.map(r => r.id === id ? { ...r, name } : r).sort((a, b) => a.name.localeCompare(b.name)))
       if (value === list.find(r => r.id === id)?.name) onChange(name)
@@ -54,7 +54,7 @@ export default function RecorderSelect({ value, onChange, disabled }) {
 
   async function deleteRecorder(e, id, name) {
     e.stopPropagation()
-    await supabase.from('recorders_list').delete().eq('id', id)
+    await supabase.from('ar_recorders_list').delete().eq('id', id)
     setList(prev => prev.filter(r => r.id !== id))
     if (value === name) onChange('')
   }

@@ -4,3 +4,18 @@ dist
 .env.local
 .DS_Store
 *.local
+
+# Claude Code internals
+.claude/worktrees/
+.claude/settings.local.json
+.claude/launch.json
+
+# Qwen
+.qwen/
+
+# Supabase temp
+supabase/.temp/
+
+# Reports / binary exports
+*.xlsx
+*.pdf

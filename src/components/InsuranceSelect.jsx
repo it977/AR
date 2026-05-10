@@ -10,7 +10,7 @@ export default function InsuranceSelect({ value, onChange, disabled }) {
   const ref = useRef(null)
 
   useEffect(() => {
-    supabase.from('insurance_list').select('*').order('name')
+    supabase.from('ar_insurance_list').select('*').order('name')
       .then(({ data }) => setList(data || []))
   }, [])
 
@@ -29,7 +29,7 @@ export default function InsuranceSelect({ value, onChange, disabled }) {
     const name = newName.trim()
     if (!name) return
     setAdding(true)
-    const { data, error } = await supabase.from('insurance_list').insert({ name }).select().single()
+    const { data, error } = await supabase.from('ar_insurance_list').insert({ name }).select().single()
     if (!error && data) {
       setList(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
       onChange(name)
@@ -42,7 +42,7 @@ export default function InsuranceSelect({ value, onChange, disabled }) {
 
   async function deleteInsurance(e, id, name) {
     e.stopPropagation()
-    await supabase.from('insurance_list').delete().eq('id', id)
+    await supabase.from('ar_insurance_list').delete().eq('id', id)
     setList(prev => prev.filter(i => i.id !== id))
     if (value === name) onChange('')
   }

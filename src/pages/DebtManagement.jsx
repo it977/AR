@@ -7,6 +7,8 @@ import Modal, { ConfirmDialog } from '../components/Modal'
 import DebtPaymentForm from '../components/forms/DebtPaymentForm'
 import BillForm from '../components/forms/BillForm'
 import LoadingSpinner from '../components/LoadingSpinner'
+import Can from '../components/Can'
+import { PERMISSIONS } from '../lib/rbac'
 
 const PAYOFF_HEADERS = [
   'Date','Week','Workload','Bill No','Insite-Onsite','OPD-IPD',
@@ -47,6 +49,7 @@ const AGING_COLOR = {
   '31-45 Days': 'bg-orange-100 text-orange-700',
   '46-60+ Days':'bg-red-100 text-red-700',
 }
+const WORKLOADS = ['8AM-4PM', '4PM-12AM', '12AM-8AM']
 
 export default function DebtManagement() {
   const [rows, setRows]       = useState([])
@@ -59,6 +62,7 @@ export default function DebtManagement() {
   const [search, setSearch]     = useState('')
   const [aging, setAging]       = useState('')
   const [statusFilter, setStatusFilter] = useState('')  // ເລີ່ມດ້ວຍທັງໝົດ
+  const [workload, setWorkload] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo]     = useState('')
 
@@ -88,10 +92,7 @@ export default function DebtManagement() {
 
     const debtData = await fetchAll((f, t) =>
       supabase.from('ar_debt').select('debt_amount, cash_paid, bcel_paid, bcel2_paid, ldb_paid, balance', { count: 'exact' }).range(f, t)
-    )
-
-    console.log('📊 KPI - Debt Data:', { count: debtData.length, data: debtData })
-
+    )
     const originalDebt = debtData.reduce((s, r) => s + (r.debt_amount || 0), 0)
     const collected    = debtData.reduce((s, r) => s + (r.cash_paid || 0) + (r.bcel_paid || 0) + (r.bcel2_paid || 0) + (r.ldb_paid || 0), 0)
     const remaining    = debtData.reduce((s, r) => s + (r.balance    || 0), 0)
@@ -113,6 +114,7 @@ export default function DebtManagement() {
     // ກັ່ນຕອງຕາມສະຖານະ: pending = balance > 0, paid = balance <= 0
     if (statusFilter === 'pending') q = q.gt('balance', 0)
     if (statusFilter === 'paid')    q = q.lte('balance', 0)
+    if (workload) q = q.eq('workload', workload)
     if (aging) {
       const today = new Date()
       const dayAgo = (n) => new Date(today.getTime() - n * 86400000).toISOString().split('T')[0]
@@ -128,12 +130,9 @@ export default function DebtManagement() {
     const { data, count, error } = await q
       .order('date', { ascending: false })
       .order('bill_no', { ascending: false })
-      .range(page * pageSize, page * pageSize + pageSize - 1)
-
-    console.log('📊 Debt Management - Fetched:', { dataCount: data?.length, total: count, error })
-    if (!error) { setRows(data || []); setTotal(count || 0) }
+      .range(page * pageSize, page * pageSize + pageSize - 1)    if (!error) { setRows(data || []); setTotal(count || 0) }
     setLoading(false)
-  }, [search, aging, statusFilter, dateFrom, dateTo, page, pageSize])
+  }, [search, aging, statusFilter, workload, dateFrom, dateTo, page, pageSize])
 
   useEffect(() => { fetchRows(); fetchKpis() }, [fetchRows, fetchKpis])
 
@@ -183,7 +182,7 @@ export default function DebtManagement() {
   const AGING_OPTS = ['', 'N', '0-15 Days', '16-30 Days', '31-45 Days', '46-60+ Days']
 
   return (
-    <div id="ar-debt-content" className="p-6 space-y-5">
+    <div id="ar-debt-content" className="p-5 space-y-4 text-sm">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -193,23 +192,23 @@ export default function DebtManagement() {
       </div>
 
       {/* KPI row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
           { label: 'ຍອດລວມທັງໝົດ', value: kpis.total_debt, color: 'text-slate-700', bg: 'bg-white border-slate-100' },
           { label: 'ເກັບໄດ້ແລ້ວ', value: kpis.total_paid, color: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-100' },
           { label: 'ໜີ້ຄ້າງ', value: kpis.total_balance, color: 'text-red-600', bg: 'bg-red-50 border-red-100' },
           { label: 'ຈຳນວນໃບບິນ', value: kpis.records, color: 'text-slate-700', bg: 'bg-white border-slate-100' },
         ].map(k => (
-          <div key={k.label} className={`rounded-xl p-4 border ${k.bg}`}>
+          <div key={k.label} className={`rounded-xl p-3 border ${k.bg}`}>
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">{k.label}</p>
-            <p className={`text-xl font-bold mt-1 font-mono ${k.color}`}>{fmt(k.value)}</p>
+            <p className={`text-lg font-bold mt-1 font-mono ${k.color}`}>{fmt(k.value)}</p>
             {k.label !== 'ຈຳນວນໃບບິນ' && <p className="text-[10px] text-slate-400 mt-0.5">LAK</p>}
           </div>
         ))}
       </div>
 
       {/* Filters */}
-      <div className="bg-white rounded-xl border border-slate-100 p-4 flex flex-wrap gap-3 items-end">
+      <div className="bg-white rounded-xl border border-slate-100 p-3 flex flex-wrap gap-2 items-end" data-pdf-hidden="true">
         <div className="flex-1 min-w-[180px]">
           <label className="block text-xs font-semibold text-slate-500 mb-1">ຄົ້ນຫາ</label>
           <input
@@ -235,6 +234,14 @@ export default function DebtManagement() {
           </select>
         </div>
         <div>
+          <label className="block text-xs font-semibold text-slate-500 mb-1">ກະ</label>
+          <select value={workload} onChange={e => { setWorkload(e.target.value); setPage(0) }}
+            className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            <option value="">ທັງໝົດ</option>
+            {WORKLOADS.map(w => <option key={w} value={w}>{w}</option>)}
+          </select>
+        </div>
+        <div>
           <label className="block text-xs font-semibold text-slate-500 mb-1">ຈາກວັນທີ</label>
           <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setPage(0) }}
             className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400" />
@@ -255,13 +262,14 @@ export default function DebtManagement() {
             <option value={500}>500 ແຖວ</option>
           </select>
         </div>
-        {(search || aging || statusFilter || dateFrom || dateTo) && (
-          <button onClick={() => { setSearch(''); setAging(''); setStatusFilter(''); setDateFrom(''); setDateTo(''); setPage(0) }}
+        {(search || aging || statusFilter || workload || dateFrom || dateTo) && (
+          <button onClick={() => { setSearch(''); setAging(''); setStatusFilter(''); setWorkload(''); setDateFrom(''); setDateTo(''); setPage(0) }}
             className="text-xs text-slate-500 hover:text-slate-800 underline">
             ລ້າງ
           </button>
         )}
         <div className="ml-auto">
+          <Can permission={PERMISSIONS.RECORDS_DELETE}>
           <button onClick={() => setDelAll(true)}
             className="inline-flex items-center gap-1.5 px-3 py-2 bg-red-50 hover:bg-red-100 text-red-500 text-xs font-semibold rounded-lg border border-red-200 transition-colors">
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -269,13 +277,14 @@ export default function DebtManagement() {
             </svg>
             ລົບທັງໝົດ
           </button>
+          </Can>
         </div>
       </div>
 
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full min-w-[1380px]">
             <thead>
               <tr className="border-b border-slate-100">
                 <th className="table-th">ເລກໃບບິນ</th>
@@ -361,6 +370,7 @@ export default function DebtManagement() {
                     <td className="table-td text-xs text-slate-600">{row.recorded_by_debt || <span className="text-slate-300">—</span>}</td>
                     <td className="table-td">
                       <div className="flex items-center gap-1">
+                        <Can permission={PERMISSIONS.RECORDS_WRITE}>
                         <button
                           onClick={() => setModal({ row })}
                           className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors ${row.debt_status === 'paid' ? 'bg-slate-50 text-slate-400 hover:bg-slate-100' : 'bg-primary-50 text-primary-600 hover:bg-primary-100'}`}
@@ -380,6 +390,8 @@ export default function DebtManagement() {
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                           </svg>
                         </button>
+                        </Can>
+                        <Can permission={PERMISSIONS.RECORDS_DELETE}>
                         <button
                           onClick={() => setDelTarget(row)}
                           className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
@@ -389,6 +401,7 @@ export default function DebtManagement() {
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                           </svg>
                         </button>
+                        </Can>
                       </div>
                     </td>
                   </tr>
@@ -400,7 +413,7 @@ export default function DebtManagement() {
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between">
+          <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between" data-pdf-hidden="true">
             <p className="text-xs text-slate-500">
               ສະແດງ {page * pageSize + 1}–{Math.min((page + 1) * pageSize, total)} ຈາກ {fmt(total)}
             </p>

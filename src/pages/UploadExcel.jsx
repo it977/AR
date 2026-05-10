@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from 'react'
 import * as XLSX from 'xlsx'
 import { parseExcelFile, formatNumber } from '../lib/excelParser'
 import { supabase } from '../lib/supabase'
+import { logAction } from '../lib/log'
 
 // ============================================================
 // Template download — same column structure as the real Excel
@@ -96,9 +97,11 @@ async function upsertBatch(table, rows) {
   const seen = new Map()
   const uniqueRows = []
   
-  const conflictKey = table === 'ar_bills' 
-    ? (r) => `${r.bill_no}__${r.date}__${r.workload || 'ALL'}`
-    : (r) => `${r.bill_no}__${r.date}`
+  const conflictKey = (r) => r.source_key || (
+    table === 'ar_bills'
+      ? `${r.bill_no}__${r.date}__${r.workload || 'ALL'}`
+      : `${r.bill_no}__${r.date}`
+  )
   
   // Keep last occurrence of each unique key
   for (const row of rows) {
@@ -113,10 +116,9 @@ async function upsertBatch(table, rows) {
   for (let i = 0; i < uniqueRows.length; i += CHUNK_SIZE) {
     const chunk = uniqueRows.slice(i, i + CHUNK_SIZE)
     
-    // ສຳລັບ ar_bills ໃຊ້ onConflict ທີ່ລວມ workload ນຳ
-    const conflictKeyDb = table === 'ar_bills' 
-      ? 'bill_no,date,workload' 
-      : 'bill_no,date'
+    const conflictKeyDb = chunk[0]?.source_key
+      ? 'source_key'
+      : (table === 'ar_bills' ? 'bill_no,date,workload' : 'bill_no,date')
     
     const { error } = await supabase.from(table).upsert(chunk, {
       onConflict: conflictKeyDb,
@@ -181,7 +183,8 @@ export default function UploadExcel() {
       addLog(`ເລີ່ມອັບໂຫຼດ "${file.name}"`)
       const billsTotal = parsed.bills.length
       const debtTotal  = parsed.debt.length
-      const grandTotal = billsTotal + debtTotal
+      const cashflowTotal = parsed.cashflow?.length || 0
+      const grandTotal = billsTotal + debtTotal + cashflowTotal
 
       if (billsTotal > 0) {
         addLog(`ກຳລັງອັບໂຫຼດ ar_bills (${formatNumber(billsTotal)} rows)...`)
@@ -225,11 +228,45 @@ export default function UploadExcel() {
         }
       }
 
+      if (cashflowTotal > 0) {
+        addLog(`ກຳລັງອັບໂຫຼດ ar_cashflow (${formatNumber(cashflowTotal)} rows)...`)
+        let done = billsTotal + debtTotal
+        for (let i = 0; i < cashflowTotal; i += BATCH_SIZE) {
+          await upsertBatch('ar_cashflow', parsed.cashflow.slice(i, i + BATCH_SIZE))
+          done += Math.min(BATCH_SIZE, cashflowTotal - i)
+          setProgress(Math.round((done / grandTotal) * 98))
+        }
+        addLog(`✓ ar_cashflow: ${formatNumber(cashflowTotal)} rows ສຳເລັດ`)
+      }
+
       setProgress(100)
       addLog('✓ ອັບໂຫຼດທຸກຢ່າງສຳເລັດ!')
+      await logAction({
+        action: 'Uploaded Excel data',
+        action_type: 'data.upload',
+        entity_type: 'excel_file',
+        entity_id: file?.name,
+        details: `Uploaded ${grandTotal} rows from ${file?.name || 'Excel file'}`,
+        metadata: {
+          file_name: file?.name,
+          bills: billsTotal,
+          debt: debtTotal,
+          cashflow: cashflowTotal,
+        },
+      })
       setStep(3)
     } catch (err) {
       addLog(`✗ ${err.message}`, false)
+      await logAction({
+        action: 'Excel upload failed',
+        action_type: 'data.upload.failed',
+        entity_type: 'excel_file',
+        entity_id: file?.name,
+        details: err.message,
+        metadata: {
+          file_name: file?.name,
+        },
+      })
     }
   }
 
@@ -241,6 +278,7 @@ export default function UploadExcel() {
   const tabs = [
     { key: 'bills', label: 'ar_bills',  icon: '📋', count: parsed?.bills?.length, desc: 'Daily Transactions' },
     { key: 'debt',  label: 'ar_debt',   icon: '💳', count: parsed?.debt?.length,  desc: 'Pay off Records' },
+    { key: 'cashflow', label: 'ar_cashflow', icon: '💸', count: parsed?.cashflow?.length, desc: 'Looker Cash Flow' },
   ]
 
   return (
@@ -423,7 +461,11 @@ export default function UploadExcel() {
               <p className="ml-auto text-xs text-slate-400 px-4">ສະແດງ 5 ແຖວທຳອິດ</p>
             </div>
             {(() => {
-              const data = activeTab === 'bills' ? parsed.bills?.slice(0, 5) : parsed.debt?.slice(0, 5)
+              const data = activeTab === 'bills'
+                ? parsed.bills?.slice(0, 5)
+                : activeTab === 'debt'
+                  ? parsed.debt?.slice(0, 5)
+                  : parsed.cashflow?.slice(0, 5)
               if (!data?.length) return <div className="p-10 text-center text-slate-400 text-sm">ບໍ່ພົບຂໍ້ມູນໃນ sheet ນີ້</div>
               const keys = Object.keys(data[0] || {}).slice(0, 10)
               return (

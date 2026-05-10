@@ -45,11 +45,12 @@ create table if not exists ar_bills (
   prepayment      numeric(18,2) default 0,
   note            text,
   aging_group     text,
+  source_key      text,
 
   created_at      timestamptz default now(),
   updated_at      timestamptz default now(),
 
-  unique(bill_no, date)
+  unique(source_key)
 );
 
 -- Index ສຳລັບ query ໄວ
@@ -88,11 +89,12 @@ create table if not exists ar_debt (
   balance         numeric(18,2) default 0,  -- ຍອດຄ້າງ
   due_date        date,
   aging_group     text,  -- 'N' | '0-15 Days' | '16-30 Days' | '31-45 Days' | '46-60+ Days'
+  source_key      text,
 
   created_at      timestamptz default now(),
   updated_at      timestamptz default now(),
 
-  unique(bill_no, date)
+  unique(source_key)
 );
 
 create index if not exists idx_ar_debt_date      on ar_debt(date);
@@ -101,10 +103,35 @@ create index if not exists idx_ar_debt_aging     on ar_debt(aging_group);
 create index if not exists idx_ar_debt_type      on ar_debt(customer_type);
 
 -- ============================================================
+-- 2b. ar_cashflow — Looker/Summary_CashFlow source
+-- ============================================================
+create table if not exists ar_cashflow (
+  id uuid default gen_random_uuid() primary key,
+  date date,
+  workload text,
+  total_actual_income numeric(18,2) default 0,
+  balance numeric(18,2) default 0,
+  cash numeric(18,2) default 0,
+  bcel numeric(18,2) default 0,
+  bcel2 numeric(18,2) default 0,
+  ldb numeric(18,2) default 0,
+  outstanding_debt numeric(18,2) default 0,
+  source_key text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+
+  unique(source_key)
+);
+
+create index if not exists idx_ar_cashflow_date on ar_cashflow(date);
+create index if not exists idx_ar_cashflow_workload on ar_cashflow(workload);
+
+-- ============================================================
 -- 3. Row Level Security
 -- ============================================================
 alter table ar_bills enable row level security;
 alter table ar_debt  enable row level security;
+alter table ar_cashflow enable row level security;
 
 -- ອ່ານໄດ້ທຸກຄົນ (ປ່ຽນເປັນ auth-based ໃນ production)
 create policy "ar_bills_read"   on ar_bills for select using (true);
@@ -116,6 +143,11 @@ create policy "ar_debt_read"    on ar_debt  for select using (true);
 create policy "ar_debt_insert"  on ar_debt  for insert with check (true);
 create policy "ar_debt_update"  on ar_debt  for update using (true);
 create policy "ar_debt_delete"  on ar_debt  for delete using (true);
+
+create policy "ar_cashflow_read"   on ar_cashflow for select using (true);
+create policy "ar_cashflow_insert" on ar_cashflow for insert with check (true);
+create policy "ar_cashflow_update" on ar_cashflow for update using (true);
+create policy "ar_cashflow_delete" on ar_cashflow for delete using (true);
 
 -- ============================================================
 -- 4. Views ທີ່ໃຊ້ງ່າຍ
