@@ -5,7 +5,7 @@ insert into ar_debt (
   date, bill_no, customer_type, insurance, hn, patient_name, gender, workload,
   grand_total, debt_amount, date_paid, submit_date,
   amount_paid, cash_paid, bcel_paid, bcel2_paid, ldb_paid,
-  balance, due_date, aging_group, source_key
+  balance, due_date, aging_group
 )
 select
   b.date, b.bill_no, b.customer_type, b.insurance, b.hn, b.patient_name, b.gender, b.workload,
@@ -17,10 +17,9 @@ select
   coalesce(b.cash,0), coalesce(b.bcel,0), coalesce(b.bcel2,0), coalesce(b.ldb,0),
   b.debt as balance,
   (b.date + interval '30 days')::date as due_date,
-  coalesce(b.aging_group, 'N') as aging_group,
-  ('bill:' || b.bill_no) as source_key
+  coalesce(b.aging_group, 'N') as aging_group
 from ar_bills b
 where b.debt > 0
   and not exists (
-    select 1 from ar_debt d where d.source_key = ('bill:' || b.bill_no)
+    select 1 from ar_debt d where d.bill_no = b.bill_no
   );
