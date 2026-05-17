@@ -91,34 +91,38 @@ function normalizeKeys(row) {
 }
 
 function toIsoDate(val) {
-  if (val instanceof Date) {
-    const y = val.getFullYear()
-    const m = String(val.getMonth() + 1).padStart(2, '0')
-    const d = String(val.getDate()).padStart(2, '0')
-    return `${y}-${m}-${d}`
-  }
+  let y, m, d
 
-  if (typeof val === 'number') {
+  if (val instanceof Date) {
+    y = val.getFullYear()
+    m = val.getMonth() + 1
+    d = val.getDate()
+  } else if (typeof val === 'number') {
     const parsed = XLSX.SSF.parse_date_code(val)
     if (parsed?.y && parsed?.m && parsed?.d) {
-      return `${parsed.y}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`
+      y = parsed.y; m = parsed.m; d = parsed.d
+    }
+  } else {
+    const s = String(val).trim()
+    const slash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+    if (slash) {
+      y = parseInt(slash[3]); m = parseInt(slash[2]); d = parseInt(slash[1])
+    } else {
+      const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
+      if (iso) {
+        y = parseInt(iso[1]); m = parseInt(iso[2]); d = parseInt(iso[3])
+      } else {
+        const parsed = new Date(s)
+        if (parsed && !isNaN(parsed.getTime())) {
+          y = parsed.getFullYear(); m = parsed.getMonth() + 1; d = parsed.getDate()
+        }
+      }
     }
   }
 
-  const s = String(val).trim()
-  const slash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
-  if (slash) {
-    return `${slash[3]}-${slash[2].padStart(2, '0')}-${slash[1].padStart(2, '0')}`
-  }
-
-  const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
-  if (iso) {
-    return `${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`
-  }
-
-  const d = new Date(s)
-  if (!d || isNaN(d.getTime())) return null
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  if (!y || !m || !d) return null
+  if (y < 2000 || m > 12 || d > 31) return null
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
 }
 
 function parseRow(row, columnMap) {
@@ -159,7 +163,7 @@ function makeSourceKey(sheetName, rowNumber, row) {
 
 function parseSheet(sheet, columnMap, addDebtStatus = false, sheetName = 'Sheet') {
   // Use formatted cell values so Google Sheets exported dates stay on their displayed day.
-  const rows = XLSX.utils.sheet_to_json(sheet, { defval: null, raw: false })
+  const rows = XLSX.utils.sheet_to_json(sheet, { defval: null })
   const parsed = rows.map((r, index) => {
     const row = parseRow(normalizeKeys(r), columnMap)
     row.source_key = makeSourceKey(sheetName, index + 2, row)
@@ -180,7 +184,7 @@ export function parseExcelFile(file) {
 
         wb.SheetNames.forEach(name => {
           const sheet = wb.Sheets[name]
-          const preview = XLSX.utils.sheet_to_json(sheet, { defval: null, raw: false })
+          const preview = XLSX.utils.sheet_to_json(sheet, { defval: null })
           result.rawSheets[name] = preview.slice(0, 5)
 
           const lower = name.toLowerCase()
