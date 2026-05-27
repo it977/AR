@@ -34,6 +34,9 @@ const MAP_BILLS = {
   'Prepayment': 'prepayment',
   'Note': 'note',
   'Aging Group': 'aging_group',
+  'Recorder': 'recorded_by',
+  'Recorded By': 'recorded_by',
+  'ຜູ້ບັນທຶກ': 'recorded_by',
 }
 
 const MAP_DEBT = {
@@ -215,7 +218,10 @@ export function parseExcelFile(file) {
     const reader = new FileReader()
     reader.onload = (e) => {
       try {
-        const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: true })
+        // cellDates:false → date cells stay as Excel serial numbers; toIsoDate parses
+        // them via XLSX.SSF.parse_date_code (timezone-safe). Enabling cellDates triggers
+        // a SheetJS epoch drift that lands dates at 23:59:56 of the previous day.
+        const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' })
         const result = { sheets: wb.SheetNames, bills: [], debt: [], cashflow: [], rawSheets: {} }
 
         wb.SheetNames.forEach(name => {

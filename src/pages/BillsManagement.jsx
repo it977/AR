@@ -1,14 +1,15 @@
-import { useState, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import { logAction } from '../lib/log'
-import Modal, { ConfirmDialog } from '../components/Modal'
+import Modal, { ConfirmDialog, ConfirmCodeDialog } from '../components/Modal'
 import BillForm from '../components/forms/BillForm'
 import LoadingSpinner from '../components/LoadingSpinner'
 import Can from '../components/Can'
 import { PERMISSIONS } from '../lib/rbac'
 import { DEFAULT_DUE_DAYS, calcAging, calcDueDate, todayIso } from '../lib/debtUtils'
+import { parseExcelFile } from '../lib/excelParser'
+import { upsertRows } from '../lib/excelUpload'
 
 const DAILY_HEADERS = [
   'Date','Week','Workload','Bill No','Insite-Onsite','OPD-IPD',
@@ -18,16 +19,18 @@ const DAILY_HEADERS = [
   'Supporting & Ancillary Services','Admin & Non-Clinical Services','Home care Services',
   'Total','Discounts','Grand Total','Cash Received',
   'Transfer Payment by BCEL','Transfer Payment by BCEL2','Transfer Payment by LDB',
-  'Outstanding Debt','Prepayment','Note','Aging Group',
+  'Outstanding Debt','Prepayment','Note','Recorder',
 ]
 const SAMPLE_DAILY = [
-  ['2026-01-01','Week 1','8AM-4PM','BILL-001','Insite','OPD','GN','','HN001','ສົມສາຍ','Male',
-   50000,0,0,0,0,0,20000,0,0,0,70000,0,70000,70000,0,0,0,0,0,'',''],
+  [new Date(2026, 0, 1),'Week 1','8AM-4PM','BILL-001','Insite','OPD','GN','','HN001','ສົມສາຍ','Male',
+   50000,0,0,0,0,0,20000,0,0,0,70000,0,70000,70000,0,0,0,0,0,'','ມະນີວັນ'],
 ]
 function downloadTemplate() {
   const wb = XLSX.utils.book_new()
-  const ws = XLSX.utils.aoa_to_sheet([DAILY_HEADERS, ...SAMPLE_DAILY])
-  ws['!cols'] = DAILY_HEADERS.map(() => ({ wch: 18 }))
+  const ws = XLSX.utils.aoa_to_sheet([DAILY_HEADERS, ...SAMPLE_DAILY], { cellDates: true })
+  ws['!cols'] = DAILY_HEADERS.map((h) => ({ wch: h === 'Date' ? 12 : 18 }))
+  // Format the Date column (A) as DD/MM/YYYY on the sample row
+  if (ws['A2']) ws['A2'].z = 'dd/mm/yyyy'
   XLSX.utils.book_append_sheet(wb, ws, 'Daily')
   XLSX.writeFile(wb, 'AR_Bills_Template_LXH.xlsx')
 }
@@ -63,7 +66,10 @@ export default function BillsManagement() {
   const [submitError, setSubmitError] = useState('')
   const [delTarget, setDelTarget] = useState(null)
   const [delAll, setDelAll]       = useState(false)
-  const navigate = useNavigate()
+
+  // Excel upload state
+  const fileRef = useRef(null)
+  const [uploadState, setUploadState] = useState(null) // null | { progress, total, done, log:[], error?, fileName }
 
   const fetchInsuranceDueDays = useCallback(async () => {
     const { data, error } = await supabase.from('ar_insurance_list').select('name,due_days')
@@ -310,6 +316,48 @@ export default function BillsManagement() {
     }
   }
 
+  async function handleExcelUpload(file) {
+    if (!file) return
+    if (!file.name.match(/\.(xlsx|xls)$/i)) {
+      alert('ກະລຸນາເລືອກໄຟລ .xlsx ຫຼື .xls ເທົ່ານັ້ນ')
+      return
+    }
+    const log = []
+    const addLog = (msg, ok = true) => log.push({ msg, ok, time: new Date().toLocaleTimeString('lo-LA') })
+    setUploadState({ progress: 0, total: 0, done: 0, log: [...log], fileName: file.name })
+    try {
+      addLog(`ກຳລັງອ່ານໄຟລ "${file.name}"...`)
+      setUploadState(s => ({ ...s, log: [...log] }))
+      const result = await parseExcelFile(file)
+      const bills = result.bills || []
+      if (!bills.length) {
+        throw new Error('ບໍ່ພົບຂໍ້ມູນໃນ sheet "Daily" — ກວດສອບໂຄງສ້າງໄຟລ')
+      }
+      addLog(`ພົບ ${bills.length} ແຖວ ໃນ sheet Daily — ກຳລັງອັບໂຫຼດ...`)
+      setUploadState(s => ({ ...s, log: [...log], total: bills.length }))
+      const uploaded = await upsertRows('ar_bills', bills, (pct, done, total) => {
+        setUploadState(s => ({ ...s, progress: pct, done, total }))
+      })
+      addLog(`✓ ສຳເລັດ: ${uploaded} ແຖວ`)
+      try {
+        await logAction({
+          action: 'ອັບໂຫຼດໃບບິນ (Excel)',
+          action_type: 'data.upload',
+          entity_type: 'excel_file',
+          entity_id: file.name,
+          details: `ອັບໂຫຼດ ${uploaded} ໃບບິນ ຈາກ ${file.name}`,
+          metadata: { file_name: file.name, bills: uploaded },
+        })
+      } catch (_) {}
+      setUploadState(s => ({ ...s, log: [...log], progress: 100 }))
+      fetchRows()
+      fetchKpis()
+    } catch (err) {
+      addLog(`✗ ${err.message}`, false)
+      setUploadState(s => ({ ...(s || { progress: 0, done: 0, total: 0, fileName: file.name }), error: err.message, log: [...log] }))
+    }
+  }
+
   const totalPages = Math.ceil(total / pageSize)
 
   if (loading) return <div className="p-6"><LoadingSpinner /></div>
@@ -349,7 +397,14 @@ export default function BillsManagement() {
             Template
           </button>
           <Can permission={PERMISSIONS.DATA_UPLOAD}>
-          <button onClick={() => navigate('/upload')}
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) handleExcelUpload(f) }}
+          />
+          <button onClick={() => fileRef.current?.click()}
             className="inline-flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 text-sm font-semibold rounded-xl border border-slate-200 transition-colors">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
@@ -572,16 +627,54 @@ export default function BillsManagement() {
         confirmLabel="ລົບ"
       />
 
-      {/* Delete all */}
-      <ConfirmDialog
+      {/* Delete all — require confirmation code */}
+      <ConfirmCodeDialog
         open={delAll}
         onClose={() => setDelAll(false)}
         onConfirm={handleDeleteAll}
         loading={saving}
         title="ລົບຂໍ້ມູນທັງໝົດ?"
-        message={`ທ່ານຕ້ອງການລົບໃບບິນທັງໝົດ ${fmt(total)} ໃບ ອອກຈາກລະບົບແທ້ບໍ? ການດຳເນີນການນີ້ບໍ່ສາມາດຍ້ອນຄືນໄດ້.`}
+        message={`ທ່ານກຳລັງຈະລົບໃບບິນທັງໝົດ ${fmt(total)} ໃບ ອອກຈາກລະບົບ. ການດຳເນີນການນີ້ບໍ່ສາມາດຍ້ອນຄືນໄດ້.`}
         confirmLabel="ລົບທັງໝົດ"
       />
+
+      {/* Excel upload progress */}
+      {uploadState && (
+        <Modal
+          open={true}
+          onClose={() => { if (uploadState.progress >= 100 || uploadState.error) setUploadState(null) }}
+          title={uploadState.error ? 'ອັບໂຫຼດບໍ່ສຳເລັດ' : (uploadState.progress >= 100 ? 'ອັບໂຫຼດສຳເລັດ' : 'ກຳລັງອັບໂຫຼດ Excel...')}
+          subtitle={uploadState.fileName}
+          size="md"
+        >
+          <div className="space-y-4">
+            <div>
+              <div className="flex justify-between text-xs text-slate-500 mb-1.5">
+                <span>ຄວາມຄືບໜ້າ</span>
+                <span className="font-semibold">{uploadState.progress}% ({fmt(uploadState.done)}/{fmt(uploadState.total)})</span>
+              </div>
+              <div className="w-full bg-slate-100 rounded-full h-2.5">
+                <div className={`h-2.5 rounded-full transition-all duration-500 ${uploadState.error ? 'bg-red-500' : 'bg-gradient-to-r from-primary-500 to-indigo-500'}`}
+                  style={{ width: `${uploadState.progress}%` }} />
+              </div>
+            </div>
+            <div className="bg-slate-900 rounded-xl p-3 font-mono text-xs space-y-1 max-h-44 overflow-y-auto">
+              {uploadState.log.map((e, i) => (
+                <p key={i} className={e.ok ? 'text-emerald-400' : 'text-red-400'}>
+                  <span className="text-slate-500 mr-1">{e.time}</span>{e.msg}
+                </p>
+              ))}
+            </div>
+            {(uploadState.progress >= 100 || uploadState.error) && (
+              <div className="flex justify-end">
+                <button onClick={() => setUploadState(null)} className="btn-primary px-6">
+                  ປິດ
+                </button>
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }

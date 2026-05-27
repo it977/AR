@@ -1,11 +1,48 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import { logAction } from '../lib/log'
-import Modal, { ConfirmDialog } from '../components/Modal'
+import Modal, { ConfirmDialog, ConfirmCodeDialog } from '../components/Modal'
 import DebtPaymentForm from '../components/forms/DebtPaymentForm'
 import BillForm from '../components/forms/BillForm'
 import Can from '../components/Can'
 import { PERMISSIONS } from '../lib/rbac'
+import { parseExcelFile } from '../lib/excelParser'
+import { upsertRows, syncDebtStatus } from '../lib/excelUpload'
+
+const PAYOFF_HEADERS = [
+  'Date','Week','Workload','Bill No','Insite-Onsite','OPD-IPD',
+  'Customer Type Code','Insurance','HN','Customer Name','Gender',
+  'Grand Total','Outstanding Debt','Date Paid','Workload Debt','Submission Date',
+  'Amount Paid','Cash Received Debt','Transfer Payment by BCEL Debt',
+  'Transfer Payment by BCEL 2 Debt','Transfer Payment by LDB Debt',
+  'Balance','Due date',
+  'Payment 1 Date','Payment 1 Method','Payment 1 Amount',
+  'Payment 2 Date','Payment 2 Method','Payment 2 Amount',
+  'Payment 3 Date','Payment 3 Method','Payment 3 Amount',
+  'Aging Group',
+]
+const SAMPLE_PAYOFF = [
+  [new Date(2026, 0, 1),'Week 1','8AM-4PM','BILL-INS001','Insite','OPD','INS','APA','HN002','ນາງສີ','Female',
+   500000,500000,new Date(2026, 0, 10),'',new Date(2026, 0, 10),200000,0,200000,0,0,300000,new Date(2026, 1, 9),
+   new Date(2026, 0, 10),'bcel',200000,'','','','','','Pay in installments'],
+]
+// Columns in PAYOFF_HEADERS that should be formatted as dates
+const PAYOFF_DATE_COLS = ['Date','Date Paid','Submission Date','Due date','Payment 1 Date','Payment 2 Date','Payment 3 Date']
+function downloadDebtTemplate() {
+  const wb = XLSX.utils.book_new()
+  const ws = XLSX.utils.aoa_to_sheet([PAYOFF_HEADERS, ...SAMPLE_PAYOFF], { cellDates: true })
+  ws['!cols'] = PAYOFF_HEADERS.map((h) => ({ wch: PAYOFF_DATE_COLS.includes(h) ? 12 : 18 }))
+  // Apply DD/MM/YYYY format to all date columns in the sample row
+  PAYOFF_DATE_COLS.forEach(h => {
+    const idx = PAYOFF_HEADERS.indexOf(h)
+    if (idx < 0) return
+    const addr = XLSX.utils.encode_cell({ r: 1, c: idx })
+    if (ws[addr]) ws[addr].z = 'dd/mm/yyyy'
+  })
+  XLSX.utils.book_append_sheet(wb, ws, 'Pay off')
+  XLSX.writeFile(wb, 'AR_Debt_Template_LXH.xlsx')
+}
 import {
   AGING_GROUPS,
   DEFAULT_DUE_DAYS,
@@ -49,6 +86,10 @@ export default function DebtManagement() {
   const [editModal, setEditModal] = useState(null)
   const [delTarget, setDelTarget] = useState(null)
   const [delAll, setDelAll]       = useState(false)
+
+  const fileRef = useRef(null)
+  const [uploadState, setUploadState] = useState(null)
+  const [mismatchDialog, setMismatchDialog] = useState(null)
 
   const [kpis, setKpis] = useState({ total_debt: 0, total_paid: 0, total_balance: 0, records: 0 })
   const [insuranceDueDays, setInsuranceDueDays] = useState({})
@@ -233,16 +274,195 @@ export default function DebtManagement() {
     else alert('Error: ' + error.message)
   }
 
+  async function handleExcelUpload(file) {
+    if (!file) return
+    if (!file.name.match(/\.(xlsx|xls)$/i)) {
+      alert('ກະລຸນາເລືອກໄຟລ .xlsx ຫຼື .xls ເທົ່ານັ້ນ')
+      return
+    }
+
+    // 1) Parse Excel file
+    let parsed
+    try {
+      parsed = await parseExcelFile(file)
+    } catch (err) {
+      alert('ອ່ານໄຟລບໍ່ສຳເລັດ: ' + err.message)
+      return
+    }
+    const debt = parsed.debt || []
+    if (!debt.length) {
+      alert('ບໍ່ພົບຂໍ້ມູນໃນ sheet "Pay off" — ກວດສອບໂຄງສ້າງໄຟລ')
+      return
+    }
+
+    // 2) Pre-flight: ກວດ bill_no, patient_name, insurance ກົງກັນ + ກວດຍອດໜີ້ເກີນ
+    const norm = (v) => String(v ?? '').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase()
+    let issues = []
+    try {
+      const billNos = [...new Set(debt.map(r => r.bill_no).filter(Boolean))]
+      const billsMap = new Map() // bill_no -> { patient_name, insurance, debt }
+      const BATCH = 500
+      for (let i = 0; i < billNos.length; i += BATCH) {
+        const batch = billNos.slice(i, i + BATCH)
+        const { data, error } = await supabase
+          .from('ar_bills')
+          .select('bill_no, patient_name, insurance, debt')
+          .in('bill_no', batch)
+        if (error) throw error
+        data?.forEach(r => {
+          // ມີຫຼາຍ row ໃນ ar_bills ດ້ວຍ bill_no ດຽວກັນ → ໃຊ້ record ທີ່ມີ debt ສູງສຸດ
+          const prev = billsMap.get(r.bill_no)
+          if (!prev || (r.debt || 0) > (prev.debt || 0)) billsMap.set(r.bill_no, r)
+        })
+      }
+
+      for (const r of debt) {
+        if (!r.bill_no) continue
+        const bill = billsMap.get(r.bill_no)
+        const rowIssues = []
+        if (!bill) {
+          rowIssues.push({ type: 'not_found', text: 'ບໍ່ມີໃບບິນ' })
+        } else {
+          if (norm(r.patient_name) !== norm(bill.patient_name)) {
+            rowIssues.push({ type: 'name', text: `ຊື່ບໍ່ກົງ → "${bill.patient_name || '—'}"` })
+          }
+          if (norm(r.insurance) !== norm(bill.insurance)) {
+            rowIssues.push({ type: 'insurance', text: `ປະກັນບໍ່ກົງ → "${bill.insurance || '—'}"` })
+          }
+          const billDebt = bill.debt || 0
+          const debtAmount = r.debt_amount || 0
+          if (debtAmount > billDebt) {
+            const over = debtAmount - billDebt
+            rowIssues.push({ type: 'overdebt', text: `ຍອດເກີນ +${fmt(over)} LAK (ໃບບິນ: ${fmt(billDebt)})` })
+          }
+        }
+        if (rowIssues.length > 0) {
+          issues.push({ row: r, bill: bill || null, issues: rowIssues })
+        }
+      }
+    } catch (err) {
+      alert('ກວດສອບໄຟລຜິດພາດ: ' + err.message)
+      return
+    }
+
+    // 3) ຖ້າມີບັນຫາ → block upload ແລະສະແດງລາຍຊື່
+    if (issues.length > 0) {
+      await new Promise(resolve => {
+        setMismatchDialog({
+          issues,
+          fileName: file.name,
+          onClose: () => { setMismatchDialog(null); resolve() },
+        })
+      })
+      try {
+        await logAction({
+          action: 'ຍົກເລີກອັບໂຫຼດໜີ້ຄ້າງ',
+          action_type: 'data.upload.cancelled',
+          entity_type: 'excel_file',
+          entity_id: file.name,
+          details: `ບໍ່ອັບໂຫຼດ — ພົບ ${issues.length} ແຖວທີ່ມີບັນຫາ`,
+          metadata: {
+            file_name: file.name,
+            issue_count: issues.length,
+            issue_types: issues.reduce((acc, it) => {
+              it.issues.forEach(i => { acc[i.type] = (acc[i.type] || 0) + 1 })
+              return acc
+            }, {}),
+          },
+        })
+      } catch (_) {}
+      return
+    }
+
+    // 4) Upload with progress
+    const log = []
+    const addLog = (msg, ok = true) => log.push({ msg, ok, time: new Date().toLocaleTimeString('lo-LA') })
+    setUploadState({ progress: 0, total: debt.length, done: 0, log: [...log], fileName: file.name })
+    try {
+      if (mismatched.length > 0) {
+        addLog(`⚠ ມີ ${mismatched.length} ໃບບິນບໍ່ກົງກັນ — ສືບຕໍ່ອັບໂຫຼດຕາມຄຳສັ່ງຜູ້ໃຊ້`, false)
+      }
+      addLog(`ພົບ ${debt.length} ແຖວ ໃນ sheet Pay off — ກຳລັງອັບໂຫຼດ...`)
+      setUploadState(s => ({ ...s, log: [...log] }))
+      const uploaded = await upsertRows('ar_debt', debt, (pct, done, total) => {
+        setUploadState(s => ({ ...s, progress: Math.round(pct * 0.85), done, total }))
+      })
+      addLog(`✓ ar_debt: ${uploaded} ແຖວສຳເລັດ`)
+      setUploadState(s => ({ ...s, log: [...log] }))
+
+      const billUpdates = parsed.billUpdates || []
+      if (billUpdates.length > 0) {
+        addLog(`ກຳລັງປັບສະຖານະໜີ້ໃນ ar_bills (${billUpdates.length} ແຖວ)...`)
+        setUploadState(s => ({ ...s, log: [...log] }))
+        await syncDebtStatus(billUpdates, (pct) => {
+          setUploadState(s => ({ ...s, progress: 85 + Math.round(pct * 0.15) }))
+        })
+        addLog(`✓ ປັບສະຖານະໜີ້: ${billUpdates.length} ໃບບິນ`)
+      }
+
+      try {
+        await logAction({
+          action: 'ອັບໂຫຼດໜີ້ຄ້າງ (Excel)',
+          action_type: 'data.upload',
+          entity_type: 'excel_file',
+          entity_id: file.name,
+          details: `ອັບໂຫຼດ ${uploaded} ລາຍການໜີ້ ຈາກ ${file.name}` + (mismatched.length ? ` (${mismatched.length} ໃບບໍ່ກົງກັນ)` : ''),
+          metadata: { file_name: file.name, debt: uploaded, bill_updates: billUpdates.length, mismatched: mismatched.length },
+        })
+      } catch (_) {}
+      setUploadState(s => ({ ...s, log: [...log], progress: 100 }))
+      fetchRows()
+      fetchKpis()
+    } catch (err) {
+      addLog(`✗ ${err.message}`, false)
+      setUploadState(s => ({ ...(s || { progress: 0, done: 0, total: 0, fileName: file.name }), error: err.message, log: [...log] }))
+    }
+  }
+
   const totalPages = Math.ceil(total / pageSize)
   const AGING_OPTS = ['', ...AGING_GROUPS]
 
   return (
     <div id="ar-debt-content" className="p-5 space-y-4 text-sm">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="section-title">ຈັດການໜີ້ຄ້າງຊຳລະ</h2>
           <p className="text-xs text-slate-500 mt-0.5">ທັງໝົດ {fmt(total)} ລາຍການ</p>
+        </div>
+        <div className="flex items-center gap-2" data-pdf-hidden="true">
+          <Can permission={PERMISSIONS.RECORDS_DELETE}>
+          <button onClick={() => setDelAll(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-sm font-semibold rounded-xl border border-red-200 transition-colors">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+            ລົບທັງໝົດ
+          </button>
+          </Can>
+          <button onClick={downloadDebtTemplate}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 text-sm font-semibold rounded-xl border border-slate-200 transition-colors">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            Template
+          </button>
+          <Can permission={PERMISSIONS.DATA_UPLOAD}>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) handleExcelUpload(f) }}
+          />
+          <button onClick={() => fileRef.current?.click()}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 text-sm font-semibold rounded-xl border border-slate-200 transition-colors">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+            ອັບໂຫຼດ Excel
+          </button>
+          </Can>
         </div>
       </div>
 
@@ -323,17 +543,6 @@ export default function DebtManagement() {
             ລ້າງ
           </button>
         )}
-        <div className="ml-auto">
-          <Can permission={PERMISSIONS.RECORDS_DELETE}>
-          <button onClick={() => setDelAll(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-red-50 hover:bg-red-100 text-red-500 text-xs font-semibold rounded-lg border border-red-200 transition-colors">
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
-            ລົບທັງໝົດ
-          </button>
-          </Can>
-        </div>
       </div>
 
       {/* Table */}
@@ -536,16 +745,153 @@ export default function DebtManagement() {
         confirmLabel="ລົບ"
       />
 
-      {/* Delete all */}
-      <ConfirmDialog
+      {/* Delete all — require confirmation code */}
+      <ConfirmCodeDialog
         open={delAll}
         onClose={() => setDelAll(false)}
         onConfirm={handleDeleteAll}
         loading={saving}
         title="ລົບໜີ້ທັງໝົດ?"
-        message={`ລົບໃບບິນທີ່ມີໜີ້ຄ້າງທັງໝົດ ${fmt(total)} ລາຍການ ອອກຈາກລະບົບແທ້ບໍ?`}
+        message={`ທ່ານກຳລັງຈະລົບລາຍການໜີ້ຄ້າງທັງໝົດ ${fmt(total)} ລາຍການ ອອກຈາກລະບົບ. ການດຳເນີນການນີ້ບໍ່ສາມາດຍ້ອນຄືນໄດ້.`}
         confirmLabel="ລົບທັງໝົດ"
       />
+
+      {/* Excel upload pre-check — blocks upload when issues found */}
+      {mismatchDialog && (() => {
+        const counts = mismatchDialog.issues.reduce((acc, it) => {
+          it.issues.forEach(i => { acc[i.type] = (acc[i.type] || 0) + 1 })
+          return acc
+        }, {})
+        const badgeCls = {
+          not_found:  'bg-red-100 text-red-700 border-red-200',
+          name:       'bg-orange-100 text-orange-700 border-orange-200',
+          insurance:  'bg-violet-100 text-violet-700 border-violet-200',
+          overdebt:   'bg-amber-100 text-amber-800 border-amber-200',
+        }
+        const chipCls = {
+          not_found:  'bg-red-50 text-red-700',
+          name:       'bg-orange-50 text-orange-700',
+          insurance:  'bg-violet-50 text-violet-700',
+          overdebt:   'bg-amber-50 text-amber-800',
+        }
+        return (
+        <Modal
+          open={true}
+          onClose={mismatchDialog.onClose}
+          title="ພົບຂໍ້ມູນບໍ່ກົງກັນ — ບໍ່ສາມາດອັບໂຫຼດໄດ້"
+          subtitle={`${fmt(mismatchDialog.issues.length)} ແຖວມີບັນຫາ · ໄຟລ: ${mismatchDialog.fileName}`}
+          size="xl"
+        >
+          <div className="space-y-5">
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700 flex items-start gap-3">
+              <svg className="w-6 h-6 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+              </svg>
+              <div className="flex-1">
+                <p className="font-semibold mb-1">ການອັບໂຫຼດຖືກຍົກເລີກ</p>
+                <p>ກວດສອບເລກໃບບິນ, ຊື່ຄົນເຈັບ, ປະກັນ ແລະ ຍອດໜີ້ໃນ Excel ໃຫ້ກົງກັບ <code className="bg-red-100 px-1 rounded">ar_bills</code> ກ່ອນ ແລ້ວຈິ່ງລອງອັບໂຫຼດໃໝ່. ຂໍ້ມູນເກົ່າຍັງຄົງເດີມ — ບໍ່ມີຫຍັງຖືກປ່ຽນແປງ.</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {counts.not_found  && <span className={`text-xs font-semibold px-2 py-1 rounded-full border ${badgeCls.not_found}`}>ບໍ່ມີໃບບິນ: {fmt(counts.not_found)}</span>}
+                  {counts.name       && <span className={`text-xs font-semibold px-2 py-1 rounded-full border ${badgeCls.name}`}>ຊື່ບໍ່ກົງ: {fmt(counts.name)}</span>}
+                  {counts.insurance  && <span className={`text-xs font-semibold px-2 py-1 rounded-full border ${badgeCls.insurance}`}>ປະກັນບໍ່ກົງ: {fmt(counts.insurance)}</span>}
+                  {counts.overdebt   && <span className={`text-xs font-semibold px-2 py-1 rounded-full border ${badgeCls.overdebt}`}>ຍອດເກີນ: {fmt(counts.overdebt)}</span>}
+                </div>
+              </div>
+            </div>
+            <div className="border border-slate-200 rounded-xl overflow-hidden">
+              <div className="max-h-[480px] overflow-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 sticky top-0 z-10">
+                    <tr>
+                      <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-slate-600 uppercase tracking-wide w-10">#</th>
+                      <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-slate-600 uppercase tracking-wide">ເລກໃບບິນ</th>
+                      <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-slate-600 uppercase tracking-wide">ວັນທີ</th>
+                      <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-slate-600 uppercase tracking-wide">ຊື່ (Excel)</th>
+                      <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-slate-600 uppercase tracking-wide">ປະກັນ (Excel)</th>
+                      <th className="px-3 py-2.5 text-right text-[11px] font-semibold text-slate-600 uppercase tracking-wide">ຍອດໜີ້ (Excel)</th>
+                      <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-slate-600 uppercase tracking-wide">ບັນຫາ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {mismatchDialog.issues.slice(0, 500).map(({ row, issues }, i) => (
+                      <tr key={i} className="hover:bg-red-50/40 align-top">
+                        <td className="px-3 py-2 text-slate-400 text-xs">{i + 1}</td>
+                        <td className="px-3 py-2 font-mono text-red-600 font-semibold text-xs">{row.bill_no}</td>
+                        <td className="px-3 py-2 text-slate-600 text-xs whitespace-nowrap">{row.date || '—'}</td>
+                        <td className="px-3 py-2 text-slate-700 truncate max-w-[220px]" title={row.patient_name || ''}>{row.patient_name || '—'}</td>
+                        <td className="px-3 py-2 text-slate-500 text-xs">{row.insurance || '—'}</td>
+                        <td className="px-3 py-2 text-right font-mono text-xs">{fmt(row.debt_amount || 0)}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex flex-wrap gap-1">
+                            {issues.map((iss, j) => (
+                              <span key={j} className={`inline-block text-[11px] font-semibold px-2 py-0.5 rounded ${chipCls[iss.type] || 'bg-slate-100 text-slate-700'}`}>
+                                {iss.text}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {mismatchDialog.issues.length > 500 && (
+                <div className="px-3 py-2 bg-slate-50 text-xs text-slate-500 border-t border-slate-200">
+                  ສະແດງ 500 ແຖວທຳອິດ ຈາກທັງໝົດ {fmt(mismatchDialog.issues.length)} ແຖວ
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end">
+              <button onClick={mismatchDialog.onClose}
+                className="inline-flex items-center gap-2 px-6 py-2.5 bg-slate-700 hover:bg-slate-800 text-white text-sm font-semibold rounded-xl transition-colors">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+                </svg>
+                ກັບຄືນ
+              </button>
+            </div>
+          </div>
+        </Modal>
+        )
+      })()}
+
+      {/* Excel upload progress */}
+      {uploadState && (
+        <Modal
+          open={true}
+          onClose={() => { if (uploadState.progress >= 100 || uploadState.error) setUploadState(null) }}
+          title={uploadState.error ? 'ອັບໂຫຼດບໍ່ສຳເລັດ' : (uploadState.progress >= 100 ? 'ອັບໂຫຼດສຳເລັດ' : 'ກຳລັງອັບໂຫຼດ Excel...')}
+          subtitle={uploadState.fileName}
+          size="md"
+        >
+          <div className="space-y-4">
+            <div>
+              <div className="flex justify-between text-xs text-slate-500 mb-1.5">
+                <span>ຄວາມຄືບໜ້າ</span>
+                <span className="font-semibold">{uploadState.progress}% ({fmt(uploadState.done)}/{fmt(uploadState.total)})</span>
+              </div>
+              <div className="w-full bg-slate-100 rounded-full h-2.5">
+                <div className={`h-2.5 rounded-full transition-all duration-500 ${uploadState.error ? 'bg-red-500' : 'bg-gradient-to-r from-primary-500 to-indigo-500'}`}
+                  style={{ width: `${uploadState.progress}%` }} />
+              </div>
+            </div>
+            <div className="bg-slate-900 rounded-xl p-3 font-mono text-xs space-y-1 max-h-44 overflow-y-auto">
+              {uploadState.log.map((e, i) => (
+                <p key={i} className={e.ok ? 'text-emerald-400' : 'text-red-400'}>
+                  <span className="text-slate-500 mr-1">{e.time}</span>{e.msg}
+                </p>
+              ))}
+            </div>
+            {(uploadState.progress >= 100 || uploadState.error) && (
+              <div className="flex justify-end">
+                <button onClick={() => setUploadState(null)} className="btn-primary px-6">
+                  ປິດ
+                </button>
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
