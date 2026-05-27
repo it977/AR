@@ -59,15 +59,19 @@ export function useARData(filters = {}) {
 export function usePayoffData(filters = {}) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
+  // ໃຫ້ caller ເລືອກ date column ໄດ້:
+  //   'date'      → ວັນທີຂອງໃບບິນຕົ້ນສະບັບ (default — ໃຊ້ໃນ Aging/Outstanding/Debt Management)
+  //   'date_paid' → ວັນທີຊຳລະ (ໃຊ້ໃນ Daily Sales/Payment Channel — cash flow view)
+  const dateField = filters.payoffDateField || 'date'
 
   useEffect(() => {
     async function load() {
       setLoading(true)
       try {
         const { rows } = await fetchAllRows((from, to) => {
-          let q = supabase.from('ar_debt').select('*', { count: 'exact' }).order('date', { ascending: false })
-          if (filters.dateFrom)     q = q.gte('date', filters.dateFrom)
-          if (filters.dateTo)       q = q.lte('date', filters.dateTo)
+          let q = supabase.from('ar_debt').select('*', { count: 'exact' }).order(dateField, { ascending: false })
+          if (filters.dateFrom)     q = q.gte(dateField, filters.dateFrom)
+          if (filters.dateTo)       q = q.lte(dateField, filters.dateTo)
           if (filters.agingGroup)   q = q.eq('aging_group', filters.agingGroup)
           if (filters.customerType) q = q.eq('customer_type', filters.customerType)
           if (filters.insurance)    q = q.ilike('insurance', `%${filters.insurance}%`)
@@ -78,7 +82,7 @@ export function usePayoffData(filters = {}) {
       setLoading(false)
     }
     load()
-  }, [filters.dateFrom, filters.dateTo, filters.agingGroup, filters.customerType, filters.insurance])
+  }, [filters.dateFrom, filters.dateTo, filters.agingGroup, filters.customerType, filters.insurance, dateField])
 
   return { data, loading }
 }

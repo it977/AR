@@ -138,7 +138,8 @@ export default function DailySales() {
   const { filters, updateFilters } = useGlobalFilters()
 
   const { data: rows,      loading }  = useARData(filters)
-  const { data: debtRows }            = usePayoffData(filters)
+  // Collection = ເງິນທີ່ເກັບໄດ້ໃນວັນທີ filter (cash flow view) → filter ດ້ວຍ date_paid
+  const { data: debtRows }            = usePayoffData({ ...filters, payoffDateField: 'date_paid' })
 
   const kpis      = useMemo(() => computeKPIs(rows || []), [rows])
   const shiftData = useMemo(() => computeShiftData(rows || []), [rows])

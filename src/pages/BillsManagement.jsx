@@ -46,6 +46,29 @@ const BADGE = {
   B2B: 'bg-violet-100 text-violet-700',
 }
 
+const CHANNEL_BADGE = {
+  cash:  'bg-emerald-50 text-emerald-700 border-emerald-200',
+  bcel:  'bg-red-50 text-red-700 border-red-200',
+  bcel2: 'bg-red-50 text-red-700 border-red-200',
+  ldb:   'bg-sky-50 text-sky-700 border-sky-200',
+}
+const CHANNEL_LABEL = { cash: 'Cash', bcel: 'BCEL', bcel2: 'BCEL2', ldb: 'LDB' }
+
+function PaymentChannels({ row }) {
+  const channels = ['cash','bcel','bcel2','ldb'].filter(k => (row[k] || 0) > 0)
+  if (!channels.length) return <span className="text-slate-300 text-xs">—</span>
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {channels.map(k => (
+        <span key={k} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-semibold ${CHANNEL_BADGE[k]}`}
+              title={`${CHANNEL_LABEL[k]}: ${fmt(row[k])}`}>
+          {CHANNEL_LABEL[k]}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 export default function BillsManagement() {
   const [rows, setRows]       = useState([])
   const [total, setTotal]     = useState(0)
@@ -488,7 +511,7 @@ export default function BillsManagement() {
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1280px]">
+          <table className="w-full min-w-[1380px]">
             <thead>
               <tr className="border-b border-slate-100">
                 <th className="table-th">ເລກໃບບິນ</th>
@@ -498,6 +521,7 @@ export default function BillsManagement() {
                 <th className="table-th">OPD/IPD</th>
                 <th className="table-th">ລາຍຮັບຕາມບໍລິການ</th>
                 <th className="table-th text-right">ຍອດລວມສຸດທິ</th>
+                <th className="table-th">ທະນາຄານ</th>
                 <th className="table-th text-right">ໜີ້</th>
                 <th className="table-th">ກະ</th>
                 <th className="table-th">ຜູ້ບັນທຶກ</th>
@@ -506,9 +530,9 @@ export default function BillsManagement() {
             </thead>
             <tbody className="divide-y divide-slate-50">
               {loading ? (
-                <tr><td colSpan={11} className="table-td text-center py-12 text-slate-400">ກຳລັງໂຫຼດ...</td></tr>
+                <tr><td colSpan={12} className="table-td text-center py-12 text-slate-400">ກຳລັງໂຫຼດ...</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={11} className="table-td text-center py-12 text-slate-400">ບໍ່ມີຂໍ້ມູນ</td></tr>
+                <tr><td colSpan={12} className="table-td text-center py-12 text-slate-400">ບໍ່ມີຂໍ້ມູນ</td></tr>
               ) : rows.map(row => (
                 <tr key={row.id} className="hover:bg-slate-50 transition-colors">
                   <td className="table-td font-mono text-xs font-semibold text-primary-600">{row.bill_no}</td>
@@ -537,6 +561,7 @@ export default function BillsManagement() {
                     </div>
                   </td>
                   <td className="table-td text-right font-mono text-xs">{fmt(row.grand_total)}</td>
+                  <td className="table-td"><PaymentChannels row={row} /></td>
                   <td className="table-td text-right font-mono text-xs">
                     {row.debt > 0 ? (
                       <span className="text-red-600 font-semibold">{fmt(row.debt)}</span>
