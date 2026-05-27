@@ -178,7 +178,7 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
           <Field label="ສ່ວນຫຼຸດ (Discounts)">
             <input type="number" min="0" step="any" value={form.discounts} onChange={num('discounts')} className={numCls} />
           </Field>
-          <Field label="ຍອດລວມ (Grand Total)" hint="ຄຳນວນອັດຕະໂນມັດ">
+          <Field label="ຍອດລວມສຸດທິ" hint="ຄຳນວນອັດຕະໂນມັດ">
             <input type="number" value={form.grand_total} readOnly className={numCls + ' bg-slate-50 cursor-not-allowed'} />
           </Field>
           <Field label="ເງິນສົດ (Cash)">
@@ -193,7 +193,7 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
           <Field label="LDB Bank">
             <input type="number" min="0" step="any" value={form.ldb} onChange={num('ldb')} className={numCls} />
           </Field>
-          <Field label="ໜີ້ຄ້າງ (Debt)" hint="ຄຳນວນອັດຕະໂນມັດ">
+          <Field label="ໜີ້ຄ້າງ" hint="ຄຳນວນອັດຕະໂນມັດ">
             <input type="number" min="0" step="any" value={form.debt} onChange={num('debt')}
               className={numCls + ' text-red-600 font-semibold'} />
           </Field>
@@ -216,8 +216,8 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
       {/* Actions */}
       <div className="flex items-center justify-between pt-3 border-t border-slate-100">
         <div className="text-xs text-slate-400">
-          Grand Total: <span className="font-bold text-slate-700">{new Intl.NumberFormat().format(form.grand_total)}</span> LAK  |
-          Debt: <span className="font-bold text-red-600">{new Intl.NumberFormat().format(form.debt)}</span> LAK
+          ຍອດລວມສຸດທິ: <span className="font-bold text-slate-700">{new Intl.NumberFormat().format(form.grand_total)}</span> LAK  |
+          ໜີ້ຄ້າງ: <span className="font-bold text-red-600">{new Intl.NumberFormat().format(form.debt)}</span> LAK
         </div>
         <div className="flex flex-col gap-2 items-end">
           {submitError && (

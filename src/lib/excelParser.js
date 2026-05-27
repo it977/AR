@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx'
+import { summarizeInstallments, calcAging, normalizeAgingGroup } from './debtUtils'
 
 const MAP_BILLS = {
   'Date': 'date',
@@ -56,6 +57,15 @@ const MAP_DEBT = {
   'Transfer Payment by LDB Debt': 'ldb_paid',
   'Balance': 'balance',
   'Due date': 'due_date',
+  'Payment 1 Date': 'payment_1_date',
+  'Payment 1 Method': 'payment_1_method',
+  'Payment 1 Amount': 'payment_1_amount',
+  'Payment 2 Date': 'payment_2_date',
+  'Payment 2 Method': 'payment_2_method',
+  'Payment 2 Amount': 'payment_2_amount',
+  'Payment 3 Date': 'payment_3_date',
+  'Payment 3 Method': 'payment_3_method',
+  'Payment 3 Amount': 'payment_3_amount',
   'Aging Group': 'aging_group',
 }
 
@@ -71,7 +81,7 @@ const MAP_CASHFLOW = {
   'Outstanding Debt': 'outstanding_debt',
 }
 
-const DATE_COLS = new Set(['date', 'date_paid', 'submit_date', 'due_date'])
+const DATE_COLS = new Set(['date', 'date_paid', 'submit_date', 'due_date', 'payment_1_date', 'payment_2_date', 'payment_3_date'])
 
 const NUMERIC_COLS = new Set([
   'svc_opd','svc_diag_image','svc_ipd','svc_surg_ot','svc_emergency',
@@ -79,6 +89,7 @@ const NUMERIC_COLS = new Set([
   'total','discounts','grand_total','cash','bcel','bcel2','ldb',
   'debt','prepayment',
   'debt_amount','amount_paid','cash_paid','bcel_paid','bcel2_paid','ldb_paid','balance',
+  'payment_1_amount','payment_2_amount','payment_3_amount',
   'total_actual_income','outstanding_debt',
 ])
 
@@ -144,6 +155,8 @@ function parseRow(row, columnMap) {
         const n = parseFloat(String(val).replace(/,/g, ''))
         out[dbCol] = isNaN(n) ? 0 : n
       }
+    } else if (dbCol === 'aging_group') {
+      out[dbCol] = normalizeAgingGroup(val) || val
     } else {
       out[dbCol] = val
     }
@@ -174,6 +187,29 @@ function parseSheet(sheet, columnMap, addDebtStatus = false, sheetName = 'Sheet'
   return parsed
 }
 
+function hydrateDebtInstallments(row) {
+  const installments = [1, 2, 3].map(number => ({
+    date: row[`payment_${number}_date`],
+    method: row[`payment_${number}_method`],
+    amount: row[`payment_${number}_amount`],
+  }))
+  const summary = summarizeInstallments(installments)
+  if (summary.total <= 0) return { ...row, aging_group: normalizeAgingGroup(row.aging_group) || calcAging(row) }
+
+  const amountPaid = row.amount_paid || summary.total
+  return {
+    ...row,
+    amount_paid: amountPaid,
+    cash_paid: row.cash_paid || summary.channelTotals.cash,
+    bcel_paid: row.bcel_paid || summary.channelTotals.bcel,
+    bcel2_paid: row.bcel2_paid || summary.channelTotals.bcel2,
+    ldb_paid: row.ldb_paid || summary.channelTotals.ldb,
+    date_paid: row.date_paid || summary.latestDate,
+    balance: row.balance || Math.max(0, (row.debt_amount || 0) - amountPaid),
+    aging_group: normalizeAgingGroup(row.aging_group) || calcAging(row),
+  }
+}
+
 export function parseExcelFile(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -191,7 +227,7 @@ export function parseExcelFile(file) {
           if (lower.includes('daily')) {
             result.bills = parseSheet(sheet, MAP_BILLS, true, name)
           } else if (lower.includes('pay')) {
-            const debtRows = parseSheet(sheet, MAP_DEBT, false, name)
+            const debtRows = parseSheet(sheet, MAP_DEBT, false, name).map(hydrateDebtInstallments)
             result.debt = debtRows
             result.billUpdates = debtRows
               .filter(r => r.bill_no && r.date)

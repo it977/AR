@@ -7,6 +7,7 @@ import PDFButton from '../components/PDFButton'
 import { useARData, usePayoffData } from '../lib/useARData'
 import { formatNumber } from '../lib/excelParser'
 import { useGlobalFilters } from '../context/FilterContext'
+import { calcAging, getAgingLabel } from '../lib/debtUtils'
 
 const LOOKER_OUTSTANDING_FALLBACK = {
   totalOutstanding: 1842393109,
@@ -23,6 +24,16 @@ const LOOKER_OUTSTANDING_FALLBACK = {
 
 const CUSTOMER_TYPES = ['GN', 'INS', 'B2B', 'iNS']
 
+function agingBadgeClass(group) {
+  if (group === '46-60+ Days') return 'bg-red-100 text-red-700'
+  if (group === '31-45 Days') return 'bg-orange-100 text-orange-700'
+  if (group === '16-30 Days') return 'bg-yellow-100 text-yellow-700'
+  if (group === '1-15 Days') return 'bg-green-100 text-green-700'
+  if (group === 'Pay in installments') return 'bg-violet-100 text-violet-700'
+  if (group === 'Due on schedule') return 'bg-sky-100 text-sky-700'
+  return 'bg-slate-100 text-slate-600'
+}
+
 export default function OutstandingDebt() {
   const { filters, updateFilters } = useGlobalFilters()
   const [page, setPage] = useState(1)
@@ -33,7 +44,10 @@ export default function OutstandingDebt() {
   const hasActiveFilters = !!(filters.dateFrom || filters.dateTo || filters.customerType || filters.opdIpd || filters.workload)
   const useLookerFallback = !hasActiveFilters && rows?.length === 4763 && debtRows?.length === 1285
 
-  const outstanding = useMemo(() => (rows || []).filter(r => r.debt > 0), [rows])
+  const outstanding = useMemo(() => {
+    const source = debtRows?.length ? debtRows : rows
+    return (source || []).filter(r => (r.balance ?? r.debt ?? 0) > 0)
+  }, [debtRows, rows])
   const totalOutstanding = useMemo(() => {
     if (useLookerFallback) return LOOKER_OUTSTANDING_FALLBACK.totalOutstanding
     const fromDebt = (debtRows || []).reduce((s, r) => s + (r.debt_amount || 0), 0)
@@ -120,7 +134,7 @@ export default function OutstandingDebt() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="section-title">ໜີ້ຄ້າງຊຳລະ</h2>
-          <p className="text-sm text-slate-500">Outstanding Debt Report</p>
+          <p className="text-sm text-slate-500">ລາຍງານໜີ້ຄ້າງຊຳລະ</p>
         </div>
         <div className="flex flex-wrap items-center gap-2" data-pdf-hidden="true">
           <PDFButton elementId="full-report-export" filename="AR_Finance_LXH_Report" label="ດາວໂຫລດ PDF" />
@@ -135,7 +149,7 @@ export default function OutstandingDebt() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <KPICard label="ໜີ້ຄ້າງທັງໝົດ" sublabel="Total Outstanding"
+        <KPICard label="ໜີ້ຄ້າງທັງໝົດ" sublabel="ຍອດຄ້າງລວມ"
           value={totalOutstanding} color="red" fullNumber
           icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" /></svg>}
           badge={`${formatNumber(totalDebtBills)} ໃບ`} badgeColor="bg-red-100 text-red-700"
@@ -153,7 +167,7 @@ export default function OutstandingDebt() {
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <div className="chart-card">
           <h3 className="section-title mb-1">ໜີ້ຕາມປະເພດລູກຄ້າ</h3>
-          <p className="text-xs text-slate-400 mb-4">Debt by Customer Type</p>
+          <p className="text-xs text-slate-400 mb-4">ໜີ້ຄ້າງຕາມປະເພດລູກຄ້າ</p>
           {rows?.length > 0 ? (
             <ReactApexChart
               options={byTypeChartOpts}
@@ -168,7 +182,7 @@ export default function OutstandingDebt() {
 
         <div className="chart-card">
           <h3 className="section-title mb-1">ທ່າອ່ຽງໜີ້ຄ້າງ</h3>
-          <p className="text-xs text-slate-400 mb-4">Outstanding Debt Trend</p>
+          <p className="text-xs text-slate-400 mb-4">ແນວໂນ້ມໜີ້ຄ້າງຊຳລະ</p>
           {trendData.length > 0 ? (
             <ReactApexChart options={trendOpts} series={[{ name: 'Outstanding', data: trendData }]} type="area" height={260} />
           ) : <EmptyState message="ບໍ່ມີຂໍ້ມູນ" />}
@@ -247,15 +261,12 @@ export default function OutstandingDebt() {
                     </td>
                     <td className="table-td text-xs text-slate-500">{r.insurance || '—'}</td>
                     <td className="table-td text-right font-mono text-xs">{formatNumber(r.grand_total)}</td>
-                    <td className="table-td text-right font-mono text-xs font-semibold text-red-600">{formatNumber(r.debt)}</td>
+                    <td className="table-td text-right font-mono text-xs font-semibold text-red-600">{formatNumber(r.balance ?? r.debt)}</td>
                     <td className="table-td">
-                      <span className={`badge text-[10px] ${
-                        r.aging_group === '46-60+ Days' ? 'bg-red-100 text-red-700' :
-                        r.aging_group === '31-45 Days'  ? 'bg-orange-100 text-orange-700' :
-                        r.aging_group === '16-30 Days'  ? 'bg-yellow-100 text-yellow-700' :
-                        r.aging_group === '0-15 Days'   ? 'bg-green-100 text-green-700' :
-                        'bg-slate-100 text-slate-600'
-                      }`}>{r.aging_group || 'N'}</span>
+                      {(() => {
+                        const aging = calcAging(r)
+                        return <span className={`badge text-[10px] ${agingBadgeClass(aging)}`}>{getAgingLabel(aging)}</span>
+                      })()}
                     </td>
                   </tr>
                 ))}

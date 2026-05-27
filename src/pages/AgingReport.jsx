@@ -7,9 +7,13 @@ import PDFButton from '../components/PDFButton'
 import { usePayoffData, computeAgingData } from '../lib/useARData'
 import { formatLAK, formatNumber } from '../lib/excelParser'
 import { useGlobalFilters } from '../context/FilterContext'
+import { getAgingLabel } from '../lib/debtUtils'
 
 const AGING_CONFIG = [
-  { key: '0-15 Days', label: '0–15 ວັນ', color: '#10b981', bg: 'bg-emerald-50', border: 'border-emerald-100', text: 'text-emerald-700', badgeBg: 'bg-emerald-100 text-emerald-700' },
+  { key: 'N', label: getAgingLabel('N'), color: '#94a3b8', bg: 'bg-slate-50', border: 'border-slate-100', text: 'text-slate-700', badgeBg: 'bg-slate-100 text-slate-700' },
+  { key: 'Due on schedule', label: 'ຢູ່ໃນກຳນົດ', color: '#0ea5e9', bg: 'bg-sky-50', border: 'border-sky-100', text: 'text-sky-700', badgeBg: 'bg-sky-100 text-sky-700' },
+  { key: 'Pay in installments', label: 'ຈ່າຍເປັນງວດ', color: '#8b5cf6', bg: 'bg-violet-50', border: 'border-violet-100', text: 'text-violet-700', badgeBg: 'bg-violet-100 text-violet-700' },
+  { key: '1-15 Days', label: '1–15 ວັນ', color: '#10b981', bg: 'bg-emerald-50', border: 'border-emerald-100', text: 'text-emerald-700', badgeBg: 'bg-emerald-100 text-emerald-700' },
   { key: '16-30 Days', label: '16–30 ວັນ', color: '#f59e0b', bg: 'bg-amber-50', border: 'border-amber-100', text: 'text-amber-700', badgeBg: 'bg-amber-100 text-amber-700' },
   { key: '31-45 Days', label: '31–45 ວັນ', color: '#f97316', bg: 'bg-orange-50', border: 'border-orange-100', text: 'text-orange-700', badgeBg: 'bg-orange-100 text-orange-700' },
   { key: '46-60+ Days', label: '46–60+ ວັນ', color: '#ef4444', bg: 'bg-red-50', border: 'border-red-100', text: 'text-red-700', badgeBg: 'bg-red-100 text-red-700' },
@@ -67,7 +71,7 @@ export default function AgingReport() {
     labels: AGING_CONFIG.map(a => a.label),
     colors: AGING_CONFIG.map(a => a.color),
     legend: { position: 'bottom', labels: { colors: '#64748b' } },
-    plotOptions: { pie: { donut: { size: '65%', labels: { show: true, total: { show: true, label: 'Total', color: '#64748b', formatter: () => formatLAK(totalDebt) } } } } },
+    plotOptions: { pie: { donut: { size: '65%', labels: { show: true, total: { show: true, label: 'ລວມ', color: '#64748b', formatter: () => formatLAK(totalDebt) } } } } },
     dataLabels: { formatter: val => `${val.toFixed(1)}%` },
     tooltip: { y: { formatter: v => `${formatNumber(v)} LAK` } },
   }
@@ -100,7 +104,7 @@ export default function AgingReport() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="section-title">ລາຍງານອາຍຸໜີ້</h2>
-          <p className="text-sm text-slate-500">Debt Aging Report</p>
+          <p className="text-sm text-slate-500">ລາຍງານອາຍຸໜີ້</p>
         </div>
         <div className="flex flex-wrap items-center gap-2" data-pdf-hidden="true">
           <PDFButton elementId="full-report-export" filename="AR_Finance_LXH_Report" label="ດາວໂຫລດ PDF" />
@@ -111,7 +115,7 @@ export default function AgingReport() {
           <input
             type="text"
             value={filters.insurance || ''}
-            onChange={e => setFilters(f => ({ ...f, insurance: e.target.value }))}
+            onChange={e => updateFilters({ insurance: e.target.value })}
             placeholder="ຄົ້ນຫາປະກັນ..."
             className="text-xs border border-slate-200 rounded-lg px-3 py-1.5 bg-white text-slate-700 outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-100 h-[34px] w-36"
           />
@@ -121,7 +125,7 @@ export default function AgingReport() {
       {/* Top KPIs */}
       <div className="grid grid-cols-2 gap-4">
         <KPICard
-          label="ໜີ້ທັງໝົດ" sublabel="Total Outstanding Debt"
+          label="ໜີ້ທັງໝົດ" sublabel="ໜີ້ຄ້າງລວມ"
           value={totalDebt} color="red"
           icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>}
           badge={`${totalBills} ໃບ`} badgeColor="bg-red-100 text-red-700"
@@ -132,7 +136,7 @@ export default function AgingReport() {
       </div>
 
       {/* Aging bucket cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4">
         {AGING_CONFIG.map(a => {
           const d = agingData[a.key] || { balance: 0, bills: 0 }
           const pct = totalDebt > 0 ? (d.balance / totalDebt * 100).toFixed(1) : '0.0'
@@ -159,7 +163,7 @@ export default function AgingReport() {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="chart-card xl:col-span-2">
           <h3 className="section-title mb-1">ຍອດໜີ້ຕາມອາຍຸ</h3>
-          <p className="text-xs text-slate-400 mb-4">Balance by Aging Bucket (LAK)</p>
+          <p className="text-xs text-slate-400 mb-4">ຍອດໜີ້ຕາມຊ່ວງອາຍຸໜີ້ (LAK)</p>
           {totalDebt > 0 ? (
             <ReactApexChart
               options={agingBarOpts}
@@ -171,7 +175,7 @@ export default function AgingReport() {
 
         <div className="chart-card">
           <h3 className="section-title mb-1">ສ່ວນແບ່ງ Aging</h3>
-          <p className="text-xs text-slate-400 mb-4">Aging Distribution</p>
+          <p className="text-xs text-slate-400 mb-4">ສັດສ່ວນອາຍຸໜີ້</p>
           {totalDebt > 0 ? (
             <ReactApexChart
               options={agingPieOpts}
@@ -187,7 +191,7 @@ export default function AgingReport() {
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div>
             <h3 className="section-title">ໜີ້ຄ້າງຕາມບໍລິສັດປະກັນ</h3>
-            <p className="text-xs text-slate-400 mt-0.5">Outstanding by Insurance Company</p>
+            <p className="text-xs text-slate-400 mt-0.5">ໜີ້ຄ້າງຕາມບໍລິສັດປະກັນ</p>
           </div>
           <input
             type="text"

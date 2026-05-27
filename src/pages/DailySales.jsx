@@ -257,7 +257,7 @@ export default function DailySales() {
     colors: ['#818cf8', '#22d3ee', '#34d399'],
     dataLabels: { ...revenueChartOpts.dataLabels, formatter: v => formatNumber(v) },
     yaxis: { labels: { formatter: v => formatNumber(v), style: { colors: '#94a3b8', fontSize: '11px' } } },
-    tooltip: { y: { formatter: v => `${formatNumber(v)} Bills` } },
+    tooltip: { y: { formatter: v => `${formatNumber(v)} ໃບ` } },
   }
 
   const dailyTrendOpts = {
@@ -291,8 +291,8 @@ export default function DailySales() {
   }, [rows])
 
   const trendSeries = [
-    { name: 'Total Sales',  data: dailyByDate.map(r => ({ x: r.date, y: r.income })) },
-    { name: 'Outstanding',  data: dailyByDate.map(r => ({ x: r.date, y: r.debt }))   },
+    { name: 'ຍອດຂາຍລວມ',  data: dailyByDate.map(r => ({ x: r.date, y: r.income })) },
+    { name: 'ໜີ້ຄ້າງ',  data: dailyByDate.map(r => ({ x: r.date, y: r.debt }))   },
   ]
 
   if (loading) return <div className="p-6"><LoadingSpinner /></div>
@@ -304,7 +304,7 @@ export default function DailySales() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold text-slate-800">ລາຍງານປະຈຳວັນ</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Daily Sales Report • ໜ່ວຍ: LAK</p>
+          <p className="text-sm text-slate-500 mt-0.5">ລາຍງານຍອດຂາຍປະຈຳວັນ • ໜ່ວຍ: LAK</p>
         </div>
         <div className="flex flex-wrap items-center gap-2" data-pdf-hidden="true">
           <PDFButton elementId="full-report-export" filename="AR_Finance_LXH_Report" label="ດາວໂຫລດ PDF" />
@@ -320,11 +320,11 @@ export default function DailySales() {
 
       {/* ── Row 1: 5 Top KPIs (PDF style) ── */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <TopCard label="ຍອດຂາຍລວມ"  sublabel="Total Sales"     value={viewKpis.totalSalesGross}  color="indigo" />
+        <TopCard label="ຍອດຂາຍລວມ"  sublabel="ຍອດກ່ອນຫັກສ່ວນຫຼຸດ"     value={viewKpis.totalSalesGross}  color="indigo" />
         <TopCard label="ສ່ວນຫຼຸດ"     sublabel="Discounts"       value={viewKpis.totalDiscounts}    color="orange" />
-        <TopCard label="ຍອດຂາຍສຸດທິ"  sublabel="Actual Total Sale" value={viewKpis.totalSales}    color="teal" />
-        <TopCard label="ໃບບິນທັງໝົດ"  sublabel="Total Bills"     value={viewKpis.totalBills}  isLAK={false} color="blue"   />
-        <TopCard label="ລູກຄ້າທັງໝົດ" sublabel="Total Customers" value={viewKpis.uniqueCustomers} isLAK={false} color="purple" />
+        <TopCard label="ຍອດຂາຍສຸດທິ"  sublabel="ຍອດຂາຍທີ່ແທ້ຈິງ" value={viewKpis.totalSales}    color="teal" />
+        <TopCard label="ໃບບິນທັງໝົດ"  sublabel="ຈຳນວນໃບບິນລວມ"     value={viewKpis.totalBills}  isLAK={false} color="blue"   />
+        <TopCard label="ລູກຄ້າທັງໝົດ" sublabel="ຈຳນວນລູກຄ້າລວມ" value={viewKpis.uniqueCustomers} isLAK={false} color="purple" />
       </div>
 
       {/* ── Row 2: Two Breakdown Sections ── */}
@@ -334,21 +334,21 @@ export default function DailySales() {
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
           <div className="flex items-center gap-2 mb-4">
             <div className="w-1 h-5 rounded-full bg-indigo-500" />
-            <h3 className="font-bold text-slate-700 text-sm">Total Sales Breakdown</h3>
+            <h3 className="font-bold text-slate-700 text-sm">ລາຍລະອຽດຍອດຂາຍ</h3>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <BreakdownCard
-              label="Actual Income" sublabel="ລາຍຮັບຈິງ (Daily Income + Collection)"
+              label="ລາຍຮັບຈິງ" sublabel="ລາຍຮັບປະຈຳວັນ + ຍອດເກັບໜີ້"
               value={actualIncomeTotal} color="green"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>}
             />
             <BreakdownCard
-              label="Outstanding Debts" sublabel="ໜີ້ຄ້າງທັງໝົດ"
+              label="ໜີ້ຄ້າງທັງໝົດ" sublabel="ໜີ້ທີ່ຍັງຕ້ອງຕິດຕາມ"
               value={viewKpis.outstandingDebt} color="red"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>}
             />
             <BreakdownCard
-              label="Daily Income" sublabel="ລາຍຮັບສຸດທິ (Actual Total Sale - Outstanding)"
+              label="ລາຍຮັບປະຈຳວັນ" sublabel="ຍອດຂາຍສຸດທິ - ໜີ້ຄ້າງ"
               value={dailyIncome} color="sky"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>}
             />
@@ -364,26 +364,26 @@ export default function DailySales() {
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
           <div className="flex items-center gap-2 mb-4">
             <div className="w-1 h-5 rounded-full bg-emerald-500" />
-            <h3 className="font-bold text-slate-700 text-sm">Total Bills Breakdown</h3>
+            <h3 className="font-bold text-slate-700 text-sm">ລາຍລະອຽດໃບບິນ</h3>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <BreakdownCard
-              label="Actual Bills Paid" sublabel="ໃບບິນຊຳລະແລ້ວ"
+              label="ໃບບິນຊຳລະແລ້ວ" sublabel="ຈ່າຍແລ້ວ"
               value={viewKpis.paidBills} isLAK={false} color="green"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>}
             />
             <BreakdownCard
-              label="Outstanding Bills" sublabel="ໃບບິນຄ້າງ"
+              label="ໃບບິນຄ້າງ" sublabel="ຍັງບໍ່ຊຳລະ"
               value={viewKpis.outstandingBills} isLAK={false} color="red"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>}
             />
             <BreakdownCard
-              label="Discounted Bills" sublabel="ໃບບິນສ່ວນຫຼຸດ"
+              label="ໃບບິນມີສ່ວນຫຼຸດ" sublabel="ໃບບິນສ່ວນຫຼຸດ"
               value={viewKpis.discountedBills} isLAK={false} color="amber"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>}
             />
             <BreakdownCard
-              label="Collection Bills" sublabel="ໃບບິນທີ່ເກັບໄດ້ (Pay off)"
+              label="ໃບບິນເກັບໜີ້ໄດ້" sublabel="ໃບບິນທີ່ປິດຍອດແລ້ວ"
               value={viewKpis.collectionBills} isLAK={false} color="purple"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>}
             />
@@ -445,11 +445,11 @@ export default function DailySales() {
         </div>
         <div className="chart-card">
           <h3 className="section-title mb-1">ໃບບິນຕາມກະວຽກ</h3>
-          <p className="text-xs text-slate-400 mb-4">Bills Count by Shift</p>
+          <p className="text-xs text-slate-400 mb-4">ຈຳນວນໃບບິນຕາມກະວຽກ</p>
           {rows?.length ? (
             <ReactApexChart
               options={billsChartOpts}
-              series={[{ name: 'Bills', data: SHIFTS.map(s => viewShiftData[s]?.bills || 0) }]}
+              series={[{ name: 'ໃບບິນ', data: SHIFTS.map(s => viewShiftData[s]?.bills || 0) }]}
               type="bar" height={260}
             />
           ) : <EmptyState message="ບໍ່ມີຂໍ້ມູນ" sublabel="ກະລຸນາອັບໂຫຼດ Excel ກ່ອນ" />}
@@ -459,7 +459,7 @@ export default function DailySales() {
       {/* ── Row 5: Daily trend ── */}
       <div className="chart-card">
         <h3 className="section-title mb-1">ທ່າອ່ຽງຍອດຂາຍລາຍວັນ</h3>
-        <p className="text-xs text-slate-400 mb-4">Daily Sales Trend</p>
+        <p className="text-xs text-slate-400 mb-4">ແນວໂນ້ມຍອດຂາຍປະຈຳວັນ</p>
         {dailyByDate.length > 0 ? (
           <ReactApexChart options={dailyTrendOpts} series={trendSeries} type="bar" height={280} />
         ) : <EmptyState message="ບໍ່ມີຂໍ້ມູນ" sublabel="ກະລຸນາອັບໂຫຼດ Excel ກ່ອນ" />}

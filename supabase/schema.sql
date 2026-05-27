@@ -86,9 +86,20 @@ create table if not exists ar_debt (
   bcel2_paid      numeric(18,2) default 0,
   ldb_paid        numeric(18,2) default 0,
 
+  -- ການຊຳລະເປັນງວດ (ສູງສຸດ 3 ຄັ້ງ)
+  payment_1_date   date,
+  payment_1_method text,
+  payment_1_amount numeric(18,2) default 0,
+  payment_2_date   date,
+  payment_2_method text,
+  payment_2_amount numeric(18,2) default 0,
+  payment_3_date   date,
+  payment_3_method text,
+  payment_3_amount numeric(18,2) default 0,
+
   balance         numeric(18,2) default 0,  -- ຍອດຄ້າງ
   due_date        date,
-  aging_group     text,  -- 'N' | '0-15 Days' | '16-30 Days' | '31-45 Days' | '46-60+ Days'
+  aging_group     text,  -- 'N' | 'Due on schedule' | 'Pay in installments' | '1-15 Days' | '16-30 Days' | '31-45 Days' | '46-60+ Days'
   source_key      text,
 
   created_at      timestamptz default now(),

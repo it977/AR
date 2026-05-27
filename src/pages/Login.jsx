@@ -7,18 +7,18 @@ function formatLoginError(error) {
   const lowerMessage = message.toLowerCase()
 
   if (lowerMessage.includes('invalid login credentials')) {
-    return 'Email or password is not correct. Please check the account in Supabase Authentication.'
+    return 'ອີເມວ ຫຼື ລະຫັດຜ່ານບໍ່ຖືກ ກະລຸນາກວດບັນຊີໃນລະບົບຢືນຢັນຂອງ Supabase'
   }
 
   if (lowerMessage.includes('email not confirmed')) {
-    return 'This email has not been confirmed yet. In Supabase, open Authentication > Users and confirm the user, or disable email confirmation.'
+    return 'ອີເມວນີ້ຍັງບໍ່ໄດ້ຢືນຢັນ ໃຫ້ເຂົ້າໜ້າຈັດການຜູ້ໃຊ້ຂອງ Supabase ແລ້ວຢືນຢັນຜູ້ໃຊ້ ຫຼື ປິດການຢືນຢັນອີເມວ'
   }
 
   if (lowerMessage.includes('failed to fetch') || lowerMessage.includes('network')) {
-    return 'Cannot connect to Supabase. Please check VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in the website environment.'
+    return 'ເຊື່ອມຕໍ່ Supabase ບໍ່ໄດ້ ກະລຸນາກວດ VITE_SUPABASE_URL ແລະ VITE_SUPABASE_ANON_KEY ໃນຕົວແປລະບົບຂອງເວັບ'
   }
 
-  return message || 'Login failed. Please try again.'
+  return message || 'ເຂົ້າລະບົບບໍ່ສຳເລັດ ກະລຸນາລອງໃໝ່'
 }
 
 export default function Login() {
@@ -61,10 +61,10 @@ export default function Login() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 11h.01M12 11h.01M15 11h.01M4 19h16a2 2 0 002-2V7a2 2 0 00-2-2H4a2 2 0 00-2 2v10a2 2 0 002 2z" />
               </svg>
             </div>
-            <p className="mt-8 text-sm font-semibold uppercase tracking-[0.28em] text-primary-200">OneMeds Dashboard</p>
+            <p className="mt-8 text-sm font-semibold uppercase tracking-[0.28em] text-primary-200">ແດຊບອດ OneMeds</p>
             <h1 className="mt-3 text-4xl font-black tracking-tight md:text-5xl">AR Finance System by No V1</h1>
             <p className="mt-5 max-w-lg text-sm leading-7 text-slate-300">
-              Sign in to access finance dashboards, bill management, debt collection, Excel uploads, and PDF exports according to your role.
+              ເຂົ້າລະບົບເພື່ອເບິ່ງແດຊບອດການເງິນ, ຈັດການໃບບິນ, ຕິດຕາມໜີ້ຄ້າງ, ອັບໂຫຼດ Excel ແລະ ສົ່ງອອກ PDF ຕາມສິດຂອງທ່ານ.
             </p>
           </div>
         </section>
@@ -72,9 +72,9 @@ export default function Login() {
         <section className="flex items-center justify-center bg-slate-50 px-6 py-10 text-slate-900">
           <form onSubmit={handleSubmit} className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-200/60">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-primary-600">Secure Login</p>
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-primary-600">ເຂົ້າລະບົບປອດໄພ</p>
               <h2 className="mt-2 text-2xl font-black text-slate-900">ເຂົ້າລະບົບ</h2>
-              <p className="mt-1 text-sm text-slate-500">Use your Supabase Auth account.</p>
+              <p className="mt-1 text-sm text-slate-500">ໃຊ້ບັນຊີ Supabase Auth ຂອງທ່ານ</p>
             </div>
 
             {error && (
@@ -84,7 +84,7 @@ export default function Login() {
             )}
 
             <label className="mt-6 block">
-              <span className="text-sm font-semibold text-slate-700">Email</span>
+              <span className="text-sm font-semibold text-slate-700">ອີເມວ</span>
               <input
                 type="email"
                 value={email}
@@ -97,7 +97,7 @@ export default function Login() {
             </label>
 
             <label className="mt-4 block">
-              <span className="text-sm font-semibold text-slate-700">Password</span>
+              <span className="text-sm font-semibold text-slate-700">ລະຫັດຜ່ານ</span>
               <input
                 type="password"
                 value={password}
@@ -114,7 +114,7 @@ export default function Login() {
               disabled={submitting}
               className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-primary-600/20 transition hover:bg-primary-700 disabled:cursor-not-allowed disabled:bg-primary-300"
             >
-              {submitting ? 'Signing in...' : 'Login'}
+              {submitting ? 'ກຳລັງເຂົ້າລະບົບ...' : 'ເຂົ້າລະບົບ'}
             </button>
           </form>
         </section>

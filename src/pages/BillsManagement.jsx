@@ -8,6 +8,7 @@ import BillForm from '../components/forms/BillForm'
 import LoadingSpinner from '../components/LoadingSpinner'
 import Can from '../components/Can'
 import { PERMISSIONS } from '../lib/rbac'
+import { DEFAULT_DUE_DAYS, calcAging, calcDueDate, todayIso } from '../lib/debtUtils'
 
 const DAILY_HEADERS = [
   'Date','Week','Workload','Bill No','Insite-Onsite','OPD-IPD',
@@ -56,6 +57,7 @@ export default function BillsManagement() {
   const [workload, setWorkload] = useState('')
 
   const [kpis, setKpis] = useState({ total_grand: 0, total_collected: 0, total_debt: 0 })
+  const [insuranceDueDays, setInsuranceDueDays] = useState({})
 
   const [modal, setModal]         = useState(null)  // null | { mode: 'add'|'edit', row?: {} }
   const [submitError, setSubmitError] = useState('')
@@ -63,15 +65,15 @@ export default function BillsManagement() {
   const [delAll, setDelAll]       = useState(false)
   const navigate = useNavigate()
 
-  function calcAgingGroup(dateStr) {
-    if (!dateStr) return 'N'
-    const days = Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000)
-    if (days <= 0) return 'N'
-    if (days <= 15) return '0-15 Days'
-    if (days <= 30) return '16-30 Days'
-    if (days <= 45) return '31-45 Days'
-    return '46-60+ Days'
-  }
+  const fetchInsuranceDueDays = useCallback(async () => {
+    const { data, error } = await supabase.from('ar_insurance_list').select('name,due_days')
+    if (error) {
+      const fallback = await supabase.from('ar_insurance_list').select('name')
+      setInsuranceDueDays(Object.fromEntries((fallback.data || []).map(item => [item.name, DEFAULT_DUE_DAYS])))
+      return
+    }
+    setInsuranceDueDays(Object.fromEntries((data || []).map(item => [item.name, item.due_days || DEFAULT_DUE_DAYS])))
+  }, [])
 
   const fetchRows = useCallback(async () => {
     setLoading(true)
@@ -118,8 +120,10 @@ export default function BillsManagement() {
 
   useEffect(() => { fetchRows() }, [fetchRows])
   useEffect(() => { fetchKpis() }, [fetchKpis])
+  useEffect(() => { fetchInsuranceDueDays() }, [fetchInsuranceDueDays])
 
   async function upsertArDebt(bill) {
+    const submitDate = todayIso()
     const debtRecord = {
       date: bill.date,
       bill_no: bill.bill_no,
@@ -131,16 +135,20 @@ export default function BillsManagement() {
       workload: bill.workload,
       grand_total: bill.grand_total,
       debt_amount: bill.debt,
-      date_paid: bill.date,
-      submit_date: new Date().toISOString().split('T')[0],
-      amount_paid: (bill.cash || 0) + (bill.bcel || 0) + (bill.bcel2 || 0) + (bill.ldb || 0),
-      cash_paid: bill.cash || 0,
-      bcel_paid: bill.bcel || 0,
-      bcel2_paid: bill.bcel2 || 0,
-      ldb_paid: bill.ldb || 0,
+      date_paid: null,
+      submit_date: submitDate,
+      amount_paid: 0,
+      cash_paid: 0,
+      bcel_paid: 0,
+      bcel2_paid: 0,
+      ldb_paid: 0,
       balance: bill.debt,
-      due_date: bill.date ? new Date(new Date(bill.date).getTime() + 30 * 86400000).toISOString().split('T')[0] : null,
-      aging_group: bill.aging_group || calcAgingGroup(bill.date),
+      due_date: calcDueDate(submitDate, insuranceDueDays, bill.insurance),
+      aging_group: calcAging({
+        submit_date: submitDate,
+        due_date: calcDueDate(submitDate, insuranceDueDays, bill.insurance),
+        balance: bill.debt,
+      }),
     }
     const { data: existing } = await supabase.from('ar_debt').select('id').eq('bill_no', bill.bill_no).limit(1)
     if (existing && existing.length > 0) {
@@ -237,6 +245,7 @@ export default function BillsManagement() {
       }
 
       // ສ້າງຂໍ້ມູນສຳລັບ ar_debt
+      const submitDate = todayIso()
       const debtRecords = billsWithDebt.map(bill => ({
         date: bill.date,
         bill_no: bill.bill_no,
@@ -248,16 +257,20 @@ export default function BillsManagement() {
         workload: bill.workload,
         grand_total: bill.grand_total,
         debt_amount: bill.debt,
-        date_paid: bill.date,
-        submit_date: new Date().toISOString().split('T')[0],
-        amount_paid: (bill.cash || 0) + (bill.bcel || 0) + (bill.bcel2 || 0) + (bill.ldb || 0),
-        cash_paid: bill.cash,
-        bcel_paid: bill.bcel,
-        bcel2_paid: bill.bcel2,
-        ldb_paid: bill.ldb,
+        date_paid: null,
+        submit_date: submitDate,
+        amount_paid: 0,
+        cash_paid: 0,
+        bcel_paid: 0,
+        bcel2_paid: 0,
+        ldb_paid: 0,
         balance: bill.debt,
-        due_date: bill.aging_group ? new Date(new Date(bill.date).getTime() + 30 * 86400000).toISOString().split('T')[0] : null,
-        aging_group: bill.aging_group || calcAgingGroup(bill.date),
+        due_date: calcDueDate(submitDate, insuranceDueDays, bill.insurance),
+        aging_group: calcAging({
+          submit_date: submitDate,
+          due_date: calcDueDate(submitDate, insuranceDueDays, bill.insurance),
+          balance: bill.debt,
+        }),
       }))
 
       // ກວດສອບວ່າມີໃນ ar_debt ແລ້ວຫຼືຍັງ (ຕາມ bill_no)
@@ -269,7 +282,7 @@ export default function BillsManagement() {
       const existingBillNos = new Set(existingDebt?.map(d => d.bill_no) || [])
       const newRecords = debtRecords.filter(r => !existingBillNos.has(r.bill_no))
       if (newRecords.length === 0) {
-        alert('ໃບບິນທັງໝົດຖືກສົ່ງໄປ Debt Management ແລ້ວ')
+        alert('ໃບບິນທັງໝົດຖືກສົ່ງໄປໜ້າຈັດການໜີ້ຄ້າງແລ້ວ')
         setSaving(false)
         return
       }
@@ -280,14 +293,14 @@ export default function BillsManagement() {
 
       try {
         await logAction({
-          action: 'ສົ່ງໜີ້ຄ້າງໄປ Debt Management',
+          action: 'ສົ່ງໜີ້ຄ້າງໄປໜ້າຈັດການໜີ້ຄ້າງ',
           details: `ສົ່ງ ${newRecords.length} ໃບບິນ`,
           amount: newRecords.reduce((s, r) => s + (r.debt_amount || 0), 0)
         })
       } catch (logErr) {
       }
 
-      alert(`ສົ່ງ ${newRecords.length} ໃບບິນ ໄປ Debt Management ສຳເລັດ!`)
+      alert(`ສົ່ງ ${newRecords.length} ໃບບິນ ໄປໜ້າຈັດການໜີ້ຄ້າງສຳເລັດ!`)
       fetchRows()
       fetchKpis()
     } catch (err) {
@@ -429,7 +442,7 @@ export default function BillsManagement() {
                 <th className="table-th">ປະເພດ</th>
                 <th className="table-th">OPD/IPD</th>
                 <th className="table-th">ລາຍຮັບຕາມບໍລິການ</th>
-                <th className="table-th text-right">Grand Total</th>
+                <th className="table-th text-right">ຍອດລວມສຸດທິ</th>
                 <th className="table-th text-right">ໜີ້</th>
                 <th className="table-th">ກະ</th>
                 <th className="table-th">ຜູ້ບັນທຶກ</th>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from './supabase'
+import { AGING_GROUPS, calcAging } from './debtUtils'
 
 // ============================================================
 // Hooks
@@ -215,15 +216,9 @@ export function computeServiceData(rows = []) {
 }
 
 export function computeAgingData(debtRows = []) {
-  const buckets = {
-    'N':          { balance: 0, bills: 0 },
-    '0-15 Days':  { balance: 0, bills: 0 },
-    '16-30 Days': { balance: 0, bills: 0 },
-    '31-45 Days': { balance: 0, bills: 0 },
-    '46-60+ Days':{ balance: 0, bills: 0 },
-  }
+  const buckets = Object.fromEntries(AGING_GROUPS.map(group => [group, { balance: 0, bills: 0 }]))
   debtRows.forEach(r => {
-    const g = r.aging_group || 'N'
+    const g = calcAging(r)
     if (buckets[g]) {
       buckets[g].balance += r.balance || r.debt_amount || 0
       buckets[g].bills   += 1
@@ -233,17 +228,9 @@ export function computeAgingData(debtRows = []) {
 }
 
 export function computeAgingFromBills(rows = []) {
-  const buckets = {
-    'N':           { balance: 0, bills: 0 },
-    '0-15 Days':   { balance: 0, bills: 0 },
-    '16-30 Days':  { balance: 0, bills: 0 },
-    '31-45 Days':  { balance: 0, bills: 0 },
-    '46-60+ Days': { balance: 0, bills: 0 },
-  }
-  const now = Date.now()
+  const buckets = Object.fromEntries(AGING_GROUPS.map(group => [group, { balance: 0, bills: 0 }]))
   rows.forEach(r => {
-    const days = r.date ? Math.max(0, Math.floor((now - new Date(r.date).getTime()) / 86400000)) : 0
-    const key = days <= 0 ? 'N' : days <= 15 ? '0-15 Days' : days <= 30 ? '16-30 Days' : days <= 45 ? '31-45 Days' : '46-60+ Days'
+    const key = calcAging(r)
     buckets[key].balance += r.debt || 0
     buckets[key].bills   += 1
   })

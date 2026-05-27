@@ -23,7 +23,11 @@ const PAYOFF_HEADERS = [
   'Grand Total','Outstanding Debt','Date Paid','Workload Debt','Submission Date',
   'Amount Paid','Cash Received Debt','Transfer Payment by BCEL Debt',
   'Transfer Payment by BCEL 2 Debt','Transfer Payment by LDB Debt',
-  'Balance','Due date','Aging Group',
+  'Balance','Due date',
+  'Payment 1 Date','Payment 1 Method','Payment 1 Amount',
+  'Payment 2 Date','Payment 2 Method','Payment 2 Amount',
+  'Payment 3 Date','Payment 3 Method','Payment 3 Amount',
+  'Aging Group',
 ]
 const SAMPLE_DAILY = [
   ['2026-01-01','Week 1','8AM-4PM','BILL-001','Insite','OPD','GN','','HN001','ສົມສາຍ','Male',
@@ -31,7 +35,8 @@ const SAMPLE_DAILY = [
 ]
 const SAMPLE_PAYOFF = [
   ['2026-01-01','Week 1','8AM-4PM','BILL-INS001','Insite','OPD','INS','APA','HN002','ນາງສີ','Female',
-   500000,500000,'','','',0,0,0,0,0,500000,'2026-01-16','16-30 Days'],
+   500000,500000,'2026-01-10','','2026-01-10',200000,0,200000,0,0,300000,'2026-02-09',
+   '2026-01-10','bcel',200000,'','','','','','Pay in installments'],
 ]
 
 function downloadTemplate() {
@@ -58,6 +63,13 @@ const STEPS = [
 ]
 
 const BATCH_SIZE = 200   // smaller batch to avoid conflicts
+const OPTIONAL_COLUMNS = {
+  ar_debt: [
+    'payment_1_date', 'payment_1_method', 'payment_1_amount',
+    'payment_2_date', 'payment_2_method', 'payment_2_amount',
+    'payment_3_date', 'payment_3_method', 'payment_3_amount',
+  ],
+}
 
 function StepIndicator({ current }) {
   return (
@@ -111,7 +123,7 @@ async function upsertBatch(table, rows) {
   
   uniqueRows.push(...seen.values())
   
-  // ແບ່ງເປັນກຸ່ມຍ່ອຍໆລະ 100 rows ເພື່ອຫຼີກລ່ຽງ conflict
+  // ແບ່ງເປັນກຸ່ມຍ່ອຍໆລະ 100 ແຖວ ເພື່ອຫຼີກລ່ຽງ conflict
   const CHUNK_SIZE = 100
   for (let i = 0; i < uniqueRows.length; i += CHUNK_SIZE) {
     const chunk = uniqueRows.slice(i, i + CHUNK_SIZE)
@@ -120,10 +132,21 @@ async function upsertBatch(table, rows) {
       ? 'source_key'
       : (table === 'ar_bills' ? 'bill_no,date,workload' : 'bill_no,date')
     
-    const { error } = await supabase.from(table).upsert(chunk, {
+    let { error } = await supabase.from(table).upsert(chunk, {
       onConflict: conflictKeyDb,
       ignoreDuplicates: false,
     })
+
+    if (error && OPTIONAL_COLUMNS[table]?.some(col => error.message?.includes(col))) {
+      const optional = new Set(OPTIONAL_COLUMNS[table])
+      const stripped = chunk.map(row => Object.fromEntries(
+        Object.entries(row).filter(([key]) => !optional.has(key))
+      ))
+      ;({ error } = await supabase.from(table).upsert(stripped, {
+        onConflict: conflictKeyDb,
+        ignoreDuplicates: false,
+      }))
+    }
     
     if (error) {
       // ຖ້າມີ conflict ອີກ ໃຫ້ລອງແບ່ງເຄິ່ງນຶ່ງອີກ
@@ -187,30 +210,30 @@ export default function UploadExcel() {
       const grandTotal = billsTotal + debtTotal + cashflowTotal
 
       if (billsTotal > 0) {
-        addLog(`ກຳລັງອັບໂຫຼດ ar_bills (${formatNumber(billsTotal)} rows)...`)
+        addLog(`ກຳລັງອັບໂຫຼດ ar_bills (${formatNumber(billsTotal)} ແຖວ)...`)
         let done = 0
         for (let i = 0; i < billsTotal; i += BATCH_SIZE) {
           await upsertBatch('ar_bills', parsed.bills.slice(i, i + BATCH_SIZE))
           done += Math.min(BATCH_SIZE, billsTotal - i)
           setProgress(Math.round((done / grandTotal) * 85))
         }
-        addLog(`✓ ar_bills: ${formatNumber(billsTotal)} rows ສຳເລັດ`)
+        addLog(`✓ ar_bills: ${formatNumber(billsTotal)} ແຖວ ສຳເລັດ`)
       }
 
       if (debtTotal > 0) {
-        addLog(`ກຳລັງອັບໂຫຼດ ar_debt (${formatNumber(debtTotal)} rows)...`)
+        addLog(`ກຳລັງອັບໂຫຼດ ar_debt (${formatNumber(debtTotal)} ແຖວ)...`)
         let done = billsTotal
         for (let i = 0; i < debtTotal; i += BATCH_SIZE) {
           await upsertBatch('ar_debt', parsed.debt.slice(i, i + BATCH_SIZE))
           done += Math.min(BATCH_SIZE, debtTotal - i)
           setProgress(Math.round((done / grandTotal) * 88))
         }
-        addLog(`✓ ar_debt: ${formatNumber(debtTotal)} rows ສຳເລັດ`)
+        addLog(`✓ ar_debt: ${formatNumber(debtTotal)} ແຖວ ສຳເລັດ`)
 
         // Sync Pay off debt_status → ar_bills (UPDATE debt_status only, keep original debt amount)
         const updates = parsed.billUpdates || []
         if (updates.length > 0) {
-          addLog(`ກຳລັງ sync debt_status → ar_bills (${formatNumber(updates.length)} rows)...`)
+          addLog(`ກຳລັງປັບສະຖານະໜີ້ → ar_bills (${formatNumber(updates.length)} ແຖວ)...`)
           const CHUNK = 50
           for (let i = 0; i < updates.length; i += CHUNK) {
             const chunk = updates.slice(i, i + CHUNK)
@@ -229,24 +252,24 @@ export default function UploadExcel() {
       }
 
       if (cashflowTotal > 0) {
-        addLog(`ກຳລັງອັບໂຫຼດ ar_cashflow (${formatNumber(cashflowTotal)} rows)...`)
+        addLog(`ກຳລັງອັບໂຫຼດ ar_cashflow (${formatNumber(cashflowTotal)} ແຖວ)...`)
         let done = billsTotal + debtTotal
         for (let i = 0; i < cashflowTotal; i += BATCH_SIZE) {
           await upsertBatch('ar_cashflow', parsed.cashflow.slice(i, i + BATCH_SIZE))
           done += Math.min(BATCH_SIZE, cashflowTotal - i)
           setProgress(Math.round((done / grandTotal) * 98))
         }
-        addLog(`✓ ar_cashflow: ${formatNumber(cashflowTotal)} rows ສຳເລັດ`)
+        addLog(`✓ ar_cashflow: ${formatNumber(cashflowTotal)} ແຖວ ສຳເລັດ`)
       }
 
       setProgress(100)
       addLog('✓ ອັບໂຫຼດທຸກຢ່າງສຳເລັດ!')
       await logAction({
-        action: 'Uploaded Excel data',
+        action: 'ອັບໂຫຼດຂໍ້ມູນ Excel',
         action_type: 'data.upload',
         entity_type: 'excel_file',
         entity_id: file?.name,
-        details: `Uploaded ${grandTotal} rows from ${file?.name || 'Excel file'}`,
+        details: `ອັບໂຫຼດ ${grandTotal} ແຖວ ຈາກ ${file?.name || 'ໄຟລ Excel'}`,
         metadata: {
           file_name: file?.name,
           bills: billsTotal,
@@ -349,7 +372,7 @@ export default function UploadExcel() {
                   <div>
                     <p className="text-sm font-semibold text-slate-800">Sheet "Daily"</p>
                     <p className="text-xs text-slate-500 mt-0.5">ໃບບິນລາຍວັນ → ບັນທຶກໃນ <code className="bg-indigo-100 px-1 rounded">ar_bills</code></p>
-                    <p className="text-xs text-indigo-600 mt-1">≈ 3,000+ rows ຕໍ່ເດືອນ</p>
+                    <p className="text-xs text-indigo-600 mt-1">≈ 3,000+ ແຖວ ຕໍ່ເດືອນ</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-3 p-3 bg-sky-50 rounded-xl">
@@ -357,7 +380,7 @@ export default function UploadExcel() {
                   <div>
                     <p className="text-sm font-semibold text-slate-800">Sheet "Pay off"</p>
                     <p className="text-xs text-slate-500 mt-0.5">ໜີ້ / ປະກັນ → ບັນທຶກໃນ <code className="bg-sky-100 px-1 rounded">ar_debt</code></p>
-                    <p className="text-xs text-sky-600 mt-1">≈ 800+ rows</p>
+                    <p className="text-xs text-sky-600 mt-1">≈ 800+ ແຖວ</p>
                   </div>
                 </div>
               </div>
@@ -367,7 +390,7 @@ export default function UploadExcel() {
             <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
               <h4 className="font-bold text-slate-700 mb-3 flex items-center gap-2">
                 <span className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-700 text-xs font-bold flex items-center justify-center">②</span>
-                Column Mapping
+                ການຈັບຄູ່ຄໍລຳ
               </h4>
               <div className="space-y-1.5 text-xs">
                 {[
@@ -427,7 +450,7 @@ export default function UploadExcel() {
             </div>
             <div className="text-right shrink-0">
               <p className="text-2xl font-bold text-primary-600">{formatNumber((parsed.bills?.length || 0) + (parsed.debt?.length || 0))}</p>
-              <p className="text-xs text-slate-400">rows (ຫຼັງ dedupe)</p>
+              <p className="text-xs text-slate-400">ແຖວ (ຫຼັງຕັດຂໍ້ມູນຊ້ຳ)</p>
             </div>
           </div>
 
@@ -435,12 +458,12 @@ export default function UploadExcel() {
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4">
               <p className="text-3xl font-bold text-indigo-700">{formatNumber(parsed.bills?.length || 0)}</p>
-              <p className="text-sm font-semibold text-indigo-600 mt-1">ar_bills rows</p>
+              <p className="text-sm font-semibold text-indigo-600 mt-1">ແຖວ ar_bills</p>
               <p className="text-xs text-slate-400">ຈາກ sheet "Daily"</p>
             </div>
             <div className="bg-sky-50 border border-sky-100 rounded-2xl p-4">
               <p className="text-3xl font-bold text-sky-700">{formatNumber(parsed.debt?.length || 0)}</p>
-              <p className="text-sm font-semibold text-sky-600 mt-1">ar_debt rows</p>
+              <p className="text-sm font-semibold text-sky-600 mt-1">ແຖວ ar_debt</p>
               <p className="text-xs text-slate-400">ຈາກ sheet "Pay off"</p>
             </div>
           </div>
@@ -540,11 +563,11 @@ export default function UploadExcel() {
           <div className="grid grid-cols-2 gap-4 max-w-xs mx-auto">
             <div className="bg-indigo-50 rounded-xl p-4">
               <p className="text-2xl font-bold text-indigo-700">{formatNumber(parsed?.bills?.length || 0)}</p>
-              <p className="text-xs text-indigo-500 mt-0.5">ar_bills rows</p>
+              <p className="text-xs text-indigo-500 mt-0.5">ແຖວ ar_bills</p>
             </div>
             <div className="bg-sky-50 rounded-xl p-4">
               <p className="text-2xl font-bold text-sky-700">{formatNumber(parsed?.debt?.length || 0)}</p>
-              <p className="text-xs text-sky-500 mt-0.5">ar_debt rows</p>
+              <p className="text-xs text-sky-500 mt-0.5">ແຖວ ar_debt</p>
             </div>
           </div>
           <div className="bg-slate-900 rounded-xl p-3 font-mono text-xs text-left max-h-28 overflow-y-auto mx-auto max-w-lg">

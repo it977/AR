@@ -45,7 +45,7 @@ export default function CustomerService() {
     labels: ['Female', 'Male'],
     colors: ['#f472b6', '#60a5fa'],
     legend: { position: 'bottom', labels: { colors: '#64748b' } },
-    plotOptions: { pie: { donut: { size: '65%', labels: { show: true, total: { show: true, label: 'Total', color: '#64748b' } } } } },
+    plotOptions: { pie: { donut: { size: '65%', labels: { show: true, total: { show: true, label: 'ລວມ', color: '#64748b' } } } } },
     dataLabels: { formatter: (val) => `${val.toFixed(1)}%` },
     tooltip: { y: { formatter: v => `${formatNumber(v)} ຄົນ` } },
   }
@@ -54,7 +54,7 @@ export default function CustomerService() {
     ...genderDonutOpts,
     labels: ['Insite', 'Onsite'],
     colors: ['#818cf8', '#34d399'],
-    plotOptions: { pie: { donut: { size: '65%', labels: { show: true, total: { show: true, label: 'Total', color: '#64748b' } } } } },
+    plotOptions: { pie: { donut: { size: '65%', labels: { show: true, total: { show: true, label: 'ລວມ', color: '#64748b' } } } } },
   }
 
   const serviceBarOpts = {
@@ -98,7 +98,7 @@ export default function CustomerService() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="section-title">ການວິເຄາະລູກຄ້າ & ການບໍລິການ</h2>
-          <p className="text-sm text-slate-500">Customer & Service Analysis</p>
+          <p className="text-sm text-slate-500">ວິເຄາະລູກຄ້າ ແລະ ການບໍລິການ</p>
         </div>
         <div className="flex flex-wrap items-center gap-2" data-pdf-hidden="true">
           <PDFButton elementId="full-report-export" filename="AR_Finance_LXH_Report" label="ດາວໂຫລດ PDF" />
@@ -123,7 +123,7 @@ export default function CustomerService() {
 
       {/* Top KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
-        <CountCard label="ລູກຄ້າທັງໝົດ" sublabel="Total Customers" value={stats.total} color="indigo"
+        <CountCard label="ລູກຄ້າທັງໝົດ" sublabel="ຈຳນວນລູກຄ້າລວມ" value={stats.total} color="indigo"
           icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>}
           isLAK={false}
         />

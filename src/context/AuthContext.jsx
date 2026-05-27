@@ -77,13 +77,16 @@ export function AuthProvider({ children }) {
       .maybeSingle()
 
     if (data && !error) {
+      console.log('[auth] Profile loaded from DB:', { role: data.role, active: data.active })
       setProfile(data)
       await loadRolePermissions()
       await loadUserPermissions(user.id)
       return data
     }
 
+    console.log('[auth] Profile DB query failed or empty:', { error: error?.message, data })
     const fallback = fallbackProfile(user)
+    console.log('[auth] Using fallback profile (active=false)')
     setProfile(fallback)
     setUserPermissions({ allowed: [], denied: [] })
 

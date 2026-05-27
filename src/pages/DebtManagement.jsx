@@ -1,55 +1,34 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
-import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import { logAction } from '../lib/log'
 import Modal, { ConfirmDialog } from '../components/Modal'
 import DebtPaymentForm from '../components/forms/DebtPaymentForm'
 import BillForm from '../components/forms/BillForm'
-import LoadingSpinner from '../components/LoadingSpinner'
 import Can from '../components/Can'
 import { PERMISSIONS } from '../lib/rbac'
-
-const PAYOFF_HEADERS = [
-  'Date','Week','Workload','Bill No','Insite-Onsite','OPD-IPD',
-  'Customer Type Code','Insurance','HN','Customer Name','Gender',
-  'Grand Total','Outstanding Debt','Date Paid','Workload Debt','Submission Date',
-  'Amount Paid','Cash Received Debt','Transfer Payment by BCEL Debt',
-  'Transfer Payment by BCEL 2 Debt','Transfer Payment by LDB Debt',
-  'Balance','Due date','Aging Group',
-]
-const SAMPLE_PAYOFF = [
-  ['2026-01-01','Week 1','8AM-4PM','BILL-INS001','Insite','OPD','INS','APA','HN002','ນາງສີ','Female',
-   500000,500000,'','','',0,0,0,0,0,500000,'2026-01-16','16-30 Days'],
-]
-function downloadTemplate() {
-  const wb = XLSX.utils.book_new()
-  const ws = XLSX.utils.aoa_to_sheet([PAYOFF_HEADERS, ...SAMPLE_PAYOFF])
-  ws['!cols'] = PAYOFF_HEADERS.map(() => ({ wch: 18 }))
-  XLSX.utils.book_append_sheet(wb, ws, 'Pay off')
-  XLSX.writeFile(wb, 'AR_Debt_Template_LXH.xlsx')
-}
+import {
+  AGING_GROUPS,
+  DEFAULT_DUE_DAYS,
+  calcAging,
+  calcOverdueDays,
+  calcDueDate,
+  getAgingLabel,
+} from '../lib/debtUtils'
 
 function fmt(v) { return new Intl.NumberFormat().format(v || 0) }
 
-function calcAging(dateStr) {
-  if (!dateStr) return 'N'
-  const days = Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000)
-  if (days <= 0)  return 'N'
-  if (days <= 15) return '0-15 Days'
-  if (days <= 30) return '16-30 Days'
-  if (days <= 45) return '31-45 Days'
-  return '46-60+ Days'
-}
-
 const AGING_COLOR = {
   'N':          'bg-slate-100 text-slate-600',
-  '0-15 Days':  'bg-emerald-100 text-emerald-700',
+  'Due on schedule': 'bg-sky-100 text-sky-700',
+  'Pay in installments': 'bg-violet-100 text-violet-700',
+  '1-15 Days':  'bg-emerald-100 text-emerald-700',
   '16-30 Days': 'bg-yellow-100 text-yellow-700',
   '31-45 Days': 'bg-orange-100 text-orange-700',
   '46-60+ Days':'bg-red-100 text-red-700',
 }
 const WORKLOADS = ['8AM-4PM', '4PM-12AM', '12AM-8AM']
+const actionThCls = 'table-th sticky right-0 z-20 bg-slate-50 text-center shadow-[-10px_0_18px_-16px_rgba(15,23,42,0.45)]'
+const actionTdCls = 'table-td sticky right-0 z-10 bg-white group-hover:bg-slate-50 shadow-[-10px_0_18px_-16px_rgba(15,23,42,0.45)]'
 
 export default function DebtManagement() {
   const [rows, setRows]       = useState([])
@@ -70,9 +49,19 @@ export default function DebtManagement() {
   const [editModal, setEditModal] = useState(null)
   const [delTarget, setDelTarget] = useState(null)
   const [delAll, setDelAll]       = useState(false)
-  const navigate = useNavigate()
 
   const [kpis, setKpis] = useState({ total_debt: 0, total_paid: 0, total_balance: 0, records: 0 })
+  const [insuranceDueDays, setInsuranceDueDays] = useState({})
+
+  const fetchInsuranceDueDays = useCallback(async () => {
+    const { data, error } = await supabase.from('ar_insurance_list').select('name,due_days')
+    if (error) {
+      const fallback = await supabase.from('ar_insurance_list').select('name')
+      setInsuranceDueDays(Object.fromEntries((fallback.data || []).map(item => [item.name, DEFAULT_DUE_DAYS])))
+      return
+    }
+    setInsuranceDueDays(Object.fromEntries((data || []).map(item => [item.name, item.due_days || DEFAULT_DUE_DAYS])))
+  }, [])
 
   const fetchKpis = useCallback(async () => {
     // ດຶງຂໍ້ມູນຈາກ ar_debt (Pay off)
@@ -116,15 +105,7 @@ export default function DebtManagement() {
     if (statusFilter === 'pending') q = q.gt('balance', 0)
     if (statusFilter === 'paid')    q = q.lte('balance', 0)
     if (workload) q = q.eq('workload', workload)
-    if (aging) {
-      const today = new Date()
-      const dayAgo = (n) => new Date(today.getTime() - n * 86400000).toISOString().split('T')[0]
-      if (aging === 'N')            q = q.gte('date', dayAgo(0))
-      else if (aging === '0-15 Days')   q = q.gte('date', dayAgo(15))
-      else if (aging === '16-30 Days')  q = q.gte('date', dayAgo(30)).lt('date', dayAgo(15))
-      else if (aging === '31-45 Days')  q = q.gte('date', dayAgo(45)).lt('date', dayAgo(30))
-      else if (aging === '46-60+ Days') q = q.lt('date', dayAgo(45))
-    }
+    if (aging) q = q.eq('aging_group', aging)
     if (dateFrom) q = q.gte('date', dateFrom)
     if (dateTo)   q = q.lte('date', dateTo)
 
@@ -137,11 +118,20 @@ export default function DebtManagement() {
   }, [search, aging, statusFilter, workload, dateFrom, dateTo, page, pageSize])
 
   useEffect(() => { fetchRows(); fetchKpis() }, [fetchRows, fetchKpis])
+  useEffect(() => { fetchInsuranceDueDays() }, [fetchInsuranceDueDays])
 
   async function handleSubmit(form) {
     setSaving(true)
     const collected = (form.cash||0)+(form.bcel||0)+(form.bcel2||0)+(form.ldb||0)
-    const today = new Date().toISOString().split('T')[0]
+    const paymentRows = form.installments || []
+    const installmentPayload = {}
+    ;[0, 1, 2].forEach(index => {
+      const row = paymentRows[index] || {}
+      const number = index + 1
+      installmentPayload[`payment_${number}_date`] = row.date || null
+      installmentPayload[`payment_${number}_method`] = row.method || null
+      installmentPayload[`payment_${number}_amount`] = row.amount || 0
+    })
 
     // 1) Update ar_debt (form.id ແມ່ນ ar_debt id)
     const debtUpdate = {
@@ -151,8 +141,11 @@ export default function DebtManagement() {
       ldb_paid: form.ldb || 0,
       amount_paid: collected,
       balance: form.debt || 0,
-      date_paid: today,
+      date_paid: form.date_paid || null,
+      submit_date: form.submit_date || null,
+      due_date: form.due_date || null,
       aging_group: form.aging_group,
+      ...installmentPayload,
     }
     const { error: debtErr } = await supabase.from('ar_debt').update(debtUpdate).eq('id', form.id)
 
@@ -206,7 +199,10 @@ export default function DebtManagement() {
           grand_total: form.grand_total, debt_amount: form.debt,
           amount_paid: collected, cash_paid: form.cash||0, bcel_paid: form.bcel||0,
           bcel2_paid: form.bcel2||0, ldb_paid: form.ldb||0,
-          balance: form.debt, aging_group: form.aging_group,
+          balance: form.debt,
+          submit_date: form.submit_date || null,
+          due_date: form.due_date || null,
+          aging_group: form.aging_group,
         }).eq('bill_no', form.bill_no)
       } catch (e) {}
     }
@@ -238,7 +234,7 @@ export default function DebtManagement() {
   }
 
   const totalPages = Math.ceil(total / pageSize)
-  const AGING_OPTS = ['', 'N', '0-15 Days', '16-30 Days', '31-45 Days', '46-60+ Days']
+  const AGING_OPTS = ['', ...AGING_GROUPS]
 
   return (
     <div id="ar-debt-content" className="p-5 space-y-4 text-sm">
@@ -289,7 +285,7 @@ export default function DebtManagement() {
           <label className="block text-xs font-semibold text-slate-500 mb-1">Aging</label>
           <select value={aging} onChange={e => { setAging(e.target.value); setPage(0) }}
             className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
-            {AGING_OPTS.map(a => <option key={a} value={a}>{a || 'ທັງໝົດ'}</option>)}
+            {AGING_OPTS.map(a => <option key={a} value={a}>{a ? getAgingLabel(a) : 'ທັງໝົດ'}</option>)}
           </select>
         </div>
         <div>
@@ -343,7 +339,7 @@ export default function DebtManagement() {
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1380px]">
+          <table className="w-full min-w-[1240px]">
             <thead>
               <tr className="border-b border-slate-100">
                 <th className="table-th">ເລກໃບບິນ</th>
@@ -354,19 +350,20 @@ export default function DebtManagement() {
                 <th className="table-th text-right">ຍອດລວມ</th>
                 <th className="table-th text-right">ເກັບໄດ້</th>
                 <th className="table-th text-right">ໜີ້ຄ້າງ</th>
+                <th className="table-th">ວັນສົ່ງເອກະສານ</th>
                 <th className="table-th text-center">ວັນຄ້າງ</th>
                 <th className="table-th">Aging</th>
                 <th className="table-th text-center">ສະຖານະ</th>
                 <th className="table-th">ຜູ້ບັນທຶກໜີ້</th>
-                <th className="table-th"></th>
+                <th className={actionThCls}>ຈັດການ</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
               {loading ? (
-                <tr><td colSpan={13} className="table-td text-center py-12 text-slate-400">ກຳລັງໂຫຼດ...</td></tr>
+                <tr><td colSpan={14} className="table-td text-center py-12 text-slate-400">ກຳລັງໂຫຼດ...</td></tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="table-td text-center py-16">
+                  <td colSpan={14} className="table-td text-center py-16">
                     <div className="flex flex-col items-center gap-2 text-slate-400">
                       <svg className="w-10 h-10 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -379,7 +376,10 @@ export default function DebtManagement() {
                 // ໃຊ້ຂໍ້ມູນຈາກ ar_debt: debt_amount, amount_paid, balance
                 const collected = (row.cash_paid || 0) + (row.bcel_paid || 0) + (row.bcel2_paid || 0) + (row.ldb_paid || 0)
                 const debt = row.balance || 0
-                const days = row.date ? Math.max(0, Math.floor((Date.now() - new Date(row.date).getTime()) / 86400000)) : 0
+                const dueDate = row.due_date || calcDueDate(row.submit_date || row.date, insuranceDueDays, row.insurance)
+                const agingRow = { ...row, due_date: dueDate, insuranceDueDays }
+                const days = calcOverdueDays(agingRow)
+                const currentAging = calcAging(agingRow)
                 const daysCls = days <= 15
                   ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
                   : days <= 30
@@ -389,10 +389,10 @@ export default function DebtManagement() {
                   : 'bg-red-100 text-red-700 border border-red-200'
                 const isPaid = debt <= 0
                 return (
-                  <tr key={row.id} className="hover:bg-slate-50 transition-colors">
+                  <tr key={row.id} className="group hover:bg-slate-50 transition-colors">
                     <td className="table-td font-mono text-xs font-semibold text-primary-600">{row.bill_no}</td>
                     <td className="table-td text-xs">{row.date}</td>
-                    <td className="table-td">{row.patient_name}</td>
+                    <td className="table-td max-w-[230px] truncate" title={row.patient_name}>{row.patient_name}</td>
                     <td className="table-td">
                       <span className={`badge ${row.customer_type === 'INS' ? 'bg-sky-100 text-sky-700' : row.customer_type === 'B2B' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'}`}>
                         {row.customer_type}
@@ -402,15 +402,16 @@ export default function DebtManagement() {
                     <td className="table-td text-right font-mono text-xs">{fmt(row.grand_total)}</td>
                     <td className="table-td text-right font-mono text-xs text-emerald-600">{fmt(row.amount_paid || collected)}</td>
                     <td className="table-td text-right font-mono text-xs font-semibold text-red-600">{fmt(debt)}</td>
+                    <td className="table-td text-xs">
+                      <span className="font-medium text-slate-700">{row.submit_date || <span className="text-slate-300">—</span>}</span>
+                    </td>
                     <td className="table-td text-center">
                       <span className={`inline-flex items-center justify-center min-w-[48px] px-2 py-0.5 rounded-lg text-xs font-bold ${daysCls}`}>
                         {days} ມື້
                       </span>
                     </td>
                     <td className="table-td">
-                      {(() => { const ag = calcAging(row.date); return (
-                        <span className={`badge text-[10px] ${AGING_COLOR[ag]}`}>{ag}</span>
-                      )})()}
+                      <span className={`badge text-[10px] ${AGING_COLOR[currentAging] || AGING_COLOR.N}`}>{getAgingLabel(currentAging)}</span>
                     </td>
                     <td className="table-td text-center">
                       {isPaid ? (
@@ -426,13 +427,13 @@ export default function DebtManagement() {
                         </span>
                       )}
                     </td>
-                    <td className="table-td text-xs text-slate-600">{row.recorded_by_debt || <span className="text-slate-300">—</span>}</td>
-                    <td className="table-td">
-                      <div className="flex items-center gap-1">
+                    <td className="table-td text-xs text-slate-600 max-w-[120px] truncate" title={row.recorded_by_debt || ''}>{row.recorded_by_debt || <span className="text-slate-300">—</span>}</td>
+                    <td className={actionTdCls}>
+                      <div className="flex items-center justify-center gap-1.5">
                         <Can permission={PERMISSIONS.RECORDS_WRITE}>
                         <button
                           onClick={() => setModal({ row })}
-                          className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors ${row.debt_status === 'paid' ? 'bg-slate-50 text-slate-400 hover:bg-slate-100' : 'bg-primary-50 text-primary-600 hover:bg-primary-100'}`}
+                          className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${isPaid ? 'bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100' : 'bg-primary-50 text-primary-600 border-primary-100 hover:bg-primary-100'}`}
                           title="ຊຳລະໜີ້"
                         >
                           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -442,7 +443,7 @@ export default function DebtManagement() {
                         </button>
                         <button
                           onClick={() => setEditModal(row)}
-                          className="p-1.5 text-slate-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
+                          className="p-1.5 text-slate-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg border border-slate-100 transition-colors"
                           title="ແກ້ໄຂ"
                         >
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -453,7 +454,7 @@ export default function DebtManagement() {
                         <Can permission={PERMISSIONS.RECORDS_DELETE}>
                         <button
                           onClick={() => setDelTarget(row)}
-                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg border border-slate-100 transition-colors"
                           title="ລົບ"
                         >
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -496,11 +497,12 @@ export default function DebtManagement() {
         open={!!modal}
         onClose={() => setModal(null)}
         title={`ຊຳລະໜີ້: ${modal?.row?.bill_no}`}
-        subtitle={modal?.row?.debt_status === 'paid' ? `${modal?.row?.patient_name} · ຊຳລະຄົບແລ້ວ` : `${modal?.row?.patient_name} · ໜີ້ຄ້າງ: ${fmt(modal?.row?.debt)} LAK`}
-        size="lg"
+        subtitle={(modal?.row?.balance || 0) <= 0 ? `${modal?.row?.patient_name} · ຊຳລະຄົບແລ້ວ` : `${modal?.row?.patient_name} · ໜີ້ຄ້າງ: ${fmt(modal?.row?.balance)} LAK`}
+        size="xl"
       >
         <DebtPaymentForm
           initial={modal?.row || {}}
+          insuranceDueDays={insuranceDueDays}
           onSubmit={handleSubmit}
           onCancel={() => setModal(null)}
           loading={saving}

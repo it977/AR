@@ -1,51 +1,83 @@
 import { useState, useMemo } from 'react'
 import RecorderSelect from '../RecorderSelect'
+import {
+  PAYMENT_METHODS,
+  calcAging,
+  calcOverdueDays,
+  calcDueDate,
+  getAgingLabel,
+  getDueDaysForInsurance,
+  normalizeInstallments,
+  summarizeInstallments,
+} from '../../lib/debtUtils'
 
 const inputCls = 'w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100 transition-all'
 const numCls   = inputCls + ' text-right font-mono'
 
 function fmt(v) { return new Intl.NumberFormat().format(v || 0) }
 
-function calcAging(date) {
-  if (!date) return 'N'
-  const days = Math.floor((Date.now() - new Date(date).getTime()) / 86400000)
-  if (days <= 0)  return 'N'
-  if (days <= 15) return '0-15 Days'
-  if (days <= 30) return '16-30 Days'
-  if (days <= 45) return '31-45 Days'
-  return '46-60+ Days'
-}
-
 const AGING_COLOR = {
   'N':           'bg-slate-100 text-slate-600',
-  '0-15 Days':   'bg-emerald-100 text-emerald-700',
+  'Due on schedule': 'bg-sky-100 text-sky-700',
+  'Pay in installments': 'bg-violet-100 text-violet-700',
+  '1-15 Days':   'bg-emerald-100 text-emerald-700',
   '16-30 Days':  'bg-amber-100 text-amber-700',
   '31-45 Days':  'bg-orange-100 text-orange-700',
   '46-60+ Days': 'bg-red-100 text-red-700',
 }
 
-export default function DebtPaymentForm({ initial, onSubmit, onCancel, loading }) {
-  const [cash,            setCash]           = useState(initial.cash             || 0)
-  const [bcel,            setBcel]           = useState(initial.bcel             || 0)
-  const [bcel2,           setBcel2]          = useState(initial.bcel2            || 0)
-  const [ldb,             setLdb]            = useState(initial.ldb              || 0)
-  const [note,            setNote]           = useState(initial.note             || '')
-  const [recordedByDebt,  setRecordedByDebt] = useState(initial.recorded_by_debt || '')
+export default function DebtPaymentForm({ initial, onSubmit, onCancel, loading, insuranceDueDays = {} }) {
+  const [installments, setInstallments] = useState(() => normalizeInstallments(initial))
+  const [submitDate,       setSubmitDate]      = useState(initial.submit_date || '')
+  const [note,             setNote]            = useState(initial.note || '')
+  const [recordedByDebt,   setRecordedByDebt]  = useState(initial.recorded_by_debt || '')
 
-  const aging = useMemo(() => calcAging(initial.date), [initial.date])
-
-  const collected  = (parseFloat(cash)||0) + (parseFloat(bcel)||0) + (parseFloat(bcel2)||0) + (parseFloat(ldb)||0)
-  const newDebt    = Math.max(0, (initial.grand_total || 0) - (initial.discounts || 0) - collected)
+  const originalDebt = initial.debt_amount ?? initial.debt ?? Math.max(0, (initial.grand_total || 0) - (initial.discounts || 0))
+  const installmentSummary = useMemo(() => summarizeInstallments(installments), [installments])
+  const dueDays = getDueDaysForInsurance(insuranceDueDays, initial.insurance)
+  const dueDate = useMemo(
+    () => calcDueDate(submitDate || initial.submit_date || initial.date, insuranceDueDays, initial.insurance),
+    [submitDate, initial.submit_date, initial.date, initial.insurance, insuranceDueDays]
+  )
+  const collected  = installmentSummary.total
+  const newDebt    = Math.max(0, originalDebt - collected)
   const isPaid     = newDebt === 0
+  const agingRow = useMemo(() => ({
+    ...initial,
+    submit_date: submitDate || null,
+    due_date: dueDate,
+    date_paid: installmentSummary.latestDate,
+    amount_paid: collected,
+    balance: newDebt,
+    payment_1_date: installmentSummary.active[0]?.date,
+    payment_1_method: installmentSummary.active[0]?.method,
+    payment_1_amount: installmentSummary.active[0]?.amount,
+    payment_2_date: installmentSummary.active[1]?.date,
+    payment_2_method: installmentSummary.active[1]?.method,
+    payment_2_amount: installmentSummary.active[1]?.amount,
+    payment_3_date: installmentSummary.active[2]?.date,
+    payment_3_method: installmentSummary.active[2]?.method,
+    payment_3_amount: installmentSummary.active[2]?.amount,
+  }), [initial, submitDate, dueDate, installmentSummary, collected, newDebt])
+  const aging = useMemo(() => calcAging(agingRow), [agingRow])
+  const overdueDays = useMemo(() => calcOverdueDays(agingRow), [agingRow])
+
+  function setInstallment(index, key, value) {
+    setInstallments(prev => prev.map((item, i) => i === index ? { ...item, [key]: value } : item))
+  }
 
   function handleSubmit(e) {
     e.preventDefault()
     onSubmit({
       ...initial,
-      cash:  parseFloat(cash)  || 0,
-      bcel:  parseFloat(bcel)  || 0,
-      bcel2: parseFloat(bcel2) || 0,
-      ldb:   parseFloat(ldb)   || 0,
+      cash:  installmentSummary.channelTotals.cash,
+      bcel:  installmentSummary.channelTotals.bcel,
+      bcel2: installmentSummary.channelTotals.bcel2,
+      ldb:   installmentSummary.channelTotals.ldb,
+      installments: installmentSummary.active,
+      submit_date: submitDate || null,
+      due_date: dueDate,
+      date_paid: installmentSummary.latestDate,
       debt:  newDebt,
       aging_group: aging,
       note,
@@ -79,7 +111,7 @@ export default function DebtPaymentForm({ initial, onSubmit, onCancel, loading }
       {/* Totals row */}
       <div className="grid grid-cols-3 gap-3">
         <div className="rounded-xl border border-slate-100 p-3 text-center">
-          <p className="text-xs text-slate-400">ຍອດລວມ (Grand Total)</p>
+          <p className="text-xs text-slate-400">ຍອດລວມສຸດທິ</p>
           <p className="text-lg font-bold font-mono text-slate-700 mt-1">{fmt(initial.grand_total)}</p>
           <p className="text-[10px] text-slate-400">LAK</p>
         </div>
@@ -96,28 +128,68 @@ export default function DebtPaymentForm({ initial, onSubmit, onCancel, loading }
       </div>
 
       {/* Payment inputs */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 mb-1">ວັນສົ່ງເອກະສານ</label>
+          <input type="date" value={submitDate} onChange={e => setSubmitDate(e.target.value)} className={inputCls} />
+          <p className="text-[11px] text-slate-400 mt-1">ເລີ່ມນັບກຳນົດຊຳລະຈາກວັນທີນີ້</p>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 mb-1">ກຳນົດຊຳລະ</label>
+          <div className="px-3 py-2 rounded-lg border bg-slate-50 border-slate-200 text-sm font-semibold text-slate-700">
+            {dueDate || '—'}
+          </div>
+          <p className="text-[11px] text-slate-400 mt-1">{initial.insurance || 'Default'} · {dueDays} ມື້</p>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 mb-1">ວັນຊຳລະຫຼ້າສຸດ</label>
+          <div className="px-3 py-2 rounded-lg border bg-slate-50 border-slate-200 text-sm font-semibold text-slate-700">
+            {installmentSummary.latestDate || '—'}
+          </div>
+          <p className="text-[11px] text-slate-400 mt-1">ດຶງຈາກງວດທີ່ມີວັນທີຫຼ້າສຸດ</p>
+        </div>
+      </div>
+
       <div>
         <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">ບັນທຶກການຊຳລະ</p>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {[
-            ['ເງິນສົດ (Cash)',  cash,  setCash],
-            ['BCEL',           bcel,  setBcel],
-            ['BCEL 2',         bcel2, setBcel2],
-            ['LDB Bank',       ldb,   setLdb],
-          ].map(([label, val, setter]) => (
-            <div key={label}>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">{label}</label>
-              <input type="number" min="0" step="any" value={val}
-                onChange={e => setter(parseFloat(e.target.value) || 0)}
-                className={numCls} />
+        <div className="space-y-2">
+          {installments.map((item, index) => (
+            <div key={item.number} className="grid grid-cols-12 gap-2 items-end rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+              <div className="col-span-12 md:col-span-1">
+                <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white border border-slate-200 text-xs font-bold text-slate-500">
+                  {item.number}
+                </span>
+              </div>
+              <div className="col-span-12 md:col-span-3">
+                <label className="block text-xs font-semibold text-slate-600 mb-1">ວັນທີຊຳລະ</label>
+                <input type="date" value={item.date} onChange={e => setInstallment(index, 'date', e.target.value)} className={inputCls} />
+              </div>
+              <div className="col-span-12 md:col-span-4">
+                <label className="block text-xs font-semibold text-slate-600 mb-1">ຊ່ອງທາງ</label>
+                <select value={item.method} onChange={e => setInstallment(index, 'method', e.target.value)} className={inputCls}>
+                  <option value="">ເລືອກ...</option>
+                  {PAYMENT_METHODS.map(method => (
+                    <option key={method.value} value={method.value}>{method.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-span-12 md:col-span-4">
+                <label className="block text-xs font-semibold text-slate-600 mb-1">ຈຳນວນເງິນ</label>
+                <input type="number" min="0" step="any" value={item.amount}
+                  onChange={e => setInstallment(index, 'amount', e.target.value)}
+                  className={numCls} />
+              </div>
             </div>
           ))}
         </div>
 
         {/* Collected total */}
-        <div className="mt-3 flex items-center justify-end gap-2">
-          <span className="text-sm text-slate-500">ລວມຊຳລະ:</span>
-          <span className="text-base font-bold font-mono text-emerald-600">{fmt(collected)} LAK</span>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs text-slate-400">ຊຳລະເປັນງວດໄດ້ສູງສຸດ 3 ຄັ້ງ</span>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-slate-500">ລວມຊຳລະ:</span>
+            <span className="text-base font-bold font-mono text-emerald-600">{fmt(collected)} LAK</span>
+          </div>
         </div>
       </div>
 
@@ -126,9 +198,9 @@ export default function DebtPaymentForm({ initial, onSubmit, onCancel, loading }
         <div>
           <label className="block text-xs font-semibold text-slate-600 mb-1">Aging Group <span className="text-slate-400 font-normal">(ອັດຕະໂນມັດ)</span></label>
           <div className="flex items-center gap-2 px-3 py-2 rounded-lg border bg-slate-50 border-slate-200">
-            <span className={`badge ${AGING_COLOR[aging]}`}>{aging}</span>
+            <span className={`badge ${AGING_COLOR[aging]}`}>{getAgingLabel(aging)}</span>
             <span className="text-xs text-slate-400">
-              {initial.date ? `${Math.floor((Date.now() - new Date(initial.date).getTime()) / 86400000)} ມື້` : ''}
+              {submitDate ? `${overdueDays} ມື້ຫຼັງກຳນົດຊຳລະ` : ''}
             </span>
           </div>
         </div>

@@ -201,7 +201,7 @@ export default function PaymentChannel() {
     labels: METHODS.map(m => m.label),
     colors: METHODS.map(m => m.color),
     legend: { position: 'bottom', labels: { colors: '#64748b' } },
-    plotOptions: { pie: { donut: { size: '65%', labels: { show: true, total: { show: true, label: 'Total', color: '#64748b', formatter: () => formatNumber(totalCollected) } } } } },
+    plotOptions: { pie: { donut: { size: '65%', labels: { show: true, total: { show: true, label: 'ລວມ', color: '#64748b', formatter: () => formatNumber(totalCollected) } } } } },
     dataLabels: { formatter: v => `${v.toFixed(1)}%` },
     tooltip: { y: { formatter: v => `${formatNumber(v)} LAK` } },
   }
@@ -228,7 +228,7 @@ export default function PaymentChannel() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold text-slate-800">ຊ່ອງທາງການຊຳລະ</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Payment Channel Analysis • ໜ່ວຍ: LAK</p>
+          <p className="text-sm text-slate-500 mt-0.5">ວິເຄາະຊ່ອງທາງຊຳລະ • ໜ່ວຍ: LAK</p>
         </div>
         <div className="flex flex-wrap items-center gap-2" data-pdf-hidden="true">
           <PDFButton elementId="full-report-export" filename="AR_Finance_LXH_Report" label="ດາວໂຫລດ PDF" />
@@ -261,7 +261,7 @@ export default function PaymentChannel() {
         {/* Pay off collection */}
         <div className="rounded-2xl p-5 text-white bg-gradient-to-br from-violet-500 to-violet-700 shadow-lg shadow-violet-200">
           <p className="text-xs font-semibold text-violet-200 uppercase tracking-wider">ເກັບໜີ້ (Pay off)</p>
-          <p className="text-xs text-violet-200 mb-3">Debt Collection</p>
+          <p className="text-xs text-violet-200 mb-3">ຍອດເກັບໜີ້</p>
           <p className="text-2xl font-extrabold leading-tight">{formatNumber(useLookerFallback ? LOOKER_CASHFLOW_FALLBACK.debtCollection : collectionStats.amount)}</p>
           <p className="text-xs text-violet-200 mt-1">ຈາກ ar_debt</p>
         </div>
@@ -304,7 +304,7 @@ export default function PaymentChannel() {
       {/* ── Row 3: Stacked bar proportion ── */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
         <h3 className="font-bold text-slate-700 text-sm mb-1">ສ່ວນແບ່ງຊ່ອງທາງການຊຳລະ</h3>
-        <p className="text-xs text-slate-400 mb-4">Payment Channel Proportion</p>
+        <p className="text-xs text-slate-400 mb-4">ສັດສ່ວນຊ່ອງທາງຊຳລະ</p>
         <div className="flex rounded-xl overflow-hidden h-8 mb-3">
           {METHODS.map(m => {
             const pct = totalCollected > 0 ? (totals[m.key] || 0) / totalCollected * 100 : 0
@@ -341,7 +341,7 @@ export default function PaymentChannel() {
               colors: ['#06b6d4', '#f43f5e'],
               legend: { position: 'bottom', labels: { colors: '#64748b' } },
               plotOptions: { pie: { donut: { size: '68%', labels: { show: true,
-                total: { show: true, label: 'Total', color: '#64748b',
+                total: { show: true, label: 'ລວມ', color: '#64748b',
                   formatter: () => formatNumber(totalCollected + remainingBalance) }
               } } } },
               dataLabels: { formatter: v => `${v.toFixed(1)}%` },
@@ -380,7 +380,7 @@ export default function PaymentChannel() {
                     colors: ['#10b981', '#4f46e5'],
                     legend: { position: 'bottom', labels: { colors: '#64748b' } },
                     plotOptions: { pie: { donut: { size: '68%', labels: { show: true,
-                      total: { show: true, label: 'Total', color: '#64748b',
+                      total: { show: true, label: 'ລວມ', color: '#64748b',
                         formatter: () => formatNumber(totalCollected) }
                     } } } },
                     dataLabels: { formatter: v => `${v.toFixed(1)}%` },
@@ -409,7 +409,7 @@ export default function PaymentChannel() {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
           <h3 className="font-bold text-slate-700 text-sm mb-1">ທ່າອ່ຽງລາຍຮັບຕາມຊ່ອງທາງ</h3>
-          <p className="text-xs text-slate-400 mb-4">Monthly Payment Channel Trend</p>
+          <p className="text-xs text-slate-400 mb-4">ແນວໂນ້ມຊ່ອງທາງຊຳລະລາຍເດືອນ</p>
           {months.length > 0 ? (
             <ReactApexChart
               options={trendOpts}
@@ -432,7 +432,7 @@ export default function PaymentChannel() {
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-100">
           <h3 className="font-bold text-slate-700 text-sm">ສະຫຼຸບຊ່ອງທາງການຊຳລະ</h3>
-          <p className="text-xs text-slate-400">Payment Channel Summary</p>
+          <p className="text-xs text-slate-400">ສະຫຼຸບຊ່ອງທາງຊຳລະ</p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">

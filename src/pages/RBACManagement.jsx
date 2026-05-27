@@ -272,7 +272,7 @@ export default function RBACManagement() {
         details: `Created ${profileEmail} as ${form.role}`,
         metadata: { role: form.role, active: form.active },
       })
-      setMessage(`Created ${profileEmail}.`)
+      setMessage(`ສ້າງ ${profileEmail} ສຳເລັດ`)
       closeFormModal()
       await loadData()
       setSaving(false)
@@ -481,15 +481,15 @@ export default function RBACManagement() {
         <section className="overflow-hidden rounded-[26px] border border-teal-100 bg-white shadow-[0_24px_80px_rgba(15,118,110,0.12)]">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
             <div className="flex items-center gap-3">
-              <span className="text-sm text-slate-500">Show</span>
+              <span className="text-sm text-slate-500">ສະແດງ</span>
               <span className="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-bold text-slate-700">10</span>
-              <span className="text-sm text-slate-500">rows</span>
+              <span className="text-sm text-slate-500">ແຖວ</span>
             </div>
             <input
               type="search"
               value={query}
               onChange={event => setQuery(event.target.value)}
-              placeholder="Search user..."
+              placeholder="ຄົ້ນຫາຜູ້ໃຊ້..."
               className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-teal-300 focus:ring-4 focus:ring-teal-100 md:w-72"
             />
           </div>
@@ -507,7 +507,7 @@ export default function RBACManagement() {
                     />
                   </th>
                   <th className="table-th">Name</th>
-                  <th className="table-th">Email</th>
+                  <th className="table-th">ອີເມວ</th>
                   <th className="table-th">Role</th>
                   <th className="table-th">Status</th>
                   <th className="table-th text-center">Actions</th>
@@ -593,7 +593,7 @@ export default function RBACManagement() {
               )}
 
               <label className="block">
-                <span className="text-sm font-bold text-slate-700">Email</span>
+                <span className="text-sm font-bold text-slate-700">ອີເມວ</span>
                 <input
                   type="email"
                   value={form.email}
@@ -605,7 +605,7 @@ export default function RBACManagement() {
 
               {formMode === 'add' && (
                 <label className="block">
-                  <span className="text-sm font-bold text-slate-700">Password</span>
+                  <span className="text-sm font-bold text-slate-700">ລະຫັດຜ່ານ</span>
                   <input
                     type="password"
                     value={form.password}

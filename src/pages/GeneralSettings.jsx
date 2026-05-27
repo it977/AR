@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { useAuth } from '../context/AuthContext'
+import { createDataBackup, listRecentBackups } from '../lib/autoBackup'
 
 // ============================================================
 // Tab definitions
@@ -21,6 +21,12 @@ const TABS = [
     items: [
       { key: 'ar_insurance_list', label: 'ບໍລິສັດປະກັນ', sublabel: 'Insurance Companies', type: 'simple', icon: '🛡️', hint: 'ລາຍຊື່ບໍລິສັດປະກັນທີ່ຮ່ວມງານ' },
       { key: 'ar_recorders_list', label: 'ຜູ້ບັນທຶກ',    sublabel: 'Recorders',           type: 'simple', icon: '👤', hint: 'ລາຍຊື່ພະນັກງານຜູ້ບັນທຶກຂໍ້ມູນ' },
+    ],
+  },
+  {
+    group: 'ລະບົບ',
+    items: [
+      { key: 'auto_backup', label: 'ສຳຮອງຂໍ້ມູນ', sublabel: 'ທຸກມື້ 23:00', type: 'backup', icon: '💾', hint: 'ສຳຮອງຂໍ້ມູນອັດຕະໂນມັດທຸກມື້ເວລາ 23:00' },
     ],
   },
 ]
@@ -251,11 +257,14 @@ function ConfigTable({ category, hint }) {
 // CRUD table for insurance_list / recorders_list
 // ============================================================
 function SimpleTable({ tableName, hint }) {
+  const isInsurance = tableName === 'ar_insurance_list'
   const [items,    setItems]    = useState([])
   const [loading,  setLoading]  = useState(true)
   const [editId,   setEditId]   = useState(null)
   const [editName, setEditName] = useState('')
+  const [editDueDays, setEditDueDays] = useState(30)
   const [newName,  setNewName]  = useState('')
+  const [newDueDays, setNewDueDays] = useState(30)
   const [saving,   setSaving]   = useState(false)
 
   useEffect(() => { load() }, [tableName])
@@ -271,10 +280,15 @@ function SimpleTable({ tableName, hint }) {
     const name = newName.trim()
     if (!name) return
     setSaving(true)
-    const { data, error } = await supabase.from(tableName).insert({ name }).select().single()
+    const payload = isInsurance ? { name, due_days: Number(newDueDays) || 30 } : { name }
+    let { data, error } = await supabase.from(tableName).insert(payload).select().single()
+    if (error && isInsurance && error.message?.includes('due_days')) {
+      ;({ data, error } = await supabase.from(tableName).insert({ name }).select().single())
+    }
     if (!error && data) {
       setItems(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
       setNewName('')
+      setNewDueDays(30)
     }
     setSaving(false)
   }
@@ -283,8 +297,12 @@ function SimpleTable({ tableName, hint }) {
     const name = editName.trim()
     if (!name) return
     setSaving(true)
-    await supabase.from(tableName).update({ name }).eq('id', id)
-    setItems(prev => prev.map(i => i.id === id ? { ...i, name } : i).sort((a, b) => a.name.localeCompare(b.name)))
+    const payload = isInsurance ? { name, due_days: Number(editDueDays) || 30 } : { name }
+    const { error } = await supabase.from(tableName).update(payload).eq('id', id)
+    if (error && isInsurance && error.message?.includes('due_days')) {
+      await supabase.from(tableName).update({ name }).eq('id', id)
+    }
+    setItems(prev => prev.map(i => i.id === id ? { ...i, ...payload } : i).sort((a, b) => a.name.localeCompare(b.name)))
     setEditId(null)
     setSaving(false)
   }
@@ -315,12 +333,13 @@ function SimpleTable({ tableName, hint }) {
               <tr className="border-b-2 border-slate-100">
                 <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wider w-14">#</th>
                 <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wider">ຊື່</th>
+                {isInsurance && <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wider w-36">ກຳນົດຊຳລະ (ມື້)</th>}
                 <th className="py-3 px-4 w-24"></th>
               </tr>
             </thead>
             <tbody>
               {items.length === 0 && (
-                <tr><td colSpan={3}><EmptyState /></td></tr>
+                <tr><td colSpan={isInsurance ? 4 : 3}><EmptyState /></td></tr>
               )}
               {items.map((item, idx) => (
                 <tr key={item.id} className="group border-b border-slate-50 hover:bg-slate-50/80 transition-colors">
@@ -333,6 +352,13 @@ function SimpleTable({ tableName, hint }) {
                           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveEdit(item.id) } if (e.key === 'Escape') setEditId(null) }}
                           className="w-full text-sm border border-primary-300 rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-primary-100" />
                       </td>
+                      {isInsurance && (
+                        <td className="py-2 px-3">
+                          <input type="number" min="1" max="365" value={editDueDays}
+                            onChange={e => setEditDueDays(e.target.value)}
+                            className="w-full text-sm border border-primary-300 rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-primary-100" />
+                        </td>
+                      )}
                       <td className="py-2 px-4">
                         <div className="flex gap-1.5 justify-end">
                           <button onClick={() => saveEdit(item.id)} disabled={saving}
@@ -354,9 +380,16 @@ function SimpleTable({ tableName, hint }) {
                         </span>
                       </td>
                       <td className="py-3.5 px-4 font-medium text-slate-800">{item.name}</td>
+                      {isInsurance && (
+                        <td className="py-3.5 px-4">
+                          <span className="font-mono font-bold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-lg text-xs">
+                            {item.due_days || 30}
+                          </span>
+                        </td>
+                      )}
                       <td className="py-3.5 px-4">
                         <div className="flex gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => { setEditId(item.id); setEditName(item.name) }}
+                          <button onClick={() => { setEditId(item.id); setEditName(item.name); setEditDueDays(item.due_days || 30) }}
                             className="p-1.5 text-slate-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors" title="ແກ້ໄຂ">
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -385,6 +418,11 @@ function SimpleTable({ tableName, hint }) {
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add() } }}
             placeholder="ພິມຊື່ລາຍການໃໝ່ແລ້ວກົດ Enter..."
             className="flex-1 text-sm border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100 transition-all bg-slate-50 focus:bg-white" />
+          {isInsurance && (
+            <input type="number" min="1" max="365" value={newDueDays} onChange={e => setNewDueDays(e.target.value)}
+              title="ຈຳນວນມື້ກຳນົດຊຳລະ"
+              className="w-36 text-sm border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100 transition-all bg-slate-50 focus:bg-white" />
+          )}
           <button onClick={add} disabled={saving || !newName.trim()}
             className="flex items-center gap-2 px-5 py-2.5 bg-primary-600 text-white text-sm font-bold rounded-xl hover:bg-primary-700 active:scale-95 transition-all disabled:opacity-40 shadow-sm shrink-0">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -393,6 +431,117 @@ function SimpleTable({ tableName, hint }) {
             ເພີ່ມ
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================
+// Auto backup panel
+// ============================================================
+function BackupPanel({ hint }) {
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  async function load() {
+    setLoading(true)
+    setError('')
+    try {
+      setItems(await listRecentBackups())
+    } catch (err) {
+      setError(err.message)
+      setItems([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { load() }, [])
+
+  async function backupNow() {
+    setSaving(true)
+    setError('')
+    try {
+      await createDataBackup('manual_settings')
+      await load()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const latest = items[0]
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center gap-2 px-4 py-3 bg-emerald-50 border border-emerald-100 rounded-xl text-xs text-emerald-700">
+        <svg className="w-4 h-4 text-emerald-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        {hint}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">ຕາຕະລາງເວລາ</p>
+          <p className="text-2xl font-bold text-slate-800 mt-1">23:00</p>
+          <p className="text-xs text-slate-400 mt-1">Asia/Bangkok · ທຸກມື້</p>
+        </div>
+        <div className="rounded-xl border border-slate-100 bg-white p-4">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">ສຳຮອງຫຼ້າສຸດ</p>
+          <p className="text-lg font-bold text-slate-800 mt-1">{latest?.backup_date || '—'}</p>
+          <p className="text-xs text-slate-400 mt-1">{latest?.source || 'ຍັງບໍ່ມີ backup'}</p>
+        </div>
+        <div className="rounded-xl border border-slate-100 bg-white p-4 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">ສຳຮອງທັນທີ</p>
+            <p className="text-xs text-slate-400 mt-1">ກົດເພື່ອສຳຮອງທັນທີ</p>
+          </div>
+          <button onClick={backupNow} disabled={saving}
+            className="px-4 py-2 rounded-xl bg-primary-600 text-white text-sm font-bold hover:bg-primary-700 disabled:opacity-50">
+            {saving ? 'ກຳລັງສຳຮອງ...' : 'ສຳຮອງດຽວນີ້'}
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          {error.includes('ar_data_backups')
+            ? 'ຍັງບໍ່ພົບ table ar_data_backups — ໃຫ້ run SQL supabase/auto_backup.sql ກ່ອນ'
+            : error}
+        </div>
+      )}
+
+      <div className="rounded-xl border border-slate-100 overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50">
+            <tr>
+              <th className="table-th">ວັນທີ</th>
+              <th className="table-th">ແຫຼ່ງທີ່ມາ</th>
+              <th className="table-th text-right">ໃບບິນ</th>
+              <th className="table-th text-right">ໜີ້</th>
+              <th className="table-th text-right">ກະແສເງິນ</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-50">
+            {loading ? (
+              <tr><td colSpan={5} className="table-td text-center text-slate-400 py-8">ກຳລັງໂຫຼດ...</td></tr>
+            ) : items.length ? items.map(item => (
+              <tr key={item.id}>
+                <td className="table-td font-semibold text-slate-700">{item.backup_date} {item.backup_time}</td>
+                <td className="table-td text-slate-500">{item.source}</td>
+                <td className="table-td text-right font-mono">{item.counts?.ar_bills || 0}</td>
+                <td className="table-td text-right font-mono">{item.counts?.ar_debt || 0}</td>
+                <td className="table-td text-right font-mono">{item.counts?.ar_cashflow || 0}</td>
+              </tr>
+            )) : (
+              <tr><td colSpan={5} className="table-td text-center text-slate-400 py-8">ຍັງບໍ່ມີ backup</td></tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   )
@@ -419,7 +568,7 @@ export default function GeneralSettings() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-slate-800 leading-tight">ຕັ້ງຄ່າທົ່ວໄປ</h1>
-            <p className="text-sm text-slate-400">General Settings — ຈັດການຄ່າ dropdown ທີ່ໃຊ້ໃນໃບບິນ</p>
+            <p className="text-sm text-slate-400">ຈັດການຄ່າຕັ້ງຕ່າງໆທີ່ໃຊ້ໃນລະບົບ</p>
           </div>
         </div>
 
@@ -471,7 +620,7 @@ export default function GeneralSettings() {
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs text-slate-400 bg-slate-100 px-3 py-1.5 rounded-full font-medium">
-                {active?.type === 'config' ? 'ar_config_options' : active?.key}
+                {active?.type === 'config' ? 'ar_config_options' : active?.type === 'backup' ? 'ar_data_backups' : active?.key}
               </span>
             </div>
           </div>
@@ -483,6 +632,9 @@ export default function GeneralSettings() {
             )}
             {active?.type === 'simple' && (
               <SimpleTable tableName={active.key} hint={active.hint} />
+            )}
+            {active?.type === 'backup' && (
+              <BackupPanel hint={active.hint} />
             )}
           </div>
         </div>

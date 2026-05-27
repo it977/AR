@@ -16,6 +16,7 @@ import DebtManagement from './pages/DebtManagement'
 import RBACManagement from './pages/RBACManagement'
 import GeneralSettings from './pages/GeneralSettings'
 import FullReportExport from './components/FullReportExport'
+import AutoBackupRunner from './components/AutoBackupRunner'
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
             path="/*"
             element={
               <ProtectedRoute>
+                <AutoBackupRunner />
                 <Layout>
                   <Routes>
                     <Route path="/" element={<ProtectedRoute permission={PERMISSIONS.PAGE_DAILY_SALES}><DailySales /></ProtectedRoute>} />

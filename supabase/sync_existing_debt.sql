@@ -11,14 +11,15 @@ select
   b.date, b.bill_no, b.customer_type, b.insurance, b.hn, b.patient_name, b.gender, b.workload,
   b.grand_total,
   b.debt as debt_amount,
-  b.date as date_paid,
+  null as date_paid,
   current_date as submit_date,
-  coalesce(b.cash,0)+coalesce(b.bcel,0)+coalesce(b.bcel2,0)+coalesce(b.ldb,0) as amount_paid,
-  coalesce(b.cash,0), coalesce(b.bcel,0), coalesce(b.bcel2,0), coalesce(b.ldb,0),
+  0 as amount_paid,
+  0 as cash_paid, 0 as bcel_paid, 0 as bcel2_paid, 0 as ldb_paid,
   b.debt as balance,
-  (b.date + interval '30 days')::date as due_date,
-  coalesce(b.aging_group, 'N') as aging_group
+  (current_date + (coalesce(i.due_days, 30) || ' days')::interval)::date as due_date,
+  'Due on schedule' as aging_group
 from ar_bills b
+left join ar_insurance_list i on i.name = b.insurance
 where b.debt > 0
   and not exists (
     select 1 from ar_debt d where d.bill_no = b.bill_no

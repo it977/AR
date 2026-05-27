@@ -7,6 +7,16 @@
 alter table ar_bills add column if not exists debt_status      text;
 alter table ar_bills add column if not exists recorded_by      text;
 alter table ar_bills add column if not exists recorded_by_debt text;
+alter table ar_insurance_list add column if not exists due_days integer not null default 30;
+alter table ar_debt add column if not exists payment_1_date date;
+alter table ar_debt add column if not exists payment_1_method text;
+alter table ar_debt add column if not exists payment_1_amount numeric(18,2) default 0;
+alter table ar_debt add column if not exists payment_2_date date;
+alter table ar_debt add column if not exists payment_2_method text;
+alter table ar_debt add column if not exists payment_2_amount numeric(18,2) default 0;
+alter table ar_debt add column if not exists payment_3_date date;
+alter table ar_debt add column if not exists payment_3_method text;
+alter table ar_debt add column if not exists payment_3_amount numeric(18,2) default 0;
 
 -- 2. ອັບເດດ debt_status ຕາມ debt
 update ar_bills set debt_status = 'pending' where (debt_status is null or debt_status = '') and debt > 0;
@@ -23,14 +33,15 @@ select
   b.date, b.bill_no, b.customer_type, b.insurance, b.hn, b.patient_name, b.gender, b.workload,
   b.grand_total,
   b.debt as debt_amount,
-  b.date as date_paid,
+  null as date_paid,
   current_date as submit_date,
-  coalesce(b.cash,0)+coalesce(b.bcel,0)+coalesce(b.bcel2,0)+coalesce(b.ldb,0) as amount_paid,
-  coalesce(b.cash,0), coalesce(b.bcel,0), coalesce(b.bcel2,0), coalesce(b.ldb,0),
+  0 as amount_paid,
+  0 as cash_paid, 0 as bcel_paid, 0 as bcel2_paid, 0 as ldb_paid,
   b.debt as balance,
-  (b.date + interval '30 days')::date as due_date,
-  coalesce(b.aging_group, 'N') as aging_group
+  (current_date + (coalesce(i.due_days, 30) || ' days')::interval)::date as due_date,
+  'Due on schedule' as aging_group
 from ar_bills b
+left join ar_insurance_list i on i.name = b.insurance
 where b.debt > 0
   and not exists (select 1 from ar_debt d where d.bill_no = b.bill_no);
 

@@ -76,6 +76,15 @@ create table if not exists ar_debt (
   bcel_paid       numeric(18,2) default 0,
   bcel2_paid      numeric(18,2) default 0,
   ldb_paid        numeric(18,2) default 0,
+  payment_1_date   date,
+  payment_1_method text,
+  payment_1_amount numeric(18,2) default 0,
+  payment_2_date   date,
+  payment_2_method text,
+  payment_2_amount numeric(18,2) default 0,
+  payment_3_date   date,
+  payment_3_method text,
+  payment_3_amount numeric(18,2) default 0,
   balance         numeric(18,2) default 0,
   due_date        date,
   aging_group     text,
@@ -125,6 +134,7 @@ create table if not exists ar_config_options (
 create table if not exists ar_insurance_list (
   id   uuid primary key default gen_random_uuid(),
   name text not null unique,
+  due_days integer not null default 30,
   created_at timestamptz default now()
 );
 
@@ -657,12 +667,13 @@ insert into ar_debt (
 )
 select
   b.date, b.bill_no, b.customer_type, b.insurance, b.hn, b.patient_name, b.gender, b.workload,
-  b.grand_total, b.debt as debt_amount, b.date as date_paid, current_date as submit_date,
-  coalesce(b.cash,0)+coalesce(b.bcel,0)+coalesce(b.bcel2,0)+coalesce(b.ldb,0) as amount_paid,
-  coalesce(b.cash,0), coalesce(b.bcel,0), coalesce(b.bcel2,0), coalesce(b.ldb,0),
-  b.debt as balance, (b.date + interval '30 days')::date as due_date,
-  coalesce(b.aging_group, 'N') as aging_group
+  b.grand_total, b.debt as debt_amount, null as date_paid, current_date as submit_date,
+  0 as amount_paid,
+  0 as cash_paid, 0 as bcel_paid, 0 as bcel2_paid, 0 as ldb_paid,
+  b.debt as balance, (current_date + (coalesce(i.due_days, 30) || ' days')::interval)::date as due_date,
+  'Due on schedule' as aging_group
 from ar_bills b
+left join ar_insurance_list i on i.name = b.insurance
 where b.debt > 0
   and not exists (select 1 from ar_debt d where d.bill_no = b.bill_no);
 

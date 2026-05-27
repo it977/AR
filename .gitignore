@@ -19,3 +19,10 @@ supabase/.temp/
 # Reports / binary exports
 *.xlsx
 *.pdf
+
+# Local test artifacts
+.tmp/
+backups/
+*-screenshot.png
+ar-*.png
+scripts/probe_supabase.py
