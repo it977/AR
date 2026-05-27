@@ -191,18 +191,13 @@ export default function PaymentChannel() {
 
   const trendOpts = {
     chart: { type: 'bar', stacked: false, toolbar: { show: false }, fontFamily: 'Inter, Noto Sans Lao, sans-serif' },
-    plotOptions: { bar: { borderRadius: 6, columnWidth: '70%', dataLabels: { position: 'top' } } },
+    plotOptions: { bar: { borderRadius: 6, columnWidth: '70%' } },
     colors: METHODS.map(m => m.color),
     xaxis: { categories: months, labels: { style: { colors: '#94a3b8', fontSize: '11px' } } },
     yaxis: { labels: { formatter: v => formatNumber(v), style: { colors: '#94a3b8', fontSize: '10px' } } },
     legend: { labels: { colors: '#64748b' }, position: 'top' },
     grid: { borderColor: '#f1f5f9', strokeDashArray: 4 },
-    dataLabels: {
-      enabled: true,
-      formatter: v => v > 0 ? formatLAK(v) : '',
-      offsetY: -20,
-      style: { fontSize: '10px', colors: ['#475569'], fontWeight: 700 },
-    },
+    dataLabels: { enabled: false },
     tooltip: { y: { formatter: v => `${formatNumber(v)} LAK` } },
   }
 
