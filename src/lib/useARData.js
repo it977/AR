@@ -221,10 +221,14 @@ export function computeServiceData(rows = []) {
 
 export function computeAgingData(debtRows = []) {
   const buckets = Object.fromEntries(AGING_GROUPS.map(group => [group, { balance: 0, bills: 0 }]))
+  // Aging report ສະແດງສະເພາະຍອດທີ່ຍັງຄ້າງຊຳລະ (balance > 0).
+  // ໜີ້ທີ່ຊຳລະແລ້ວ (balance=0) ບໍ່ຄິດເຂົ້າ — ບໍ່ໃຊ່ "ໜີ້ຄ້າງ" ອີກຕໍ່ໄປ.
   debtRows.forEach(r => {
+    const balance = r.balance || 0
+    if (balance <= 0) return
     const g = calcAging(r)
     if (buckets[g]) {
-      buckets[g].balance += r.balance || r.debt_amount || 0
+      buckets[g].balance += balance
       buckets[g].bills   += 1
     }
   })

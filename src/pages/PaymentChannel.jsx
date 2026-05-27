@@ -97,7 +97,11 @@ export default function PaymentChannel() {
   const { filters, updateFilters } = useGlobalFilters()
 
   const { data: rows, loading } = useARData(filters)
-  const { data: debtRows } = usePayoffData(filters)
+  // ສອງມຸມຂອງ ar_debt:
+  //  - debtRows (date_paid)   → cash flow / collection channels ໃນວັນທີ filter (ກົງກັບ Daily Sales)
+  //  - outstandingRows (date) → ໜີ້ຄ້າງຂອງໃບບິນທີ່ອອກໃນວັນທີ filter
+  const { data: debtRows }        = usePayoffData({ ...filters, payoffDateField: 'date_paid' })
+  const { data: outstandingRows } = usePayoffData(filters)
   const { data: cashflowRows } = useCashflowData(filters)
   const kpis = useMemo(() => computeKPIs(rows || []), [rows])
   const hasCashflow = !!cashflowRows?.length
@@ -152,8 +156,9 @@ export default function PaymentChannel() {
   const remainingBalance = useMemo(() => {
     if (useLookerFallback) return LOOKER_CASHFLOW_FALLBACK.balance
     if (hasCashflow) return (cashflowRows || []).reduce((s, r) => s + (r.balance || 0), 0)
-    return (debtRows || []).reduce((s, r) => s + (r.balance || 0), 0)
-  }, [cashflowRows, debtRows, hasCashflow, useLookerFallback])
+    // ໃຊ້ outstandingRows (filter by bill date) ບໍ່ແມ່ນ debtRows (filter by date_paid)
+    return (outstandingRows || []).reduce((s, r) => s + (r.balance || 0), 0)
+  }, [cashflowRows, outstandingRows, hasCashflow, useLookerFallback])
 
   // Monthly breakdown
   const monthly = useMemo(() => {
@@ -186,13 +191,18 @@ export default function PaymentChannel() {
 
   const trendOpts = {
     chart: { type: 'bar', stacked: false, toolbar: { show: false }, fontFamily: 'Inter, Noto Sans Lao, sans-serif' },
-    plotOptions: { bar: { borderRadius: 6, columnWidth: '70%' } },
+    plotOptions: { bar: { borderRadius: 6, columnWidth: '70%', dataLabels: { position: 'top' } } },
     colors: METHODS.map(m => m.color),
     xaxis: { categories: months, labels: { style: { colors: '#94a3b8', fontSize: '11px' } } },
     yaxis: { labels: { formatter: v => formatNumber(v), style: { colors: '#94a3b8', fontSize: '10px' } } },
     legend: { labels: { colors: '#64748b' }, position: 'top' },
     grid: { borderColor: '#f1f5f9', strokeDashArray: 4 },
-    dataLabels: { enabled: false },
+    dataLabels: {
+      enabled: true,
+      formatter: v => v > 0 ? formatLAK(v) : '',
+      offsetY: -20,
+      style: { fontSize: '10px', colors: ['#475569'], fontWeight: 700 },
+    },
     tooltip: { y: { formatter: v => `${formatNumber(v)} LAK` } },
   }
 

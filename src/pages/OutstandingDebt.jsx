@@ -89,13 +89,18 @@ export default function OutstandingDebt() {
 
   const byTypeChartOpts = {
     chart: { type: 'bar', toolbar: { show: false }, fontFamily: 'Inter, Noto Sans Lao, sans-serif' },
-    plotOptions: { bar: { borderRadius: 6, columnWidth: '55%', grouped: true } },
+    plotOptions: { bar: { borderRadius: 6, columnWidth: '55%', grouped: true, dataLabels: { position: 'top' } } },
     colors: ['#4f46e5', '#ef4444'],
     xaxis: { categories: CUSTOMER_TYPES, labels: { style: { colors: '#94a3b8' } } },
     yaxis: { labels: { formatter: v => formatNumber(v), style: { colors: '#94a3b8', fontSize: '10px' } } },
     legend: { labels: { colors: '#64748b' }, position: 'top' },
     grid: { borderColor: '#f1f5f9', strokeDashArray: 4 },
-    dataLabels: { enabled: false },
+    dataLabels: {
+      enabled: true,
+      formatter: v => v > 0 ? formatLAK(v) : '',
+      offsetY: -20,
+      style: { fontSize: '10px', colors: ['#475569'], fontWeight: 700 },
+    },
     tooltip: { y: { formatter: v => `${formatNumber(v)} LAK` } },
   }
 
