@@ -82,7 +82,6 @@ export default function BillsManagement() {
   const [dateTo, setDateTo]   = useState('')
   const [workload, setWorkload] = useState('')
 
-  const [kpis, setKpis] = useState({ total_grand: 0, total_collected: 0, total_debt: 0 })
   const [insuranceDueDays, setInsuranceDueDays] = useState({})
 
   const [modal, setModal]         = useState(null)  // null | { mode: 'add'|'edit', row?: {} }
@@ -122,33 +121,7 @@ export default function BillsManagement() {
     setLoading(false)
   }, [search, dateFrom, dateTo, workload, page, pageSize])
 
-  // Separate KPI fetch — sums ALL matching bills with batch pagination (bypass 1000-row limit)
-  const fetchKpis = useCallback(async () => {
-    const PAGE = 1000
-    let allData = [], from = 0, total = null
-    while (true) {
-      let q = supabase.from('ar_bills')
-        .select('grand_total, cash, bcel, bcel2, ldb, debt', { count: 'exact' })
-      if (search)   q = q.or(`bill_no.ilike.%${search}%,patient_name.ilike.%${search}%`)
-      if (dateFrom) q = q.gte('date', dateFrom)
-      if (dateTo)   q = q.lte('date', dateTo)
-      if (workload) q = q.eq('workload', workload)
-      const { data, count, error } = await q.range(from, from + PAGE - 1)
-      if (error) break
-      if (total === null && count != null) total = count
-      if (data?.length) allData = allData.concat(data)
-      if (!data?.length || allData.length >= (total ?? Infinity) || data.length < PAGE) break
-      from += PAGE
-    }
-    setKpis({
-      total_grand:     allData.reduce((s, r) => s + (r.grand_total || 0), 0),
-      total_collected: allData.reduce((s, r) => s + (r.cash || 0) + (r.bcel || 0) + (r.bcel2 || 0) + (r.ldb || 0), 0),
-      total_debt:      allData.reduce((s, r) => s + (r.debt || 0), 0),
-    })
-  }, [search, dateFrom, dateTo, workload])
-
   useEffect(() => { fetchRows() }, [fetchRows])
-  useEffect(() => { fetchKpis() }, [fetchKpis])
   useEffect(() => { fetchInsuranceDueDays() }, [fetchInsuranceDueDays])
 
   async function upsertArDebt(bill) {
@@ -210,7 +183,7 @@ export default function BillsManagement() {
         await logAction({ action: modal.mode === 'add' ? 'ເພີ່ມໃບບິນ' : 'ແກ້ໄຂໃບບິນ', bill_no: form.bill_no, patient_name: form.patient_name, amount: form.grand_total, recorder: form.recorded_by })
       } catch (logErr) {
       }
-      setModal(null); fetchRows(); fetchKpis()
+      setModal(null); fetchRows()
     } else {
       if (error.message?.includes('duplicate key') || error.code === '23505') {
         setSubmitError('ໃບບິນເລກ "' + form.bill_no + '" ວັນທີ "' + form.date + '" ກະວຽກ "' + form.workload + '" ມີຢູ່ໃນລະບົບແລ້ວ — ກວດສອບຂໍ້ມູນຄືນ')
@@ -233,7 +206,7 @@ export default function BillsManagement() {
         await logAction({ action: 'ລົບໃບບິນ', bill_no: delTarget.bill_no, patient_name: delTarget.patient_name, amount: delTarget.grand_total })
       } catch (logErr) {
       }
-      setDelTarget(null); fetchRows(); fetchKpis()
+      setDelTarget(null); fetchRows()
     } else {
       alert('Error: ' + error.message)
     }
@@ -250,7 +223,7 @@ export default function BillsManagement() {
         await logAction({ action: 'ລຶບຂໍ້ມູນທັງໝົດ', details: 'ລຶບທັງ ar_bills ແລະ ar_debt' })
       } catch (logErr) {
       }
-      setDelAll(false); fetchRows(); fetchKpis()
+      setDelAll(false); fetchRows()
     } else {
       alert('Error: ' + (errorBills?.message || errorDebt?.message || 'Unknown error'))
     }
@@ -331,7 +304,6 @@ export default function BillsManagement() {
 
       alert(`ສົ່ງ ${newRecords.length} ໃບບິນ ໄປໜ້າຈັດການໜີ້ຄ້າງສຳເລັດ!`)
       fetchRows()
-      fetchKpis()
     } catch (err) {
       alert('ຜິດພາດ: ' + err.message)
     } finally {
@@ -374,7 +346,6 @@ export default function BillsManagement() {
       } catch (_) {}
       setUploadState(s => ({ ...s, log: [...log], progress: 100 }))
       fetchRows()
-      fetchKpis()
     } catch (err) {
       addLog(`✗ ${err.message}`, false)
       setUploadState(s => ({ ...(s || { progress: 0, done: 0, total: 0, fileName: file.name }), error: err.message, log: [...log] }))
@@ -444,22 +415,6 @@ export default function BillsManagement() {
           </button>
           </Can>
         </div>
-      </div>
-
-      {/* KPI Summary Boxes */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: 'ຍອດຂາຍລວມ', value: kpis.total_grand, color: 'text-slate-700', bg: 'bg-white border-slate-200' },
-          { label: 'ເງິນທີ່ຮັບແລ້ວ', value: kpis.total_collected, color: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-200' },
-          { label: 'ໜີ້ຄ້າງຊຳລະ', value: kpis.total_debt, color: 'text-red-600', bg: 'bg-red-50 border-red-200' },
-          { label: 'ຈຳນວນໃບບິນ', value: total, color: 'text-slate-700', bg: 'bg-white border-slate-200', isCount: true },
-        ].map(k => (
-          <div key={k.label} className={`rounded-xl p-3 border ${k.bg}`}>
-            <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">{k.label}</p>
-            <p className={`text-lg font-bold mt-1 font-mono ${k.color}`}>{fmt(k.value)}</p>
-            {!k.isCount && <p className="text-[10px] text-slate-400 mt-0.5">LAK</p>}
-          </div>
-        ))}
       </div>
 
       {/* Filters */}
