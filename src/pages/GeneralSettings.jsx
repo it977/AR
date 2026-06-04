@@ -436,7 +436,6 @@ function SimpleTable({ tableName, hint }) {
   )
 }
 
-// ============================================================
 // Auto backup panel
 // ============================================================
 function BackupPanel({ hint }) {

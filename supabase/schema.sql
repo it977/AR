@@ -43,6 +43,10 @@ create table if not exists ar_bills (
   ldb             numeric(18,2) default 0,
   debt            numeric(18,2) default 0,  -- outstanding_debt
   prepayment      numeric(18,2) default 0,
+  payment_type    text,
+  bill_issued_at  timestamptz,
+  due_date        date,
+  debt_status     text,
   note            text,
   aging_group     text,
   source_key      text,
@@ -59,6 +63,8 @@ create index if not exists idx_ar_bills_workload      on ar_bills(workload);
 create index if not exists idx_ar_bills_customer_type on ar_bills(customer_type);
 create index if not exists idx_ar_bills_insurance     on ar_bills(insurance);
 create index if not exists idx_ar_bills_aging         on ar_bills(aging_group);
+create index if not exists idx_ar_bills_payment_type  on ar_bills(payment_type);
+create index if not exists idx_ar_bills_due_date      on ar_bills(due_date);
 
 -- ============================================================
 -- 2. ar_debt — ໜີ້ຄ້າງ / ປະກັນ (Insurance & Debt Payoff)
@@ -67,6 +73,9 @@ create table if not exists ar_debt (
   id            uuid default gen_random_uuid() primary key,
   date          date,
   bill_no       text,
+  insite_onsite text,
+  opd_ipd       text,
+  payment_type  text,
   customer_type text,
   insurance     text,
   hn            text,
@@ -99,7 +108,7 @@ create table if not exists ar_debt (
 
   balance         numeric(18,2) default 0,  -- ຍອດຄ້າງ
   due_date        date,
-  aging_group     text,  -- 'N' | 'Due on schedule' | 'Pay in installments' | '1-15 Days' | '16-30 Days' | '31-45 Days' | '46-60+ Days'
+  aging_group     text,  -- 'Current Receivables' | '1-15 Days' | '16-30 Days' | '31-45 Days' | '46-90 Days'
   source_key      text,
 
   created_at      timestamptz default now(),
@@ -112,6 +121,7 @@ create index if not exists idx_ar_debt_date      on ar_debt(date);
 create index if not exists idx_ar_debt_insurance on ar_debt(insurance);
 create index if not exists idx_ar_debt_aging     on ar_debt(aging_group);
 create index if not exists idx_ar_debt_type      on ar_debt(customer_type);
+create index if not exists idx_ar_debt_due_date  on ar_debt(due_date);
 
 -- ============================================================
 -- 2b. ar_cashflow — Looker/Summary_CashFlow source

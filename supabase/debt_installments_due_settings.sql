@@ -34,12 +34,10 @@ where due_date is null
 
 update ar_debt
 set aging_group = case
-  when submit_date is null then 'N'
-  when coalesce(amount_paid, 0) > 0 and coalesce(balance, 0) > 0 then 'Pay in installments'
-  when current_date <= due_date then 'Due on schedule'
+  when current_date <= due_date then 'Current Receivables'
   when current_date - due_date <= 15 then '1-15 Days'
   when current_date - due_date <= 30 then '16-30 Days'
   when current_date - due_date <= 45 then '31-45 Days'
-  else '46-60+ Days'
+  else '46-90 Days'
 end
-where due_date is not null or submit_date is null;
+where due_date is not null;

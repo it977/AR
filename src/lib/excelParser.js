@@ -1,5 +1,11 @@
 import * as XLSX from 'xlsx'
-import { summarizeInstallments, calcAging, normalizeAgingGroup } from './debtUtils'
+import {
+  summarizeInstallments,
+  calcAging,
+  normalizeAgingGroup,
+  normalizePaymentType,
+  resolvePaymentStatus,
+} from './debtUtils'
 
 const MAP_BILLS = {
   'Date': 'date',
@@ -32,6 +38,13 @@ const MAP_BILLS = {
   'Transfer Payment by LDB': 'ldb',
   'Outstanding Debt': 'debt',
   'Prepayment': 'prepayment',
+  'Payment Type': 'payment_type',
+  'Payment Category': 'payment_type',
+  'Due date': 'due_date',
+  'Due Date': 'due_date',
+  'Bill Issued At': 'bill_issued_at',
+  'Bill Issued DateTime': 'bill_issued_at',
+  'Bill Issued Date Time': 'bill_issued_at',
   'Note': 'note',
   'Aging Group': 'aging_group',
   'Recorder': 'recorded_by',
@@ -43,6 +56,8 @@ const MAP_DEBT = {
   'Date': 'date',
   'Workload': 'workload',
   'Bill No': 'bill_no',
+  'Insite-Onsite': 'insite_onsite',
+  'OPD-IPD': 'opd_ipd',
   'Customer Type Code': 'customer_type',
   'Insurance': 'insurance',
   'HN': 'hn',
@@ -60,6 +75,9 @@ const MAP_DEBT = {
   'Transfer Payment by LDB Debt': 'ldb_paid',
   'Balance': 'balance',
   'Due date': 'due_date',
+  'Due Date': 'due_date',
+  'Payment Type': 'payment_type',
+  'Payment Category': 'payment_type',
   'Payment 1 Date': 'payment_1_date',
   'Payment 1 Method': 'payment_1_method',
   'Payment 1 Amount': 'payment_1_amount',
@@ -85,6 +103,7 @@ const MAP_CASHFLOW = {
 }
 
 const DATE_COLS = new Set(['date', 'date_paid', 'submit_date', 'due_date', 'payment_1_date', 'payment_2_date', 'payment_3_date'])
+const DATETIME_COLS = new Set(['bill_issued_at'])
 
 const NUMERIC_COLS = new Set([
   'svc_opd','svc_diag_image','svc_ipd','svc_surg_ot','svc_emergency',
@@ -139,6 +158,42 @@ function toIsoDate(val) {
   return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
 }
 
+function toIsoDateTime(val) {
+  let y, m, d, hh = 0, mm = 0, ss = 0
+
+  if (val instanceof Date) {
+    y = val.getFullYear()
+    m = val.getMonth() + 1
+    d = val.getDate()
+    hh = val.getHours()
+    mm = val.getMinutes()
+    ss = val.getSeconds()
+  } else if (typeof val === 'number') {
+    const parsed = XLSX.SSF.parse_date_code(val)
+    if (parsed?.y && parsed?.m && parsed?.d) {
+      y = parsed.y; m = parsed.m; d = parsed.d
+      hh = parsed.H || 0; mm = parsed.M || 0; ss = Math.floor(parsed.S || 0)
+    }
+  } else {
+    const s = String(val).trim()
+    const direct = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/)
+    if (direct) {
+      y = parseInt(direct[1]); m = parseInt(direct[2]); d = parseInt(direct[3])
+      hh = parseInt(direct[4] || '0'); mm = parseInt(direct[5] || '0'); ss = parseInt(direct[6] || '0')
+    } else {
+      const parsed = new Date(s)
+      if (parsed && !isNaN(parsed.getTime())) {
+        y = parsed.getFullYear(); m = parsed.getMonth() + 1; d = parsed.getDate()
+        hh = parsed.getHours(); mm = parsed.getMinutes(); ss = parsed.getSeconds()
+      }
+    }
+  }
+
+  if (!y || !m || !d) return null
+  if (y < 2000 || m > 12 || d > 31) return null
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
+}
+
 function parseRow(row, columnMap) {
   const out = {}
   for (const [excelCol, dbCol] of Object.entries(columnMap)) {
@@ -151,6 +206,8 @@ function parseRow(row, columnMap) {
       out[dbCol] = NUMERIC_COLS.has(dbCol) ? 0 : null
     } else if (DATE_COLS.has(dbCol)) {
       out[dbCol] = toIsoDate(val)
+    } else if (DATETIME_COLS.has(dbCol)) {
+      out[dbCol] = toIsoDateTime(val)
     } else if (NUMERIC_COLS.has(dbCol)) {
       if (typeof val === 'number') {
         out[dbCol] = isNaN(val) ? 0 : val
@@ -160,6 +217,8 @@ function parseRow(row, columnMap) {
       }
     } else if (dbCol === 'aging_group') {
       out[dbCol] = normalizeAgingGroup(val) || val
+    } else if (dbCol === 'payment_type') {
+      out[dbCol] = normalizePaymentType(val) || val
     } else {
       out[dbCol] = val
     }
@@ -183,7 +242,7 @@ function parseSheet(sheet, columnMap, addDebtStatus = false, sheetName = 'Sheet'
   const parsed = rows.map((r, index) => {
     const row = parseRow(normalizeKeys(r), columnMap)
     row.source_key = makeSourceKey(sheetName, index + 2, row)
-    if (addDebtStatus) row.debt_status = (row.debt || 0) > 0 ? 'pending' : null
+    if (addDebtStatus) row.debt_status = resolvePaymentStatus(row)
     return row
   }).filter(r => r.bill_no && r.date)
 
@@ -240,7 +299,7 @@ export function parseExcelFile(file) {
               .map(d => ({
                 bill_no: d.bill_no,
                 date: d.date,
-                debt_status: (d.balance ?? 0) > 0 ? 'pending' : 'paid',
+                debt_status: resolvePaymentStatus(d),
               }))
           } else if (lower.includes('summary_cashflow')) {
             result.cashflow = parseSheet(sheet, MAP_CASHFLOW, false, name)

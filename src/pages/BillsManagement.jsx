@@ -7,7 +7,14 @@ import BillForm from '../components/forms/BillForm'
 import LoadingSpinner from '../components/LoadingSpinner'
 import Can from '../components/Can'
 import { PERMISSIONS } from '../lib/rbac'
-import { DEFAULT_DUE_DAYS, calcAging, calcDueDate, todayIso } from '../lib/debtUtils'
+import {
+  DEFAULT_DUE_DAYS,
+  PAYMENT_TYPES,
+  calcAging,
+  calcDueDate,
+  resolvePaymentStatus,
+  todayIso,
+} from '../lib/debtUtils'
 import { parseExcelFile } from '../lib/excelParser'
 import { upsertRows } from '../lib/excelUpload'
 
@@ -19,11 +26,11 @@ const DAILY_HEADERS = [
   'Supporting & Ancillary Services','Admin & Non-Clinical Services','Home care Services',
   'Total','Discounts','Grand Total','Cash Received',
   'Transfer Payment by BCEL','Transfer Payment by BCEL2','Transfer Payment by LDB',
-  'Outstanding Debt','Prepayment','Note','Recorder',
+  'Outstanding Debt','Prepayment','Payment Type','Due date','Bill Issued At','Note','Recorder',
 ]
 const SAMPLE_DAILY = [
   [new Date(2026, 0, 1),'Week 1','8AM-4PM','BILL-001','Insite','OPD','GN','','HN001','ສົມສາຍ','Male',
-   50000,0,0,0,0,0,20000,0,0,0,70000,0,70000,70000,0,0,0,0,0,'','ມະນີວັນ'],
+   50000,0,0,0,0,0,20000,0,0,0,70000,0,70000,70000,0,0,0,0,0,'Cash','','2026-01-01T08:30','','ມະນີວັນ'],
 ]
 function downloadTemplate() {
   const wb = XLSX.utils.book_new()
@@ -54,17 +61,34 @@ const CHANNEL_BADGE = {
 }
 const CHANNEL_LABEL = { cash: 'Cash', bcel: 'BCEL', bcel2: 'BCEL2', ldb: 'LDB' }
 
+function displayPaymentType(row) {
+  if (row.payment_type) return row.payment_type
+  const cash = Number(row.cash) || 0
+  const transfer = (Number(row.bcel) || 0) + (Number(row.bcel2) || 0) + (Number(row.ldb) || 0)
+  if (cash > 0 && transfer > 0) return 'Cash/Transfer'
+  if (cash > 0) return 'Cash'
+  if (transfer > 0) return 'Transfer'
+  return ''
+}
+
 function PaymentChannels({ row }) {
   const channels = ['cash','bcel','bcel2','ldb'].filter(k => (row[k] || 0) > 0)
-  if (!channels.length) return <span className="text-slate-300 text-xs">—</span>
   return (
-    <div className="flex flex-wrap items-center gap-1">
-      {channels.map(k => (
-        <span key={k} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-semibold ${CHANNEL_BADGE[k]}`}
-              title={`${CHANNEL_LABEL[k]}: ${fmt(row[k])}`}>
-          {CHANNEL_LABEL[k]}
-        </span>
-      ))}
+    <div className="flex flex-col items-start gap-1">
+      {!!channels.length && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {channels.map(k => (
+            <span key={k} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-semibold ${CHANNEL_BADGE[k]}`}
+                  title={`${CHANNEL_LABEL[k]}: ${fmt(row[k])}`}>
+              {CHANNEL_LABEL[k]}
+            </span>
+          ))}
+        </div>
+      )}
+      {row.debt > 0 && (
+        <span className="font-mono text-xs font-semibold text-red-600">{fmt(row.debt)}</span>
+      )}
+      {!channels.length && !(row.debt > 0) && <span className="text-slate-300 text-xs">—</span>}
     </div>
   )
 }
@@ -81,6 +105,9 @@ export default function BillsManagement() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo]   = useState('')
   const [workload, setWorkload] = useState('')
+  const [customerTypeFilter, setCustomerTypeFilter] = useState('')
+  const [bankFilter, setBankFilter] = useState('')
+  const [paymentTypeFilter, setPaymentTypeFilter] = useState('')
 
   const [insuranceDueDays, setInsuranceDueDays] = useState({})
 
@@ -111,6 +138,13 @@ export default function BillsManagement() {
     if (dateFrom) q = q.gte('date', dateFrom)
     if (dateTo)   q = q.lte('date', dateTo)
     if (workload) q = q.eq('workload', workload)
+    if (customerTypeFilter) q = q.eq('customer_type', customerTypeFilter)
+    if (paymentTypeFilter) q = q.eq('payment_type', paymentTypeFilter)
+    if (bankFilter === 'cash') q = q.gt('cash', 0)
+    if (bankFilter === 'bcel') q = q.gt('bcel', 0)
+    if (bankFilter === 'bcel2') q = q.gt('bcel2', 0)
+    if (bankFilter === 'ldb') q = q.gt('ldb', 0)
+    if (bankFilter === 'debt') q = q.gt('debt', 0)
 
     const { data, count, error } = await q
       .order('date', { ascending: false })
@@ -119,7 +153,7 @@ export default function BillsManagement() {
 
     if (!error) { setRows(data || []); setTotal(count || 0) }
     setLoading(false)
-  }, [search, dateFrom, dateTo, workload, page, pageSize])
+  }, [search, dateFrom, dateTo, workload, customerTypeFilter, paymentTypeFilter, bankFilter, page, pageSize])
 
   useEffect(() => { fetchRows() }, [fetchRows])
   useEffect(() => { fetchInsuranceDueDays() }, [fetchInsuranceDueDays])
@@ -129,6 +163,9 @@ export default function BillsManagement() {
     const debtRecord = {
       date: bill.date,
       bill_no: bill.bill_no,
+      insite_onsite: bill.insite_onsite,
+      opd_ipd: bill.opd_ipd,
+      payment_type: displayPaymentType(bill) || null,
       customer_type: bill.customer_type,
       insurance: bill.insurance,
       hn: bill.hn,
@@ -145,10 +182,10 @@ export default function BillsManagement() {
       bcel2_paid: 0,
       ldb_paid: 0,
       balance: bill.debt,
-      due_date: calcDueDate(submitDate, insuranceDueDays, bill.insurance),
+      due_date: bill.due_date || calcDueDate(submitDate, insuranceDueDays, bill.insurance),
       aging_group: calcAging({
         submit_date: submitDate,
-        due_date: calcDueDate(submitDate, insuranceDueDays, bill.insurance),
+        due_date: bill.due_date || calcDueDate(submitDate, insuranceDueDays, bill.insurance),
         balance: bill.debt,
       }),
     }
@@ -161,20 +198,37 @@ export default function BillsManagement() {
   }
 
   async function handleSubmit(form) {
-    setSaving(true)
     setSubmitError('')
-    const payload = { ...form, debt_status: (form.debt || 0) > 0 ? 'pending' : null }
+    setSaving(true)
+    const normalizedForm = {
+      ...form,
+      payment_type: form.payment_type,
+      bill_issued_at: form.bill_issued_at || null,
+      due_date: null,
+    }
+    const payload = { ...normalizedForm, debt_status: resolvePaymentStatus(normalizedForm) }
     let error
     if (modal.mode === 'add') {
       ;({ error } = await supabase.from('ar_bills').insert(payload))
     } else {
       ;({ error } = await supabase.from('ar_bills').update(payload).eq('id', form.id))
     }
+    if (error && ['payment_type', 'due_date', 'bill_issued_at'].some(col => error.message?.includes(col))) {
+      const fallbackPayload = { ...payload }
+      ;['payment_type', 'due_date', 'bill_issued_at'].forEach(col => {
+        delete fallbackPayload[col]
+      })
+      if (modal.mode === 'add') {
+        ;({ error } = await supabase.from('ar_bills').insert(fallbackPayload))
+      } else {
+        ;({ error } = await supabase.from('ar_bills').update(fallbackPayload).eq('id', form.id))
+      }
+    }
     setSaving(false)
     if (!error) {
       // Auto-sync ໄປ ar_debt ທັນທີ ຖ້າມີໜີ້
-      if ((form.debt || 0) > 0) {
-        try { await upsertArDebt(form) } catch (e) {}
+      if ((normalizedForm.debt || 0) > 0) {
+        try { await upsertArDebt(normalizedForm) } catch (e) {}
       } else if (modal.mode === 'edit') {
         // ຖ້າແກ້ໄຂໃຫ້ໜີ້ = 0 ໃຫ້ລຶບອອກຈາກ ar_debt
         try { await supabase.from('ar_debt').delete().eq('bill_no', form.bill_no) } catch (e) {}
@@ -237,7 +291,7 @@ export default function BillsManagement() {
         .from('ar_bills')
         .select('*')
         .gt('debt', 0)
-        .eq('debt_status', 'pending') // ເອົາສະເພາະຍັງບໍ່ທັນສົ່ງໄປ ar_debt
+        .in('debt_status', ['pending', 'overdue', 'deposit']) // ເອົາສະເພາະຍັງບໍ່ທັນສົ່ງໄປ ar_debt
       if (fetchError) throw fetchError
 
       if (!billsWithDebt || billsWithDebt.length === 0) {
@@ -251,6 +305,9 @@ export default function BillsManagement() {
       const debtRecords = billsWithDebt.map(bill => ({
         date: bill.date,
         bill_no: bill.bill_no,
+        insite_onsite: bill.insite_onsite,
+        opd_ipd: bill.opd_ipd,
+        payment_type: displayPaymentType(bill) || null,
         customer_type: bill.customer_type,
         insurance: bill.insurance,
         hn: bill.hn,
@@ -267,10 +324,10 @@ export default function BillsManagement() {
         bcel2_paid: 0,
         ldb_paid: 0,
         balance: bill.debt,
-        due_date: calcDueDate(submitDate, insuranceDueDays, bill.insurance),
+        due_date: bill.due_date || calcDueDate(submitDate, insuranceDueDays, bill.insurance),
         aging_group: calcAging({
           submit_date: submitDate,
-          due_date: calcDueDate(submitDate, insuranceDueDays, bill.insurance),
+          due_date: bill.due_date || calcDueDate(submitDate, insuranceDueDays, bill.insurance),
           balance: bill.debt,
         }),
       }))
@@ -436,6 +493,34 @@ export default function BillsManagement() {
           </select>
         </div>
         <div>
+          <label className="block text-xs font-semibold text-slate-500 mb-1">ປະເພດລູກຄ້າ</label>
+          <select value={customerTypeFilter} onChange={e => { setCustomerTypeFilter(e.target.value); setPage(0) }}
+            className="text-xs border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            <option value="">ທັງໝົດ</option>
+            {['GN', 'INS', 'B2B'].map(type => <option key={type} value={type}>{type}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-slate-500 mb-1">Payment Type</label>
+          <select value={paymentTypeFilter} onChange={e => { setPaymentTypeFilter(e.target.value); setPage(0) }}
+            className="text-xs border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            <option value="">ທັງໝົດ</option>
+            {PAYMENT_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-slate-500 mb-1">ທະນາຄານ</label>
+          <select value={bankFilter} onChange={e => { setBankFilter(e.target.value); setPage(0) }}
+            className="text-xs border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            <option value="">ທັງໝົດ</option>
+            <option value="cash">Cash</option>
+            <option value="bcel">BCEL</option>
+            <option value="bcel2">BCEL 2</option>
+            <option value="ldb">LDB</option>
+            <option value="debt">ມີໜີ້</option>
+          </select>
+        </div>
+        <div>
           <label className="block text-xs font-semibold text-slate-500 mb-1">ຈາກວັນທີ</label>
           <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setPage(0) }}
             className="text-xs border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400" />
@@ -455,8 +540,8 @@ export default function BillsManagement() {
             <option value={200}>200 ແຖວ</option>
           </select>
         </div>
-        {(search || dateFrom || dateTo || workload) && (
-          <button onClick={() => { setSearch(''); setDateFrom(''); setDateTo(''); setWorkload(''); setPage(0) }}
+        {(search || dateFrom || dateTo || workload || customerTypeFilter || paymentTypeFilter || bankFilter) && (
+          <button onClick={() => { setSearch(''); setDateFrom(''); setDateTo(''); setWorkload(''); setCustomerTypeFilter(''); setPaymentTypeFilter(''); setBankFilter(''); setPage(0) }}
             className="text-xs text-slate-500 hover:text-slate-800 underline">
             ລ້າງ
           </button>
@@ -466,7 +551,7 @@ export default function BillsManagement() {
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1380px]">
+          <table className="w-full min-w-[1180px]">
             <thead>
               <tr className="border-b border-slate-100">
                 <th className="table-th">ເລກໃບບິນ</th>
@@ -474,10 +559,9 @@ export default function BillsManagement() {
                 <th className="table-th">ຊື່ຄົນເຈັບ</th>
                 <th className="table-th">ປະເພດ</th>
                 <th className="table-th">OPD/IPD</th>
-                <th className="table-th">ລາຍຮັບຕາມບໍລິການ</th>
+                <th className="table-th">Payment Type</th>
                 <th className="table-th text-right">ຍອດລວມສຸດທິ</th>
                 <th className="table-th">ທະນາຄານ</th>
-                <th className="table-th text-right">ໜີ້</th>
                 <th className="table-th">ກະ</th>
                 <th className="table-th">ຜູ້ບັນທຶກ</th>
                 <th className="table-th"></th>
@@ -485,9 +569,9 @@ export default function BillsManagement() {
             </thead>
             <tbody className="divide-y divide-slate-50">
               {loading ? (
-                <tr><td colSpan={12} className="table-td text-center py-12 text-slate-400">ກຳລັງໂຫຼດ...</td></tr>
+                <tr><td colSpan={11} className="table-td text-center py-12 text-slate-400">ກຳລັງໂຫຼດ...</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={12} className="table-td text-center py-12 text-slate-400">ບໍ່ມີຂໍ້ມູນ</td></tr>
+                <tr><td colSpan={11} className="table-td text-center py-12 text-slate-400">ບໍ່ມີຂໍ້ມູນ</td></tr>
               ) : rows.map(row => (
                 <tr key={row.id} className="hover:bg-slate-50 transition-colors">
                   <td className="table-td font-mono text-xs font-semibold text-primary-600">{row.bill_no}</td>
@@ -500,30 +584,14 @@ export default function BillsManagement() {
                   </td>
                   <td className="table-td text-xs">{row.opd_ipd}</td>
                   <td className="table-td">
-                    <div className="flex items-center gap-1 overflow-hidden whitespace-nowrap max-w-[360px]">
-                      {[
-                        ['OPD', row.svc_opd], ['Diag', row.svc_diag_image], ['IPD', row.svc_ipd],
-                        ['Surg', row.svc_surg_ot], ['ER', row.svc_emergency], ['Chronic', row.svc_chronic],
-                        ['Pharma', row.svc_pharma], ['Support', row.svc_support], ['Admin', row.svc_admin], ['Home', row.svc_homecare],
-                      ].filter(([, v]) => v > 0).map(([lbl, v]) => (
-                        <span key={lbl} className="inline-flex shrink-0 items-center gap-0.5 px-1.5 py-0.5 bg-primary-50 text-primary-700 text-[10px] font-semibold rounded">
-                          {lbl}: {fmt(v)}
-                        </span>
-                      ))}
-                      {!['svc_opd','svc_diag_image','svc_ipd','svc_surg_ot','svc_emergency','svc_chronic','svc_pharma','svc_support','svc_admin','svc_homecare'].some(k => row[k] > 0) && (
-                        <span className="text-slate-300 text-xs">—</span>
-                      )}
-                    </div>
+                    {displayPaymentType(row) ? (
+                      <span className="badge bg-slate-100 text-slate-700">{displayPaymentType(row)}</span>
+                    ) : (
+                      <span className="text-slate-300">—</span>
+                    )}
                   </td>
                   <td className="table-td text-right font-mono text-xs">{fmt(row.grand_total)}</td>
                   <td className="table-td"><PaymentChannels row={row} /></td>
-                  <td className="table-td text-right font-mono text-xs">
-                    {row.debt > 0 ? (
-                      <span className="text-red-600 font-semibold">{fmt(row.debt)}</span>
-                    ) : (
-                      <span className="text-emerald-600">0</span>
-                    )}
-                  </td>
                   <td className="table-td text-xs text-slate-500">{row.workload}</td>
                   <td className="table-td text-xs text-slate-600">{row.recorded_by || <span className="text-slate-300">—</span>}</td>
                   <td className="table-td">

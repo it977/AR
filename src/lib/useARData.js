@@ -1,6 +1,20 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from './supabase'
-import { AGING_GROUPS, calcAging } from './debtUtils'
+import {
+  AGING_BUCKETS,
+  AGING_GROUPS,
+  PAYMENT_STATUSES,
+  SERVICE_FIELDS,
+  calcAging,
+  calcAgingBucket,
+  derivePaymentType,
+  getAdvanceAmount,
+  getBillingCollectedAmount,
+  getDebtCollectedAmount,
+  getDepositAmount,
+  resolvePaymentStatus,
+  toNumber,
+} from './debtUtils'
 
 // ============================================================
 // Hooks
@@ -157,23 +171,24 @@ export function computeKPIs(rows = []) {
   const bcel   = rows.reduce((s, r) => s + (r.bcel  || 0), 0)
   const bcel2  = rows.reduce((s, r) => s + (r.bcel2 || 0), 0)
   const ldb    = rows.reduce((s, r) => s + (r.ldb   || 0), 0)
+  const prepayment = rows.reduce((s, r) => s + (r.prepayment || 0), 0)
   const outstandingDebt = rows.reduce((s, r) => s + (r.debt || 0), 0)
   // actualIncome = cash collected at billing time (cash + bcel + bcel2 + ldb)
-  const actualIncome    = cash + bcel + bcel2 + ldb
+  const actualIncome    = cash + bcel + bcel2 + ldb + prepayment
   // dailyIncome = Actual Total Sale - Outstanding Debts
   const dailyIncome     = totalSales - outstandingDebt
 
   // Use debt_status column for accurate bill counts (matches PDF definitions)
   // null = paid in full at billing | 'pending' = still outstanding | 'paid' = collected via Pay off
-  const paidBills        = rows.filter(r => !r.debt_status).length
-  const outstandingBills = rows.filter(r => r.debt_status === 'pending').length
+  const paidBills        = rows.filter(r => resolvePaymentStatus(r) === 'paid').length
+  const outstandingBills = rows.filter(r => ['pending', 'overdue'].includes(resolvePaymentStatus(r))).length
   const collectionBills  = rows.filter(r => r.debt_status === 'paid').length
   const discountedBills  = rows.filter(r => r.discounts && r.discounts > 0).length
 
   return {
     totalSalesGross, totalSales, totalDiscounts, totalBills, uniqueCustomers,
     actualIncome, outstandingDebt, dailyIncome,
-    cash, bcel, bcel2, ldb,
+    cash, bcel, bcel2, ldb, prepayment,
     paidBills, outstandingBills, collectionBills, discountedBills,
   }
 }
@@ -217,6 +232,120 @@ export function computeServiceData(rows = []) {
     svc['Support']     += r.svc_support    || 0
   })
   return svc
+}
+
+export function computePaymentTypeSummary(rows = []) {
+  const init = {
+    Cash: { bills: 0, amount: 0 },
+    Transfer: { bills: 0, amount: 0 },
+    'Cash/Transfer': { bills: 0, amount: 0 },
+    Transacted: { bills: 0, amount: 0 },
+    Deposit: { bills: 0, amount: 0 },
+    Advance: { bills: 0, amount: 0 },
+  }
+  rows.forEach(row => {
+    const type = derivePaymentType(row)
+    const bucket = init[type] || init.Transacted
+    bucket.bills += 1
+    if (type === 'Deposit') bucket.amount += getDepositAmount(row)
+    else if (type === 'Advance') bucket.amount += getAdvanceAmount(row)
+    else bucket.amount += getBillingCollectedAmount(row) || (toNumber(row.balance ?? row.debt) <= 0 ? toNumber(row.grand_total) : 0)
+  })
+  return init
+}
+
+export function computeStatusSummary(rows = []) {
+  const init = Object.fromEntries(PAYMENT_STATUSES.map(status => [status, { bills: 0, amount: 0 }]))
+  rows.forEach(row => {
+    const status = resolvePaymentStatus(row)
+    const bucket = init[status] || init.pending
+    const balance = toNumber(row.balance ?? row.debt)
+    bucket.bills += 1
+    if (status === 'deposit') bucket.amount += getDepositAmount(row) || balance
+    else if (status === 'advance') bucket.amount += getAdvanceAmount(row)
+    else if (status === 'paid') bucket.amount += getDebtCollectedAmount(row) || getBillingCollectedAmount(row) || toNumber(row.grand_total)
+    else bucket.amount += balance
+  })
+  return init
+}
+
+export function computeAgingBucketData(rows = []) {
+  const buckets = Object.fromEntries(AGING_BUCKETS.map(bucket => [bucket, { balance: 0, bills: 0 }]))
+  rows.forEach(row => {
+    const balance = toNumber(row.balance ?? row.debt)
+    if (balance <= 0) return
+    const bucket = calcAgingBucket(row)
+    buckets[bucket].balance += balance
+    buckets[bucket].bills += 1
+  })
+  return buckets
+}
+
+export function computeServiceSummary(rows = []) {
+  return SERVICE_FIELDS.map(({ key, label }) => {
+    const bills = new Set()
+    const clients = new Set()
+    let amount = 0
+    rows.forEach(row => {
+      const value = toNumber(row[key])
+      if (value <= 0) return
+      amount += value
+      bills.add(row.bill_no || row.id || `${label}-${bills.size}`)
+      clients.add(row.hn || row.patient_name || row.bill_no || row.id || `${label}-${clients.size}`)
+    })
+    const billCount = bills.size
+    const clientCount = clients.size
+    return {
+      key,
+      label,
+      amount,
+      bills: billCount,
+      clients: clientCount,
+      averagePerClient: clientCount > 0 ? amount / clientCount : 0,
+    }
+  }).sort((a, b) => b.amount - a.amount)
+}
+
+export function computeLocationSummary(rows = []) {
+  const init = {
+    Insite: { bills: new Set(), amount: 0 },
+    Onsite: { bills: new Set(), amount: 0 },
+  }
+  rows.forEach(row => {
+    const key = row.insite_onsite === 'Onsite' ? 'Onsite' : 'Insite'
+    init[key].bills.add(row.bill_no || row.id || `${key}-${init[key].bills.size}`)
+    init[key].amount += toNumber(row.grand_total)
+  })
+  return Object.fromEntries(Object.entries(init).map(([key, value]) => {
+    const bills = value.bills.size
+    return [key, {
+      bills,
+      amount: value.amount,
+      averagePerBill: bills > 0 ? value.amount / bills : 0,
+    }]
+  }))
+}
+
+export function computeDebtCollectionStats(rows = []) {
+  const cash = rows.reduce((s, r) => s + (r.cash_paid || 0), 0)
+  const bcel = rows.reduce((s, r) => s + (r.bcel_paid || 0), 0)
+  const bcel2 = rows.reduce((s, r) => s + (r.bcel2_paid || 0), 0)
+  const ldb = rows.reduce((s, r) => s + (r.ldb_paid || 0), 0)
+  const fallbackAmount = rows.reduce((s, r) => {
+    const paid = getDebtCollectedAmount(r)
+    if (paid > 0) return s + paid
+    const debtPaid = toNumber(r.debt_amount) - toNumber(r.balance)
+    return s + (debtPaid > 0 ? debtPaid : 0)
+  }, 0)
+  const channelAmount = cash + bcel + bcel2 + ldb
+  return {
+    amount: channelAmount > 0 ? channelAmount : fallbackAmount,
+    bills: new Set(rows.map(r => r.bill_no).filter(Boolean)).size,
+    cash,
+    bcel,
+    bcel2,
+    ldb,
+  }
 }
 
 export function computeAgingData(debtRows = []) {

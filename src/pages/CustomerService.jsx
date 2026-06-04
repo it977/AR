@@ -4,7 +4,7 @@ import KPICard, { CountCard } from '../components/KPICard'
 import DateFilter, { FilterSelect } from '../components/DateFilter'
 import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
 import PDFButton from '../components/PDFButton'
-import { useARData, computeServiceData } from '../lib/useARData'
+import { useARData, computeServiceData, computeServiceSummary, computeLocationSummary } from '../lib/useARData'
 import { formatLAK, formatNumber } from '../lib/excelParser'
 import { useGlobalFilters } from '../context/FilterContext'
 
@@ -13,6 +13,36 @@ const SHIFT_OPTIONS = [
   { value: '4PM-12AM', label: '16:00PM-21:00PM' },
   { value: '12AM-8AM', label: '21:00PM-08:00AM' },
 ]
+
+const formatDonutBillLabel = (val, opts) => {
+  const billCount = opts?.w?.config?.series?.[opts.seriesIndex] || 0
+  return `${formatNumber(billCount)} ບິນ (${val.toFixed(1)}%)`
+}
+
+const getBillPercent = (value, total) => {
+  if (!total) return '0.0%'
+  return `${((value / total) * 100).toFixed(1)}%`
+}
+
+function DonutBillSummary({ items }) {
+  const total = items.reduce((sum, item) => sum + item.value, 0)
+
+  return (
+    <div className="mt-3 grid grid-cols-1 gap-2 text-sm">
+      {items.map(item => (
+        <div key={item.label} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
+            <span className="truncate font-medium text-slate-700">{item.label}</span>
+          </div>
+          <span className="whitespace-nowrap font-semibold text-slate-800">
+            {formatNumber(item.value)} ບິນ ({getBillPercent(item.value, total)})
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 export default function CustomerService() {
   const { filters, updateFilters } = useGlobalFilters()
@@ -35,6 +65,8 @@ export default function CustomerService() {
   }, [rows])
 
   const services = useMemo(() => computeServiceData(rows || []), [rows])
+  const serviceSummary = useMemo(() => computeServiceSummary(rows || []), [rows])
+  const locationSummary = useMemo(() => computeLocationSummary(rows || []), [rows])
 
   const serviceEntries = Object.entries(services)
     .sort(([, a], [, b]) => b - a)
@@ -44,17 +76,41 @@ export default function CustomerService() {
     chart: { type: 'donut', fontFamily: 'Inter, Noto Sans Lao, sans-serif' },
     labels: ['Female', 'Male'],
     colors: ['#f472b6', '#60a5fa'],
-    legend: { position: 'bottom', labels: { colors: '#64748b' } },
-    plotOptions: { pie: { donut: { size: '65%', labels: { show: true, total: { show: true, label: 'ລວມ', color: '#64748b' } } } } },
-    dataLabels: { formatter: (val) => `${val.toFixed(1)}%` },
-    tooltip: { y: { formatter: v => `${formatNumber(v)} ຄົນ` } },
+    legend: {
+      position: 'bottom',
+      labels: { colors: '#64748b' },
+      formatter: (seriesName, opts) => {
+        const billCount = opts?.w?.globals?.series?.[opts.seriesIndex] || 0
+        return `${seriesName} (${formatNumber(billCount)} ບິນ)`
+      },
+    },
+    plotOptions: {
+      pie: {
+        donut: {
+          size: '65%',
+          labels: {
+            show: true,
+            total: {
+              show: true,
+              label: 'ລວມ',
+              color: '#64748b',
+              formatter: w => `${formatNumber(w.globals.seriesTotals.reduce((sum, value) => sum + value, 0))} ບິນ`,
+            },
+          },
+        },
+      },
+    },
+    dataLabels: {
+      formatter: formatDonutBillLabel,
+      style: { fontSize: '11px', fontWeight: 700 },
+    },
+    tooltip: { y: { formatter: v => `${formatNumber(v)} ບິນ` } },
   }
 
   const insiteDonutOpts = {
     ...genderDonutOpts,
     labels: ['Insite', 'Onsite'],
     colors: ['#818cf8', '#34d399'],
-    plotOptions: { pie: { donut: { size: '65%', labels: { show: true, total: { show: true, label: 'ລວມ', color: '#64748b' } } } } },
   }
 
   const serviceBarOpts = {
@@ -144,17 +200,52 @@ export default function CustomerService() {
         />
       </div>
 
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {['Insite', 'Onsite'].map(location => {
+          const item = locationSummary[location] || { bills: 0, amount: 0, averagePerBill: 0 }
+          return (
+            <div key={location} className="chart-card">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="section-title">{location}</h3>
+                  <p className="text-xs text-slate-400">Bills, amount, and average per bill</p>
+                </div>
+                <span className="badge bg-slate-100 text-slate-700">{formatNumber(item.bills)} bills</span>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                  <p className="text-xs text-slate-500">Amount</p>
+                  <p className="text-lg font-bold text-slate-800">{formatNumber(item.amount)}</p>
+                </div>
+                <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                  <p className="text-xs text-slate-500">Average / Bill</p>
+                  <p className="text-lg font-bold text-slate-800">{formatNumber(item.averagePerBill)}</p>
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
       {/* Donut charts */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="chart-card">
           <h3 className="section-title mb-1">ເພດ</h3>
           <p className="text-xs text-slate-400 mb-2">Gender Distribution</p>
           {stats.total > 0 ? (
-            <ReactApexChart
-              options={genderDonutOpts}
-              series={[stats.female || 0, stats.male || 0]}
-              type="donut" height={220}
-            />
+            <>
+              <ReactApexChart
+                options={genderDonutOpts}
+                series={[stats.female || 0, stats.male || 0]}
+                type="donut" height={220}
+              />
+              <DonutBillSummary
+                items={[
+                  { label: 'Female', value: stats.female || 0, color: '#f472b6' },
+                  { label: 'Male', value: stats.male || 0, color: '#60a5fa' },
+                ]}
+              />
+            </>
           ) : <EmptyState message="ບໍ່ມີຂໍ້ມູນ" />}
         </div>
 
@@ -162,11 +253,19 @@ export default function CustomerService() {
           <h3 className="section-title mb-1">Insite / Onsite</h3>
           <p className="text-xs text-slate-400 mb-2">Location Type</p>
           {stats.total > 0 ? (
-            <ReactApexChart
-              options={insiteDonutOpts}
-              series={[stats.insite || 0, stats.onsite || 0]}
-              type="donut" height={220}
-            />
+            <>
+              <ReactApexChart
+                options={insiteDonutOpts}
+                series={[stats.insite || 0, stats.onsite || 0]}
+                type="donut" height={220}
+              />
+              <DonutBillSummary
+                items={[
+                  { label: 'Insite', value: stats.insite || 0, color: '#818cf8' },
+                  { label: 'Onsite', value: stats.onsite || 0, color: '#34d399' },
+                ]}
+              />
+            </>
           ) : <EmptyState message="ບໍ່ມີຂໍ້ມູນ" />}
         </div>
 
@@ -206,24 +305,29 @@ export default function CustomerService() {
       {/* Summary Table */}
       {serviceEntries.length > 0 && (
         <div className="chart-card overflow-hidden">
-          <h3 className="section-title mb-4">ສະຫຼຸບການບໍລິການ</h3>
+          <h3 className="section-title mb-4">ສະຫຼຸບ 10 Services</h3>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr>
                   <th className="table-th rounded-tl-lg">ການບໍລິການ</th>
+                  <th className="table-th text-right">Bill</th>
                   <th className="table-th text-right">ລາຍຮັບ (LAK)</th>
+                  <th className="table-th text-right">Average / Client</th>
                   <th className="table-th text-right rounded-tr-lg">ສ່ວນແບ່ງ</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {serviceEntries.map(([name, value], i) => {
+                {serviceSummary.filter(s => s.amount > 0).map(service => {
+                  const { label: name, amount: value } = service
                   const total = serviceEntries.reduce((s, [, v]) => s + v, 0)
                   const pct = total > 0 ? (value / total * 100).toFixed(1) : '0.0'
                   return (
                     <tr key={name} className="hover:bg-slate-50 transition-colors">
                       <td className="table-td font-medium">{name}</td>
+                      <td className="table-td text-right font-mono text-slate-800">{formatNumber(service.bills)}</td>
                       <td className="table-td text-right font-mono text-slate-800">{formatNumber(value)}</td>
+                      <td className="table-td text-right font-mono text-slate-800">{formatNumber(service.averagePerClient)}</td>
                       <td className="table-td text-right">
                         <div className="flex items-center justify-end gap-2">
                           <div className="w-16 bg-slate-100 rounded-full h-1.5">

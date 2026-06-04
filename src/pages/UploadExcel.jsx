@@ -15,7 +15,7 @@ const DAILY_HEADERS = [
   'Supporting & Ancillary Services','Admin & Non-Clinical Services','Home care Services',
   'Total','Discounts','Grand Total','Cash Received',
   'Transfer Payment by BCEL','Transfer Payment by BCEL2','Transfer Payment by LDB',
-  'Outstanding Debt','Prepayment','Note','Aging Group',
+  'Outstanding Debt','Prepayment','Payment Type','Due date','Bill Issued At','Note','Aging Group',
 ]
 const PAYOFF_HEADERS = [
   'Date','Week','Workload','Bill No','Insite-Onsite','OPD-IPD',
@@ -23,7 +23,7 @@ const PAYOFF_HEADERS = [
   'Grand Total','Outstanding Debt','Date Paid','Workload Debt','Submission Date',
   'Amount Paid','Cash Received Debt','Transfer Payment by BCEL Debt',
   'Transfer Payment by BCEL 2 Debt','Transfer Payment by LDB Debt',
-  'Balance','Due date',
+  'Balance','Due date','Payment Type',
   'Payment 1 Date','Payment 1 Method','Payment 1 Amount',
   'Payment 2 Date','Payment 2 Method','Payment 2 Amount',
   'Payment 3 Date','Payment 3 Method','Payment 3 Amount',
@@ -31,12 +31,12 @@ const PAYOFF_HEADERS = [
 ]
 const SAMPLE_DAILY = [
   ['2026-01-01','Week 1','8AM-4PM','BILL-001','Insite','OPD','GN','','HN001','ສົມສາຍ','Male',
-   50000,0,0,0,0,0,20000,0,0,0,70000,0,70000,70000,0,0,0,0,0,'',''],
+   50000,0,0,0,0,0,20000,0,0,0,70000,0,70000,70000,0,0,0,0,0,'Cash','','2026-01-01T08:30','',''],
 ]
 const SAMPLE_PAYOFF = [
   ['2026-01-01','Week 1','8AM-4PM','BILL-INS001','Insite','OPD','INS','APA','HN002','ນາງສີ','Female',
-   500000,500000,'2026-01-10','','2026-01-10',200000,0,200000,0,0,300000,'2026-02-09',
-   '2026-01-10','bcel',200000,'','','','','','Pay in installments'],
+   500000,500000,'2026-01-10','','2026-01-10',200000,0,200000,0,0,300000,'2026-02-09','Deposit',
+   '2026-01-10','bcel',200000,'','','','','','Current Receivables'],
 ]
 
 function downloadTemplate() {
@@ -64,7 +64,11 @@ const STEPS = [
 
 const BATCH_SIZE = 200   // smaller batch to avoid conflicts
 const OPTIONAL_COLUMNS = {
+  ar_bills: [
+    'payment_type', 'due_date', 'bill_issued_at',
+  ],
   ar_debt: [
+    'insite_onsite', 'opd_ipd', 'payment_type',
     'payment_1_date', 'payment_1_method', 'payment_1_amount',
     'payment_2_date', 'payment_2_method', 'payment_2_amount',
     'payment_3_date', 'payment_3_method', 'payment_3_amount',

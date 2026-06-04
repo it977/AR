@@ -2,7 +2,12 @@ import { useMemo } from 'react'
 import ReactApexChart from 'react-apexcharts'
 import DateFilter, { FilterSelect } from '../components/DateFilter'
 import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
-import { useARData, usePayoffData, computeKPIs, computeShiftData } from '../lib/useARData'
+import {
+  useARData,
+  usePayoffData,
+  computeKPIs,
+  computeShiftData,
+} from '../lib/useARData'
 import { formatLAK, formatNumber } from '../lib/excelParser'
 import PDFButton from '../components/PDFButton'
 import { useGlobalFilters } from '../context/FilterContext'
@@ -130,6 +135,26 @@ function TopCard({ label, sublabel, value, isLAK = true, color = 'indigo' }) {
         {isLAK ? formatNumber(value) : formatNumber(value, 0)}
       </p>
       <p className="text-[11px] text-white/60 mt-1">{label}{isLAK ? ' • LAK' : ''}</p>
+    </div>
+  )
+}
+
+function CollectionMetric({ label, sublabel, value, isLAK = true, tone = 'slate' }) {
+  const tones = {
+    slate: 'border-slate-200 bg-white text-slate-800',
+    green: 'border-emerald-100 bg-emerald-50 text-emerald-700',
+    red: 'border-red-100 bg-red-50 text-red-700',
+    blue: 'border-blue-100 bg-blue-50 text-blue-700',
+    amber: 'border-amber-100 bg-amber-50 text-amber-700',
+    violet: 'border-violet-100 bg-violet-50 text-violet-700',
+  }
+  return (
+    <div className={`rounded-xl border p-4 ${tones[tone] || tones.slate}`}>
+      <p className="text-[11px] font-bold uppercase tracking-wide opacity-70">{label}</p>
+      <p className="mt-1 text-xl font-extrabold leading-tight">
+        {isLAK ? formatNumber(value) : formatNumber(value, 0)}
+      </p>
+      <p className="mt-0.5 text-[11px] text-slate-400">{sublabel || (isLAK ? 'LAK' : 'Bills')}</p>
     </div>
   )
 }
@@ -316,6 +341,30 @@ export default function DailySales() {
           <FilterSelect label="ປະເພດລູກຄ້າ" value={filters.customerType}
             onChange={v => updateFilters({ customerType: v })}
             options={['GN','INS','B2B']} />
+        </div>
+      </div>
+
+      {/* Collection Team daily KPIs */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <div>
+            <h3 className="section-title">Collection Team Daily KPIs</h3>
+            <p className="text-xs text-slate-400 mt-0.5">Daily sales, unpaid bills, cash-in, collection, and discount tracking</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <CollectionMetric label="Sale Revenue / Day" sublabel="Net sales revenue" value={viewKpis.totalSales} tone="blue" />
+          <CollectionMetric label="Bill Out / Day" sublabel="Bills issued today" value={viewKpis.totalBills} isLAK={false} tone="slate" />
+          <CollectionMetric label="Unpaid Bill / Day" sublabel="Under sales revenue" value={viewKpis.outstandingBills} isLAK={false} tone="red" />
+          <CollectionMetric label="Total Bill / Day" sublabel="All daily bills" value={viewKpis.totalBills} isLAK={false} tone="violet" />
+          <CollectionMetric label="Paid Bill / Day" sublabel="Paid at billing" value={viewKpis.paidBills} isLAK={false} tone="green" />
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-3">
+          <CollectionMetric label="Cash In / Day" sublabel="Daily collected sales" value={dailyIncome} tone="green" />
+          <CollectionMetric label="Collection From Unpaid / Day" sublabel="Pay off collection" value={viewCollectionStats.amount} tone="violet" />
+          <CollectionMetric label="Discounts Bill / Day" sublabel="Discounted bill count" value={viewKpis.discountedBills} isLAK={false} tone="amber" />
+          <CollectionMetric label="Discount Amount / Day" sublabel="Total discount amount" value={viewKpis.totalDiscounts} tone="amber" />
+          <CollectionMetric label="Collected Bill" sublabel="Unpaid bills collected" value={viewKpis.collectionBills} isLAK={false} tone="blue" />
         </div>
       </div>
 

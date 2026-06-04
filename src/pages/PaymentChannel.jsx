@@ -4,7 +4,13 @@ import KPICard from '../components/KPICard'
 import DateFilter, { FilterSelect } from '../components/DateFilter'
 import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
 import PDFButton from '../components/PDFButton'
-import { useARData, usePayoffData, useCashflowData, computeKPIs } from '../lib/useARData'
+import {
+  useARData,
+  usePayoffData,
+  useCashflowData,
+  computeKPIs,
+  computePaymentTypeSummary,
+} from '../lib/useARData'
 import { formatNumber } from '../lib/excelParser'
 import { useGlobalFilters } from '../context/FilterContext'
 
@@ -104,6 +110,9 @@ export default function PaymentChannel() {
   const { data: outstandingRows } = usePayoffData(filters)
   const { data: cashflowRows } = useCashflowData(filters)
   const kpis = useMemo(() => computeKPIs(rows || []), [rows])
+  const paymentTypeSummary = useMemo(() => computePaymentTypeSummary(rows || []), [rows])
+  const depositCollection = paymentTypeSummary.Deposit?.amount || 0
+  const advanceCollection = paymentTypeSummary.Advance?.amount || 0
   const hasCashflow = !!cashflowRows?.length
   const hasActiveFilters = !!(filters.dateFrom || filters.dateTo || filters.customerType || filters.workload)
   const useLookerFallback = !hasCashflow && !hasActiveFilters && rows?.length === 4763 && debtRows?.length === 1285
@@ -152,7 +161,8 @@ export default function PaymentChannel() {
     return t
   }, [rows, collectionStats, cashflowRows, useLookerFallback])
 
-  const totalCollected = totals.cash + totals.bcel + totals.bcel2 + totals.ldb
+  const methodCollected = totals.cash + totals.bcel + totals.bcel2 + totals.ldb
+  const totalCollected = methodCollected + depositCollection
   const remainingBalance = useMemo(() => {
     if (useLookerFallback) return LOOKER_CASHFLOW_FALLBACK.balance
     if (hasCashflow) return (cashflowRows || []).reduce((s, r) => s + (r.balance || 0), 0)
@@ -222,7 +232,7 @@ export default function PaymentChannel() {
     ? (cashflowRows || []).reduce((s, r) => s + (r.total_actual_income || 0), 0)
     : useLookerFallback
       ? LOOKER_CASHFLOW_FALLBACK.totalActualIncome
-      : dailyIncome + collectionStats.amount
+      : dailyIncome + collectionStats.amount + depositCollection
 
   if (loading) return <div className="p-6"><LoadingSpinner /></div>
 
@@ -248,7 +258,7 @@ export default function PaymentChannel() {
       </div>
 
       {/* ── Row 1: 4 Summary KPI Cards ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         {/* Actual Income */}
         <div className="rounded-2xl p-5 text-white bg-gradient-to-br from-indigo-500 to-indigo-700 shadow-lg shadow-indigo-200">
           <p className="text-xs font-semibold text-indigo-200 uppercase tracking-wider">ລາຍຮັບຈິງ</p>
@@ -269,6 +279,12 @@ export default function PaymentChannel() {
           <p className="text-xs text-violet-200 mb-3">ຍອດເກັບໜີ້</p>
           <p className="text-2xl font-extrabold leading-tight">{formatNumber(useLookerFallback ? LOOKER_CASHFLOW_FALLBACK.debtCollection : collectionStats.amount)}</p>
           <p className="text-xs text-violet-200 mt-1">ຈາກ ar_debt</p>
+        </div>
+        <div className="rounded-2xl p-5 text-white bg-gradient-to-br from-amber-500 to-amber-700 shadow-lg shadow-amber-200">
+          <p className="text-xs font-semibold text-amber-100 uppercase tracking-wider">All Dept Deposit</p>
+          <p className="text-xs text-amber-100 mb-3">Collection from Deposit</p>
+          <p className="text-2xl font-extrabold leading-tight">{formatNumber(depositCollection)}</p>
+          <p className="text-xs text-amber-100 mt-1">{formatNumber(paymentTypeSummary.Deposit?.bills || 0)} bills</p>
         </div>
         {/* Outstanding */}
         <div className="rounded-2xl p-5 text-white bg-gradient-to-br from-rose-500 to-rose-700 shadow-lg shadow-rose-200">
@@ -301,6 +317,23 @@ export default function PaymentChannel() {
                 <div className="h-2 rounded-full transition-all duration-500"
                   style={{ width: `${pct}%`, backgroundColor: m.color }} />
               </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+        {['Cash', 'Transfer', 'Cash/Transfer', 'Transacted', 'Deposit', 'Advance'].map(type => {
+          const data = paymentTypeSummary[type] || { bills: 0, amount: 0 }
+          const amount = type === 'Deposit' ? depositCollection : type === 'Advance' ? advanceCollection : data.amount
+          return (
+            <div key={type} className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-bold text-slate-700">{type}</p>
+                <span className="badge bg-slate-100 text-slate-600">{formatNumber(data.bills)} bills</span>
+              </div>
+              <p className="mt-2 text-lg font-extrabold text-slate-800">{formatNumber(amount)}</p>
+              <p className="text-[10px] text-slate-400">LAK</p>
             </div>
           )
         })}
@@ -477,6 +510,20 @@ export default function PaymentChannel() {
                   </tr>
                 )
               })}
+              <tr className="hover:bg-slate-50 transition-colors">
+                <td className="table-td">
+                  <div>
+                    <p className="font-semibold text-slate-800">All Dept collection from Deposit</p>
+                    <p className="text-xs text-slate-400">Deposit</p>
+                  </div>
+                </td>
+                <td className="table-td text-right font-mono font-semibold text-slate-800">{formatNumber(depositCollection)}</td>
+                <td className="table-td text-right">
+                  <span className="text-sm font-bold text-amber-600">
+                    {totalCollected > 0 ? (depositCollection / totalCollected * 100).toFixed(1) : '0.0'}%
+                  </span>
+                </td>
+              </tr>
               <tr className="bg-slate-50">
                 <td className="table-td font-bold text-slate-700">ລວມທັງໝົດ (Collected)</td>
                 <td className="table-td text-right font-mono font-bold text-slate-800">{formatNumber(totalCollected)}</td>

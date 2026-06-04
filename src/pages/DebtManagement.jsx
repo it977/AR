@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import { logAction } from '../lib/log'
@@ -25,7 +25,7 @@ const PAYOFF_HEADERS = [
 const SAMPLE_PAYOFF = [
   [new Date(2026, 0, 1),'Week 1','8AM-4PM','BILL-INS001','Insite','OPD','INS','APA','HN002','ນາງສີ','Female',
    500000,500000,new Date(2026, 0, 10),'',new Date(2026, 0, 10),200000,0,200000,0,0,300000,new Date(2026, 1, 9),
-   new Date(2026, 0, 10),'bcel',200000,'','','','','','Pay in installments'],
+   new Date(2026, 0, 10),'bcel',200000,'','','','','','Current Receivables'],
 ]
 // Columns in PAYOFF_HEADERS that should be formatted as dates
 const PAYOFF_DATE_COLS = ['Date','Date Paid','Submission Date','Due date','Payment 1 Date','Payment 2 Date','Payment 3 Date']
@@ -50,22 +50,39 @@ import {
   calcOverdueDays,
   calcDueDate,
   getAgingLabel,
+  resolvePaymentStatus,
+  statusBadgeClass,
+  todayIso,
 } from '../lib/debtUtils'
 
 function fmt(v) { return new Intl.NumberFormat().format(v || 0) }
 
 const AGING_COLOR = {
-  'N':          'bg-slate-100 text-slate-600',
-  'Due on schedule': 'bg-sky-100 text-sky-700',
-  'Pay in installments': 'bg-violet-100 text-violet-700',
+  'Current Receivables': 'bg-sky-100 text-sky-700',
   '1-15 Days':  'bg-emerald-100 text-emerald-700',
   '16-30 Days': 'bg-yellow-100 text-yellow-700',
   '31-45 Days': 'bg-orange-100 text-orange-700',
-  '46-60+ Days':'bg-red-100 text-red-700',
+  '46-90 Days':'bg-red-100 text-red-700',
 }
-const WORKLOADS = ['8AM-4PM', '4PM-12AM', '12AM-8AM']
 const actionThCls = 'table-th sticky right-0 z-20 bg-slate-50 text-center shadow-[-10px_0_18px_-16px_rgba(15,23,42,0.45)]'
 const actionTdCls = 'table-td sticky right-0 z-10 bg-white group-hover:bg-slate-50 shadow-[-10px_0_18px_-16px_rgba(15,23,42,0.45)]'
+
+function dateDaysAgo(days) {
+  const date = new Date(todayIso())
+  date.setDate(date.getDate() - days)
+  return date.toISOString().split('T')[0]
+}
+
+function applyAgingFilter(query, aging) {
+  if (!aging) return query
+  const today = todayIso()
+  if (aging === 'Current Receivables') return query.or(`due_date.is.null,due_date.gte.${today}`)
+  if (aging === '1-15 Days') return query.lt('due_date', today).gte('due_date', dateDaysAgo(15))
+  if (aging === '16-30 Days') return query.lt('due_date', dateDaysAgo(15)).gte('due_date', dateDaysAgo(30))
+  if (aging === '31-45 Days') return query.lt('due_date', dateDaysAgo(30)).gte('due_date', dateDaysAgo(45))
+  if (aging === '46-90 Days') return query.lt('due_date', dateDaysAgo(45))
+  return query
+}
 
 export default function DebtManagement() {
   const [rows, setRows]       = useState([])
@@ -77,8 +94,9 @@ export default function DebtManagement() {
 
   const [search, setSearch]     = useState('')
   const [aging, setAging]       = useState('')
-  const [statusFilter, setStatusFilter] = useState('')  // ເລີ່ມດ້ວຍທັງໝົດ
-  const [workload, setWorkload] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')  // Collection workflow status
+  const [paymentTypeFilter, setPaymentTypeFilter] = useState('')
+  const [insuranceFilter, setInsuranceFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo]     = useState('')
 
@@ -93,6 +111,11 @@ export default function DebtManagement() {
 
   const [kpis, setKpis] = useState({ total_debt: 0, total_paid: 0, total_balance: 0, records: 0 })
   const [insuranceDueDays, setInsuranceDueDays] = useState({})
+
+  const insuranceOptions = useMemo(
+    () => Object.keys(insuranceDueDays).filter(Boolean).sort((a, b) => a.localeCompare(b)),
+    [insuranceDueDays],
+  )
 
   const fetchInsuranceDueDays = useCallback(async () => {
     const { data, error } = await supabase.from('ar_insurance_list').select('name,due_days')
@@ -142,11 +165,16 @@ export default function DebtManagement() {
     let q = supabase.from('ar_debt').select('*', { count: 'exact' })
 
     if (search)       q = q.or(`bill_no.ilike.%${search}%,patient_name.ilike.%${search}%`)
-    // ກັ່ນຕອງຕາມສະຖານະ: pending = balance > 0, paid = balance <= 0
-    if (statusFilter === 'pending') q = q.gt('balance', 0)
-    if (statusFilter === 'paid')    q = q.lte('balance', 0)
-    if (workload) q = q.eq('workload', workload)
-    if (aging) q = q.eq('aging_group', aging)
+    const today = todayIso()
+    if (statusFilter === 'pending_submission') q = q.gt('balance', 0).is('submit_date', null)
+    if (statusFilter === 'pending_payment') q = q.gt('balance', 0).not('submit_date', 'is', null)
+    if (statusFilter === 'outstanding') q = q.gt('balance', 0)
+    if (statusFilter === 'current') q = q.gt('balance', 0).or(`due_date.is.null,due_date.gte.${today}`)
+    if (statusFilter === 'past_due') q = q.gt('balance', 0).lt('due_date', today)
+    if (statusFilter === 'paid') q = q.lte('balance', 0)
+    if (paymentTypeFilter) q = q.eq('payment_type', paymentTypeFilter)
+    if (insuranceFilter) q = q.eq('insurance', insuranceFilter)
+    q = applyAgingFilter(q, aging)
     if (dateFrom) q = q.gte('date', dateFrom)
     if (dateTo)   q = q.lte('date', dateTo)
 
@@ -156,7 +184,7 @@ export default function DebtManagement() {
       .range(page * pageSize, page * pageSize + pageSize - 1)
     if (!error) { setRows(data || []); setTotal(count || 0) }
     setLoading(false)
-  }, [search, aging, statusFilter, workload, dateFrom, dateTo, page, pageSize])
+  }, [search, aging, statusFilter, paymentTypeFilter, insuranceFilter, dateFrom, dateTo, page, pageSize])
 
   useEffect(() => { fetchRows(); fetchKpis() }, [fetchRows, fetchKpis])
   useEffect(() => { fetchInsuranceDueDays() }, [fetchInsuranceDueDays])
@@ -220,12 +248,12 @@ export default function DebtManagement() {
   async function handleEditSubmit(form) {
     setSaving(true)
     const newDebt = form.debt || 0
-    const debt_status = newDebt > 0 ? 'pending' : (form.debt_status || 'paid')
+    const debt_status = resolvePaymentStatus({ ...form, debt: newDebt })
     // ກັ່ນຕອງເອົາແຕ່ ar_bills columns
     const billCols = ['date','week','workload','bill_no','customer_type','insite_onsite','opd_ipd',
       'insurance','hn','patient_name','gender',
       'svc_opd','svc_diag_image','svc_ipd','svc_surg_ot','svc_emergency','svc_chronic','svc_pharma','svc_support','svc_admin','svc_homecare',
-      'total','discounts','grand_total','cash','bcel','bcel2','ldb','debt','prepayment','note','aging_group']
+      'total','discounts','grand_total','cash','bcel','bcel2','ldb','debt','prepayment','payment_type','due_date','note','aging_group']
     const payload = { debt_status }
     for (const k of billCols) if (form[k] !== undefined) payload[k] = form[k]
     const { error } = await supabase.from('ar_bills').update(payload).eq('bill_no', form.bill_no)
@@ -236,6 +264,7 @@ export default function DebtManagement() {
       try {
         await supabase.from('ar_debt').update({
           date: form.date, customer_type: form.customer_type, insurance: form.insurance,
+          insite_onsite: form.insite_onsite, opd_ipd: form.opd_ipd, payment_type: form.payment_type,
           hn: form.hn, patient_name: form.patient_name, gender: form.gender, workload: form.workload,
           grand_total: form.grand_total, debt_amount: form.debt,
           amount_paid: collected, cash_paid: form.cash||0, bcel_paid: form.bcel||0,
@@ -379,9 +408,6 @@ export default function DebtManagement() {
     const addLog = (msg, ok = true) => log.push({ msg, ok, time: new Date().toLocaleTimeString('lo-LA') })
     setUploadState({ progress: 0, total: debt.length, done: 0, log: [...log], fileName: file.name })
     try {
-      if (mismatched.length > 0) {
-        addLog(`⚠ ມີ ${mismatched.length} ໃບບິນບໍ່ກົງກັນ — ສືບຕໍ່ອັບໂຫຼດຕາມຄຳສັ່ງຜູ້ໃຊ້`, false)
-      }
       addLog(`ພົບ ${debt.length} ແຖວ ໃນ sheet Pay off — ກຳລັງອັບໂຫຼດ...`)
       setUploadState(s => ({ ...s, log: [...log] }))
       const uploaded = await upsertRows('ar_debt', debt, (pct, done, total) => {
@@ -406,8 +432,8 @@ export default function DebtManagement() {
           action_type: 'data.upload',
           entity_type: 'excel_file',
           entity_id: file.name,
-          details: `ອັບໂຫຼດ ${uploaded} ລາຍການໜີ້ ຈາກ ${file.name}` + (mismatched.length ? ` (${mismatched.length} ໃບບໍ່ກົງກັນ)` : ''),
-          metadata: { file_name: file.name, debt: uploaded, bill_updates: billUpdates.length, mismatched: mismatched.length },
+          details: `ອັບໂຫຼດ ${uploaded} ລາຍການໜີ້ ຈາກ ${file.name}`,
+          metadata: { file_name: file.name, debt: uploaded, bill_updates: billUpdates.length },
         })
       } catch (_) {}
       setUploadState(s => ({ ...s, log: [...log], progress: 100 }))
@@ -497,8 +523,21 @@ export default function DebtManagement() {
           <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(0) }}
             className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
             <option value="">ທັງໝົດ</option>
-            <option value="pending">ຍັງຄ້າງ</option>
+            <option value="pending_submission">Pending Insurance Submission</option>
+            <option value="pending_payment">Pending Insurance Payment</option>
+            <option value="outstanding">Outstanding Receivables</option>
+            <option value="current">Current Receivables</option>
+            <option value="past_due">Past Due Receivables</option>
             <option value="paid">ຊຳລະແລ້ວ</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-slate-500 mb-1">ປະເພດຊຳລະ</label>
+          <select value={paymentTypeFilter} onChange={e => { setPaymentTypeFilter(e.target.value); setPage(0) }}
+            className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            <option value="">ທັງໝົດ</option>
+            <option value="Deposit">Deposit</option>
+            <option value="Advance">Advance</option>
           </select>
         </div>
         <div>
@@ -509,11 +548,11 @@ export default function DebtManagement() {
           </select>
         </div>
         <div>
-          <label className="block text-xs font-semibold text-slate-500 mb-1">ກະ</label>
-          <select value={workload} onChange={e => { setWorkload(e.target.value); setPage(0) }}
+          <label className="block text-xs font-semibold text-slate-500 mb-1">ປະກັນ</label>
+          <select value={insuranceFilter} onChange={e => { setInsuranceFilter(e.target.value); setPage(0) }}
             className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
             <option value="">ທັງໝົດ</option>
-            {WORKLOADS.map(w => <option key={w} value={w}>{w}</option>)}
+            {insuranceOptions.map(name => <option key={name} value={name}>{name}</option>)}
           </select>
         </div>
         <div>
@@ -537,8 +576,8 @@ export default function DebtManagement() {
             <option value={500}>500 ແຖວ</option>
           </select>
         </div>
-        {(search || aging || statusFilter || workload || dateFrom || dateTo) && (
-          <button onClick={() => { setSearch(''); setAging(''); setStatusFilter(''); setWorkload(''); setDateFrom(''); setDateTo(''); setPage(0) }}
+        {(search || aging || statusFilter || paymentTypeFilter || insuranceFilter || dateFrom || dateTo) && (
+          <button onClick={() => { setSearch(''); setAging(''); setStatusFilter(''); setPaymentTypeFilter(''); setInsuranceFilter(''); setDateFrom(''); setDateTo(''); setPage(0) }}
             className="text-xs text-slate-500 hover:text-slate-800 underline">
             ລ້າງ
           </button>
@@ -560,6 +599,7 @@ export default function DebtManagement() {
                 <th className="table-th text-right">ເກັບໄດ້</th>
                 <th className="table-th text-right">ໜີ້ຄ້າງ</th>
                 <th className="table-th">ວັນສົ່ງເອກະສານ</th>
+                <th className="table-th">Due Date</th>
                 <th className="table-th text-center">ວັນຄ້າງ</th>
                 <th className="table-th">Aging</th>
                 <th className="table-th text-center">ສະຖານະ</th>
@@ -569,10 +609,10 @@ export default function DebtManagement() {
             </thead>
             <tbody className="divide-y divide-slate-50">
               {loading ? (
-                <tr><td colSpan={14} className="table-td text-center py-12 text-slate-400">ກຳລັງໂຫຼດ...</td></tr>
+                <tr><td colSpan={15} className="table-td text-center py-12 text-slate-400">ກຳລັງໂຫຼດ...</td></tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={14} className="table-td text-center py-16">
+                  <td colSpan={15} className="table-td text-center py-16">
                     <div className="flex flex-col items-center gap-2 text-slate-400">
                       <svg className="w-10 h-10 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -597,6 +637,7 @@ export default function DebtManagement() {
                   ? 'bg-orange-100 text-orange-700 border border-orange-200'
                   : 'bg-red-100 text-red-700 border border-red-200'
                 const isPaid = debt <= 0
+                const paymentStatus = resolvePaymentStatus(agingRow)
                 return (
                   <tr key={row.id} className="group hover:bg-slate-50 transition-colors">
                     <td className="table-td font-mono text-xs font-semibold text-primary-600">{row.bill_no}</td>
@@ -614,16 +655,23 @@ export default function DebtManagement() {
                     <td className="table-td text-xs">
                       <span className="font-medium text-slate-700">{row.submit_date || <span className="text-slate-300">—</span>}</span>
                     </td>
+                    <td className="table-td text-xs">
+                      <span className={resolvePaymentStatus(agingRow) === 'overdue' ? 'font-semibold text-red-600' : 'text-slate-600'}>
+                        {dueDate || <span className="text-slate-300">—</span>}
+                      </span>
+                    </td>
                     <td className="table-td text-center">
                       <span className={`inline-flex items-center justify-center min-w-[48px] px-2 py-0.5 rounded-lg text-xs font-bold ${daysCls}`}>
                         {days} ມື້
                       </span>
                     </td>
                     <td className="table-td">
-                      <span className={`badge text-[10px] ${AGING_COLOR[currentAging] || AGING_COLOR.N}`}>{getAgingLabel(currentAging)}</span>
+                      <span className={`badge text-[10px] ${AGING_COLOR[currentAging] || 'bg-slate-100 text-slate-600'}`}>{getAgingLabel(currentAging)}</span>
                     </td>
                     <td className="table-td text-center">
-                      {isPaid ? (
+                      {paymentStatus ? (
+                        <span className={`badge ${statusBadgeClass(paymentStatus)}`}>{paymentStatus}</span>
+                      ) : isPaid ? (
                         <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold bg-emerald-100 text-emerald-700 rounded-lg border border-emerald-200">
                           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />

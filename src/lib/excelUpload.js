@@ -1,7 +1,11 @@
 import { supabase } from './supabase'
 
 const OPTIONAL_COLUMNS = {
+  ar_bills: [
+    'payment_type', 'due_date', 'bill_issued_at',
+  ],
   ar_debt: [
+    'insite_onsite', 'opd_ipd', 'payment_type',
     'payment_1_date', 'payment_1_method', 'payment_1_amount',
     'payment_2_date', 'payment_2_method', 'payment_2_amount',
     'payment_3_date', 'payment_3_method', 'payment_3_amount',

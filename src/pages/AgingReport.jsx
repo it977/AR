@@ -10,13 +10,11 @@ import { useGlobalFilters } from '../context/FilterContext'
 import { getAgingLabel } from '../lib/debtUtils'
 
 const AGING_CONFIG = [
-  { key: 'N', label: getAgingLabel('N'), color: '#94a3b8', bg: 'bg-slate-50', border: 'border-slate-100', text: 'text-slate-700', badgeBg: 'bg-slate-100 text-slate-700' },
-  { key: 'Due on schedule', label: 'ຢູ່ໃນກຳນົດ', color: '#0ea5e9', bg: 'bg-sky-50', border: 'border-sky-100', text: 'text-sky-700', badgeBg: 'bg-sky-100 text-sky-700' },
-  { key: 'Pay in installments', label: 'ຈ່າຍເປັນງວດ', color: '#8b5cf6', bg: 'bg-violet-50', border: 'border-violet-100', text: 'text-violet-700', badgeBg: 'bg-violet-100 text-violet-700' },
+  { key: 'Current Receivables', label: getAgingLabel('Current Receivables'), color: '#0ea5e9', bg: 'bg-sky-50', border: 'border-sky-100', text: 'text-sky-700', badgeBg: 'bg-sky-100 text-sky-700' },
   { key: '1-15 Days', label: '1–15 ວັນ', color: '#10b981', bg: 'bg-emerald-50', border: 'border-emerald-100', text: 'text-emerald-700', badgeBg: 'bg-emerald-100 text-emerald-700' },
   { key: '16-30 Days', label: '16–30 ວັນ', color: '#f59e0b', bg: 'bg-amber-50', border: 'border-amber-100', text: 'text-amber-700', badgeBg: 'bg-amber-100 text-amber-700' },
   { key: '31-45 Days', label: '31–45 ວັນ', color: '#f97316', bg: 'bg-orange-50', border: 'border-orange-100', text: 'text-orange-700', badgeBg: 'bg-orange-100 text-orange-700' },
-  { key: '46-60+ Days', label: '46–60+ ວັນ', color: '#ef4444', bg: 'bg-red-50', border: 'border-red-100', text: 'text-red-700', badgeBg: 'bg-red-100 text-red-700' },
+  { key: '46-90 Days', label: '46–90 ວັນ', color: '#ef4444', bg: 'bg-red-50', border: 'border-red-100', text: 'text-red-700', badgeBg: 'bg-red-100 text-red-700' },
 ]
 
 export default function AgingReport() {
@@ -136,7 +134,7 @@ export default function AgingReport() {
       </div>
 
       {/* Aging bucket cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {AGING_CONFIG.map(a => {
           const d = agingData[a.key] || { balance: 0, bills: 0 }
           const pct = totalDebt > 0 ? (d.balance / totalDebt * 100).toFixed(1) : '0.0'

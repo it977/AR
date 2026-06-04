@@ -1,13 +1,21 @@
 import { useState, useEffect } from 'react'
 import InsuranceSelect from '../InsuranceSelect'
 import RecorderSelect from '../RecorderSelect'
+import { PAYMENT_TYPES } from '../../lib/debtUtils'
 
 const WORKLOADS   = ['8AM-4PM', '4PM-12AM', '12AM-8AM']
 const CUST_TYPES  = ['GN', 'INS', 'B2B']
 const GENDERS     = ['Male', 'Female']
 const INSITE_OPTS = ['Insite', 'Onsite']
 const OPD_OPTS    = ['OPD', 'IPD']
-const WEEKS       = Array.from({ length: 53 }, (_, i) => `Week ${i + 1}`)
+const WEEKS       = Array.from({ length: 5 }, (_, i) => `Week ${i + 1}`)
+const BOOKING_PAYMENT_TYPES = new Set(['Deposit', 'Advance'])
+const AUTO_PAYMENT_TYPES = new Set(['Cash', 'Transfer', 'Cash/Transfer'])
+const PAYMENT_CHANNEL_FIELDS = ['cash', 'bcel', 'bcel2', 'ldb']
+const SERVICE_FIELDS = [
+  'svc_opd','svc_diag_image','svc_ipd','svc_surg_ot','svc_emergency',
+  'svc_chronic','svc_pharma','svc_support','svc_admin','svc_homecare',
+]
 
 const EMPTY = {
   date: '', week: '', workload: '8AM-4PM', bill_no: '',
@@ -17,7 +25,7 @@ const EMPTY = {
   svc_chronic: 0, svc_pharma: 0, svc_support: 0, svc_admin: 0, svc_homecare: 0,
   total: 0, discounts: 0, grand_total: 0,
   cash: 0, bcel: 0, bcel2: 0, ldb: 0,
-  debt: 0, prepayment: 0, note: '', aging_group: 'N', recorded_by: '',
+  debt: 0, prepayment: 0, payment_type: '', bill_issued_at: '', note: '', aging_group: 'Current Receivables', recorded_by: '',
 }
 
 function Field({ label, required, children, hint }) {
@@ -35,29 +43,140 @@ function Field({ label, required, children, hint }) {
 const inputCls = 'w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100 transition-all'
 const numCls   = inputCls + ' text-right font-mono'
 
-export default function BillForm({ initial, onSubmit, onCancel, loading, submitError }) {
-  const [form, setForm]       = useState({ ...EMPTY, ...initial })
-  const [showSvc, setShowSvc] = useState(true)
+function localTodayIso() {
+  const today = new Date()
+  today.setMinutes(today.getMinutes() - today.getTimezoneOffset())
+  return today.toISOString().split('T')[0]
+}
 
-  useEffect(() => { setForm({ ...EMPTY, ...initial }) }, [initial])
+function localNowDateTime() {
+  const now = new Date()
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset())
+  return now.toISOString().slice(0, 16)
+}
+
+function toDateTimeInputValue(value) {
+  if (!value) return localNowDateTime()
+  return String(value).slice(0, 16)
+}
+
+function getWeekFromDate(dateStr) {
+  if (!dateStr) return ''
+  const date = new Date(`${dateStr}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return ''
+  const weekNumber = Math.min(5, Math.ceil(date.getDate() / 7))
+  return `Week ${weekNumber}`
+}
+
+function getWorkloadFromTime(date = new Date()) {
+  const hour = date.getHours()
+  if (hour >= 8 && hour < 16) return '8AM-4PM'
+  if (hour >= 16 && hour < 21) return '4PM-12AM'
+  return '12AM-8AM'
+}
+
+function getDefaultForm(initial = {}) {
+  const isEdit = !!initial?.id
+  const date = initial.date || (isEdit ? '' : localTodayIso())
+  const form = {
+    ...EMPTY,
+    ...initial,
+    date,
+    week: initial.week || (date ? getWeekFromDate(date) : ''),
+    workload: initial.workload || (isEdit ? '' : getWorkloadFromTime()),
+    bill_issued_at: initial.bill_issued_at || (isEdit ? '' : localNowDateTime()),
+  }
+  if (!form.week && form.date) form.week = getWeekFromDate(form.date)
+  form.bill_issued_at = form.bill_issued_at ? toDateTimeInputValue(form.bill_issued_at) : ''
+  return form
+}
+
+function isBookingPayment(type) {
+  return BOOKING_PAYMENT_TYPES.has(type)
+}
+
+function isAutoPayment(type) {
+  return AUTO_PAYMENT_TYPES.has(type)
+}
+
+function deriveAutoPaymentType(values) {
+  const cash = parseFloat(values.cash) || 0
+  const transfer = (parseFloat(values.bcel) || 0) + (parseFloat(values.bcel2) || 0) + (parseFloat(values.ldb) || 0)
+  if (cash > 0 && transfer > 0) return 'Cash/Transfer'
+  if (cash > 0) return 'Cash'
+  if (transfer > 0) return 'Transfer'
+  return ''
+}
+
+function getServiceTotal(values) {
+  return SERVICE_FIELDS.reduce((sum, field) => sum + (parseFloat(values[field]) || 0), 0)
+}
+
+function getBookingDiscount(total, percent) {
+  return Math.round((parseFloat(total) || 0) * (parseFloat(percent) || 0) / 100)
+}
+
+function recalcAmounts(values) {
+  const next = { ...values }
+  const svcTotal = getServiceTotal(next)
+  next.total = svcTotal
+  next.grand_total = svcTotal - (parseFloat(next.discounts) || 0)
+  const collected = (parseFloat(next.cash)||0)+(parseFloat(next.bcel)||0)+(parseFloat(next.bcel2)||0)+(parseFloat(next.ldb)||0)+(parseFloat(next.prepayment)||0)
+  next.debt = Math.max(0, next.grand_total - collected)
+  return next
+}
+
+export default function BillForm({ initial, onSubmit, onCancel, loading, submitError }) {
+  const [form, setForm]       = useState(() => getDefaultForm(initial))
+  const [showSvc, setShowSvc] = useState(true)
+  const [bookingDiscountPercent, setBookingDiscountPercent] = useState(30)
+
+  useEffect(() => {
+    const nextForm = getDefaultForm(initial)
+    setForm(nextForm)
+    if (isBookingPayment(nextForm.payment_type) && (parseFloat(nextForm.total) || 0) > 0) {
+      setBookingDiscountPercent(Number((((parseFloat(nextForm.discounts) || 0) / (parseFloat(nextForm.total) || 1)) * 100).toFixed(2)))
+    } else {
+      setBookingDiscountPercent(30)
+    }
+  }, [initial])
 
   function set(k, v) {
     setForm(prev => {
       const next = { ...prev, [k]: v }
-      // Auto-compute total & grand_total
-      const svcTotal = ['svc_opd','svc_diag_image','svc_ipd','svc_surg_ot','svc_emergency',
-        'svc_chronic','svc_pharma','svc_support','svc_admin','svc_homecare']
-        .reduce((s, f) => s + (parseFloat(next[f]) || 0), 0)
-      next.total = svcTotal
-      next.grand_total = svcTotal - (parseFloat(next.discounts) || 0)
-      // Auto debt = grand_total - collected
-      const collected = (parseFloat(next.cash)||0)+(parseFloat(next.bcel)||0)+(parseFloat(next.bcel2)||0)+(parseFloat(next.ldb)||0)
-      next.debt = Math.max(0, next.grand_total - collected)
-      return next
+      if (k === 'date') {
+        next.week = getWeekFromDate(v)
+      }
+      if ((k === 'payment_type' && isBookingPayment(v)) || (SERVICE_FIELDS.includes(k) && isBookingPayment(next.payment_type))) {
+        next.discounts = getBookingDiscount(getServiceTotal(next), bookingDiscountPercent)
+      }
+      if (PAYMENT_CHANNEL_FIELDS.includes(k) && !isBookingPayment(next.payment_type)) {
+        const autoType = deriveAutoPaymentType(next)
+        next.payment_type = autoType || (isAutoPayment(next.payment_type) ? '' : next.payment_type)
+      }
+      return recalcAmounts(next)
     })
   }
 
-  function num(k) { return e => set(k, parseFloat(e.target.value) || 0) }
+  function setBookingPercent(value) {
+    const percent = parseFloat(value) || 0
+    setBookingDiscountPercent(percent)
+    setForm(prev => recalcAmounts({
+      ...prev,
+      discounts: getBookingDiscount(getServiceTotal(prev), percent),
+    }))
+  }
+
+  function num(k) {
+    return e => {
+      const value = parseFloat(e.target.value) || 0
+      if (k === 'discounts' && isBookingPayment(form.payment_type)) {
+        const total = getServiceTotal(form)
+        setBookingDiscountPercent(total > 0 ? Number(((value / total) * 100).toFixed(2)) : 0)
+      }
+      set(k, value)
+    }
+  }
   function txt(k) { return e => set(k, e.target.value) }
 
   function handleSubmit(e) {
@@ -200,7 +319,33 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
           <Field label="Prepayment">
             <input type="number" min="0" step="any" value={form.prepayment} onChange={num('prepayment')} className={numCls} />
           </Field>
+          <Field label="Payment Type">
+            <select value={form.payment_type || ''} onChange={txt('payment_type')} className={inputCls}>
+              <option value="">-- ເລືອກ Payment Type --</option>
+              {PAYMENT_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
+            </select>
+          </Field>
         </div>
+        {isBookingPayment(form.payment_type) && (
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="ສ່ວນຫຼຸດຈອງກ່ອນ (%)" hint="ຕັ້ງຕົ້ນ 30% ແລະປັບໄດ້">
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="any"
+                  value={bookingDiscountPercent}
+                  onChange={e => setBookingPercent(e.target.value)}
+                  className={numCls}
+                />
+              </Field>
+              <Field label="ຈຳນວນເງິນສ່ວນຫຼຸດ" hint="ປັບຈຳນວນເງິນໄດ້ໂດຍກົງ">
+                <input type="number" min="0" step="any" value={form.discounts} onChange={num('discounts')} className={numCls} />
+              </Field>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Section 5: Notes ── */}
@@ -208,9 +353,14 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
         <Field label="ໝາຍເຫດ (Note)">
           <input type="text" value={form.note} onChange={txt('note')} className={inputCls} />
         </Field>
-        <Field label="ຊື່ຜູ້ບັນທຶກ">
-          <RecorderSelect value={form.recorded_by} onChange={v => set('recorded_by', v)} />
-        </Field>
+        <div className="space-y-3">
+          <Field label="ວັນທີ/ເວລາອອກບິນ">
+            <input type="datetime-local" value={form.bill_issued_at || ''} onChange={txt('bill_issued_at')} className={inputCls} />
+          </Field>
+          <Field label="ຊື່ຜູ້ບັນທຶກ">
+            <RecorderSelect value={form.recorded_by} onChange={v => set('recorded_by', v)} />
+          </Field>
+        </div>
       </div>
 
       {/* Actions */}

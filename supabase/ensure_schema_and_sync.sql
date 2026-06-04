@@ -7,7 +7,13 @@
 alter table ar_bills add column if not exists debt_status      text;
 alter table ar_bills add column if not exists recorded_by      text;
 alter table ar_bills add column if not exists recorded_by_debt text;
+alter table ar_bills add column if not exists payment_type     text;
+alter table ar_bills add column if not exists bill_issued_at   timestamptz;
+alter table ar_bills add column if not exists due_date         date;
 alter table ar_insurance_list add column if not exists due_days integer not null default 30;
+alter table ar_debt add column if not exists insite_onsite text;
+alter table ar_debt add column if not exists opd_ipd text;
+alter table ar_debt add column if not exists payment_type text;
 alter table ar_debt add column if not exists payment_1_date date;
 alter table ar_debt add column if not exists payment_1_method text;
 alter table ar_debt add column if not exists payment_1_amount numeric(18,2) default 0;
@@ -21,16 +27,29 @@ alter table ar_debt add column if not exists payment_3_amount numeric(18,2) defa
 -- 2. ອັບເດດ debt_status ຕາມ debt
 update ar_bills set debt_status = 'pending' where (debt_status is null or debt_status = '') and debt > 0;
 update ar_bills set debt_status = 'paid'    where (debt_status is null or debt_status = '') and (debt is null or debt <= 0);
+update ar_bills
+set payment_type = case
+  when coalesce(prepayment, 0) >= coalesce(grand_total, 0) and coalesce(prepayment, 0) > 0 then 'Advance'
+  when coalesce(prepayment, 0) > 0 then 'Deposit'
+  when coalesce(cash, 0) > 0 and coalesce(bcel, 0) + coalesce(bcel2, 0) + coalesce(ldb, 0) > 0 then 'Cash/Transfer'
+  when coalesce(cash, 0) > 0 then 'Cash'
+  when coalesce(bcel, 0) + coalesce(bcel2, 0) + coalesce(ldb, 0) > 0 then 'Transfer'
+  else 'Transacted'
+end
+where payment_type is null or payment_type = '';
+update ar_bills
+set due_date = coalesce(date, current_date) + interval '30 days'
+where due_date is null and insite_onsite = 'Onsite';
 
 -- 3. Sync ໃບບິນທີ່ມີໜີ້ → ar_debt (ບໍ່ duplicate)
 insert into ar_debt (
-  date, bill_no, customer_type, insurance, hn, patient_name, gender, workload,
+  date, bill_no, insite_onsite, opd_ipd, payment_type, customer_type, insurance, hn, patient_name, gender, workload,
   grand_total, debt_amount, date_paid, submit_date,
   amount_paid, cash_paid, bcel_paid, bcel2_paid, ldb_paid,
   balance, due_date, aging_group
 )
 select
-  b.date, b.bill_no, b.customer_type, b.insurance, b.hn, b.patient_name, b.gender, b.workload,
+  b.date, b.bill_no, b.insite_onsite, b.opd_ipd, b.payment_type, b.customer_type, b.insurance, b.hn, b.patient_name, b.gender, b.workload,
   b.grand_total,
   b.debt as debt_amount,
   null as date_paid,
@@ -39,7 +58,7 @@ select
   0 as cash_paid, 0 as bcel_paid, 0 as bcel2_paid, 0 as ldb_paid,
   b.debt as balance,
   (current_date + (coalesce(i.due_days, 30) || ' days')::interval)::date as due_date,
-  'Due on schedule' as aging_group
+  'Current Receivables' as aging_group
 from ar_bills b
 left join ar_insurance_list i on i.name = b.insurance
 where b.debt > 0

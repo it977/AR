@@ -25,12 +25,11 @@ const LOOKER_OUTSTANDING_FALLBACK = {
 const CUSTOMER_TYPES = ['GN', 'INS', 'B2B', 'iNS']
 
 function agingBadgeClass(group) {
-  if (group === '46-60+ Days') return 'bg-red-100 text-red-700'
+  if (group === '46-90 Days') return 'bg-red-100 text-red-700'
   if (group === '31-45 Days') return 'bg-orange-100 text-orange-700'
   if (group === '16-30 Days') return 'bg-yellow-100 text-yellow-700'
   if (group === '1-15 Days') return 'bg-green-100 text-green-700'
-  if (group === 'Pay in installments') return 'bg-violet-100 text-violet-700'
-  if (group === 'Due on schedule') return 'bg-sky-100 text-sky-700'
+  if (group === 'Current Receivables') return 'bg-sky-100 text-sky-700'
   return 'bg-slate-100 text-slate-600'
 }
 

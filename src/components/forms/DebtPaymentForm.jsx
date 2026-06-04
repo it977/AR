@@ -8,6 +8,7 @@ import {
   getAgingLabel,
   getDueDaysForInsurance,
   normalizeInstallments,
+  resolvePaymentStatus,
   summarizeInstallments,
 } from '../../lib/debtUtils'
 
@@ -17,13 +18,11 @@ const numCls   = inputCls + ' text-right font-mono'
 function fmt(v) { return new Intl.NumberFormat().format(v || 0) }
 
 const AGING_COLOR = {
-  'N':           'bg-slate-100 text-slate-600',
-  'Due on schedule': 'bg-sky-100 text-sky-700',
-  'Pay in installments': 'bg-violet-100 text-violet-700',
+  'Current Receivables': 'bg-sky-100 text-sky-700',
   '1-15 Days':   'bg-emerald-100 text-emerald-700',
   '16-30 Days':  'bg-amber-100 text-amber-700',
   '31-45 Days':  'bg-orange-100 text-orange-700',
-  '46-60+ Days': 'bg-red-100 text-red-700',
+  '46-90 Days': 'bg-red-100 text-red-700',
 }
 
 export default function DebtPaymentForm({ initial, onSubmit, onCancel, loading, insuranceDueDays = {} }) {
@@ -81,7 +80,7 @@ export default function DebtPaymentForm({ initial, onSubmit, onCancel, loading, 
       debt:  newDebt,
       aging_group: aging,
       note,
-      debt_status: newDebt === 0 ? 'paid' : 'pending',
+      debt_status: resolvePaymentStatus({ ...agingRow, balance: newDebt }),
       recorded_by_debt: recordedByDebt,
     })
   }
@@ -198,7 +197,7 @@ export default function DebtPaymentForm({ initial, onSubmit, onCancel, loading, 
         <div>
           <label className="block text-xs font-semibold text-slate-600 mb-1">Aging Group <span className="text-slate-400 font-normal">(ອັດຕະໂນມັດ)</span></label>
           <div className="flex items-center gap-2 px-3 py-2 rounded-lg border bg-slate-50 border-slate-200">
-            <span className={`badge ${AGING_COLOR[aging]}`}>{getAgingLabel(aging)}</span>
+            <span className={`badge ${AGING_COLOR[aging] || 'bg-slate-100 text-slate-600'}`}>{getAgingLabel(aging)}</span>
             <span className="text-xs text-slate-400">
               {submitDate ? `${overdueDays} ມື້ຫຼັງກຳນົດຊຳລະ` : ''}
             </span>
