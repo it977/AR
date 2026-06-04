@@ -628,6 +628,7 @@ export default function DebtManagement() {
                     <span className="block text-[10px] font-semibold text-slate-500 leading-snug">{term.label}</span>
                     <span className={`block text-lg font-extrabold font-mono leading-tight mt-1 ${style.count}`}>{fmt(item.bills)}</span>
                     <span className="block text-[10px] text-slate-400">Bills</span>
+                    <span className="block text-[11px] font-semibold font-mono text-slate-600 mt-1 truncate">{fmt(item.amount)} LAK</span>
                   </span>
                 </div>
               </button>

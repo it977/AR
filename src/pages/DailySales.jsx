@@ -421,6 +421,7 @@ export default function DailySales() {
                   <p className="text-[11px] font-semibold text-slate-500 leading-tight min-h-[28px]">{term.label}</p>
                   <p className="text-xl font-extrabold font-mono text-slate-800 mt-2">{formatNumber(item.bills, 0)}</p>
                   <p className="text-[10px] text-slate-400">Bills</p>
+                  <p className="text-[11px] font-semibold font-mono text-slate-600 mt-1 truncate">{formatNumber(item.amount || 0, 0)} LAK</p>
                 </button>
               )
             })}
