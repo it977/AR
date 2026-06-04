@@ -206,6 +206,7 @@ export default function DebtPaymentForm({ initial, onSubmit, onCancel, loading, 
         <div>
           <label className="block text-xs font-semibold text-slate-600 mb-1">ໝາຍເຫດ</label>
           <input type="text" value={note} onChange={e => setNote(e.target.value)} className={inputCls} />
+          <p className="text-[11px] text-slate-400 mt-1">ຖ້າປະກັນປະຕິເສດ claim ໃຫ້ພິມ “Denied” ຫຼື “ປະຕິເສດ”</p>
         </div>
         <div>
           <label className="block text-xs font-semibold text-slate-600 mb-1">ຜູ້ບັນທຶກໜີ້</label>

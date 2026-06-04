@@ -45,10 +45,13 @@ function downloadDebtTemplate() {
 }
 import {
   AGING_GROUPS,
+  COLLECTION_TERMS,
   DEFAULT_DUE_DAYS,
   calcAging,
   calcOverdueDays,
   calcDueDate,
+  computeCollectionTermSummary,
+  getCollectionStatus,
   getAgingLabel,
   resolvePaymentStatus,
   statusBadgeClass,
@@ -64,6 +67,10 @@ const AGING_COLOR = {
   '31-45 Days': 'bg-orange-100 text-orange-700',
   '46-90 Days':'bg-red-100 text-red-700',
 }
+const COLLECTION_STATUS_OPTIONS = [
+  ...COLLECTION_TERMS.map(term => ({ value: term.key, label: term.label })),
+  { value: 'paid', label: 'ຊຳລະແລ້ວ' },
+]
 const actionThCls = 'table-th sticky right-0 z-20 bg-slate-50 text-center shadow-[-10px_0_18px_-16px_rgba(15,23,42,0.45)]'
 const actionTdCls = 'table-td sticky right-0 z-10 bg-white group-hover:bg-slate-50 shadow-[-10px_0_18px_-16px_rgba(15,23,42,0.45)]'
 
@@ -82,6 +89,88 @@ function applyAgingFilter(query, aging) {
   if (aging === '31-45 Days') return query.lt('due_date', dateDaysAgo(30)).gte('due_date', dateDaysAgo(45))
   if (aging === '46-90 Days') return query.lt('due_date', dateDaysAgo(45))
   return query
+}
+
+function collectionStatusBadgeClass(key) {
+  if (key === 'denied') return 'bg-rose-100 text-rose-700 border border-rose-200'
+  if (key === 'paid') return 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+  if (key === 'pending_submission') return 'bg-slate-100 text-slate-700 border border-slate-200'
+  if (key === 'past_due') return 'bg-red-100 text-red-700 border border-red-200'
+  if (key === 'pending_payment') return 'bg-sky-100 text-sky-700 border border-sky-200'
+  return 'bg-slate-100 text-slate-700 border border-slate-200'
+}
+
+const TERM_CARD_STYLE = {
+  pending_submission: {
+    box: 'border-slate-200 bg-white hover:bg-slate-50',
+    active: 'border-slate-400 bg-slate-50',
+    icon: 'bg-slate-100 text-slate-600',
+    count: 'text-slate-800',
+  },
+  pending_payment: {
+    box: 'border-sky-100 bg-sky-50/70 hover:bg-sky-50',
+    active: 'border-sky-300 bg-sky-50',
+    icon: 'bg-sky-100 text-sky-700',
+    count: 'text-sky-700',
+  },
+  denied: {
+    box: 'border-rose-100 bg-rose-50/70 hover:bg-rose-50',
+    active: 'border-rose-300 bg-rose-50',
+    icon: 'bg-rose-100 text-rose-700',
+    count: 'text-rose-700',
+  },
+  outstanding: {
+    box: 'border-amber-100 bg-amber-50/70 hover:bg-amber-50',
+    active: 'border-amber-300 bg-amber-50',
+    icon: 'bg-amber-100 text-amber-700',
+    count: 'text-amber-700',
+  },
+  current: {
+    box: 'border-emerald-100 bg-emerald-50/70 hover:bg-emerald-50',
+    active: 'border-emerald-300 bg-emerald-50',
+    icon: 'bg-emerald-100 text-emerald-700',
+    count: 'text-emerald-700',
+  },
+  past_due: {
+    box: 'border-red-100 bg-red-50/70 hover:bg-red-50',
+    active: 'border-red-300 bg-red-50',
+    icon: 'bg-red-100 text-red-700',
+    count: 'text-red-700',
+  },
+}
+
+function TermIcon({ keyName }) {
+  const base = 'w-4 h-4'
+  if (keyName === 'pending_submission') return (
+    <svg className={base} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6M7 3h6l5 5v13H7a2 2 0 01-2-2V5a2 2 0 012-2z" />
+    </svg>
+  )
+  if (keyName === 'pending_payment') return (
+    <svg className={base} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-2.21 0-4 .9-4 2s1.79 2 4 2 4 .9 4 2-1.79 2-4 2m0-10v2m0 8v2M4 6h16M4 20h16" />
+    </svg>
+  )
+  if (keyName === 'denied') return (
+    <svg className={base} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v4m0 4h.01M4.93 4.93l14.14 14.14M12 3a9 9 0 019 9 8.96 8.96 0 01-2.64 6.36M6.34 18.36A9 9 0 0112 3" />
+    </svg>
+  )
+  if (keyName === 'outstanding') return (
+    <svg className={base} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14l6-6M5 21V5a2 2 0 012-2h10a2 2 0 012 2v16l-3-2-3 2-3-2-3 2z" />
+    </svg>
+  )
+  if (keyName === 'current') return (
+    <svg className={base} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3M5 11h14M6 21h12a2 2 0 002-2V7a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+    </svg>
+  )
+  return (
+    <svg className={base} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  )
 }
 
 export default function DebtManagement() {
@@ -109,7 +198,7 @@ export default function DebtManagement() {
   const [uploadState, setUploadState] = useState(null)
   const [mismatchDialog, setMismatchDialog] = useState(null)
 
-  const [kpis, setKpis] = useState({ total_debt: 0, total_paid: 0, total_balance: 0, records: 0 })
+  const [collectionSummary, setCollectionSummary] = useState(() => computeCollectionTermSummary([]))
   const [insuranceDueDays, setInsuranceDueDays] = useState({})
 
   const insuranceOptions = useMemo(
@@ -134,7 +223,7 @@ export default function DebtManagement() {
       let all = [], from = 0, total = null
       while (true) {
         const { data, count, error } = await buildQuery(from, from + PAGE - 1)
-        if (error) break
+        if (error) throw error
         if (total === null && count != null) total = count
         if (data?.length) all = all.concat(data)
         if (!data?.length || all.length >= (total ?? Infinity) || data.length < PAGE) break
@@ -143,21 +232,22 @@ export default function DebtManagement() {
       return all
     }
 
-    const debtData = await fetchAll((f, t) =>
-      supabase.from('ar_debt').select('debt_amount, cash_paid, bcel_paid, bcel2_paid, ldb_paid, balance', { count: 'exact' }).range(f, t)
-    )
+    const summaryColumns = 'id,bill_no,date,insurance,note,submit_date,due_date,balance'
+    const fallbackColumns = 'id,bill_no,date,insurance,submit_date,due_date,balance'
+    let debtData = []
+    try {
+      debtData = await fetchAll((f, t) =>
+        supabase.from('ar_debt').select(summaryColumns, { count: 'exact' }).range(f, t)
+      )
+    } catch (err) {
+      if (!String(err.message || '').includes('note')) throw err
+      debtData = await fetchAll((f, t) =>
+        supabase.from('ar_debt').select(fallbackColumns, { count: 'exact' }).range(f, t)
+      )
+    }
 
-    const originalDebt = debtData.reduce((s, r) => s + (r.debt_amount || 0), 0)
-    const collected    = debtData.reduce((s, r) => s + (r.cash_paid || 0) + (r.bcel_paid || 0) + (r.bcel2_paid || 0) + (r.ldb_paid || 0), 0)
-    const remaining    = debtData.reduce((s, r) => s + (r.balance    || 0), 0)
-
-    setKpis({
-      total_debt:    originalDebt > 0 ? originalDebt : collected + remaining,
-      total_paid:    collected,
-      total_balance: remaining,
-      records:       debtData.length,
-    })
-  }, [])
+    setCollectionSummary(computeCollectionTermSummary(debtData, insuranceDueDays))
+  }, [insuranceDueDays])
 
   const fetchRows = useCallback(async () => {
     setLoading(true)
@@ -168,6 +258,7 @@ export default function DebtManagement() {
     const today = todayIso()
     if (statusFilter === 'pending_submission') q = q.gt('balance', 0).is('submit_date', null)
     if (statusFilter === 'pending_payment') q = q.gt('balance', 0).not('submit_date', 'is', null)
+    if (statusFilter === 'denied') q = q.or('note.ilike.%denied%,note.ilike.%reject%,note.ilike.%rejected%,note.ilike.%ປະຕິເສດ%')
     if (statusFilter === 'outstanding') q = q.gt('balance', 0)
     if (statusFilter === 'current') q = q.gt('balance', 0).or(`due_date.is.null,due_date.gte.${today}`)
     if (statusFilter === 'past_due') q = q.gt('balance', 0).lt('due_date', today)
@@ -182,7 +273,13 @@ export default function DebtManagement() {
       .order('date', { ascending: false })
       .order('bill_no', { ascending: false })
       .range(page * pageSize, page * pageSize + pageSize - 1)
-    if (!error) { setRows(data || []); setTotal(count || 0) }
+    if (error && statusFilter === 'denied' && String(error.message || '').includes('note')) {
+      setRows([])
+      setTotal(0)
+    } else if (!error) {
+      setRows(data || [])
+      setTotal(count || 0)
+    }
     setLoading(false)
   }, [search, aging, statusFilter, paymentTypeFilter, insuranceFilter, dateFrom, dateTo, page, pageSize])
 
@@ -492,20 +589,51 @@ export default function DebtManagement() {
         </div>
       </div>
 
-      {/* KPI row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: 'ຍອດລວມທັງໝົດ', value: kpis.total_debt, color: 'text-slate-700', bg: 'bg-white border-slate-100' },
-          { label: 'ເກັບໄດ້ແລ້ວ', value: kpis.total_paid, color: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-100' },
-          { label: 'ໜີ້ຄ້າງ', value: kpis.total_balance, color: 'text-red-600', bg: 'bg-red-50 border-red-100' },
-          { label: 'ຈຳນວນໃບບິນ', value: kpis.records, color: 'text-slate-700', bg: 'bg-white border-slate-100' },
-        ].map(k => (
-          <div key={k.label} className={`rounded-xl p-3 border ${k.bg}`}>
-            <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">{k.label}</p>
-            <p className={`text-lg font-bold mt-1 font-mono ${k.color}`}>{fmt(k.value)}</p>
-            {k.label !== 'ຈຳນວນໃບບິນ' && <p className="text-[10px] text-slate-400 mt-0.5">LAK</p>}
+      {/* Collection term summary */}
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="font-bold text-slate-700 text-sm">Collection Term Summary</h3>
+            <p className="text-xs text-slate-400">ຈຳນວນບິນຕາມ term ສຳລັບທີມ Collection</p>
           </div>
-        ))}
+          <select
+            value={statusFilter}
+            onChange={e => { setStatusFilter(e.target.value); setPage(0) }}
+            className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400 bg-white min-w-[220px]"
+            data-pdf-hidden="true"
+          >
+            <option value="">All Terms</option>
+            {COLLECTION_TERMS.map(term => (
+              <option key={term.key} value={term.key}>{term.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2.5">
+          {COLLECTION_TERMS.map(term => {
+            const item = collectionSummary[term.key] || { bills: 0, amount: 0 }
+            const active = statusFilter === term.key
+            const style = TERM_CARD_STYLE[term.key] || TERM_CARD_STYLE.pending_submission
+            return (
+              <button
+                key={term.key}
+                type="button"
+                onClick={() => { setStatusFilter(active ? '' : term.key); setPage(0) }}
+                className={`text-left rounded-xl border px-3 py-2.5 transition-colors ${active ? style.active : style.box}`}
+              >
+                <div className="flex items-start gap-2.5">
+                  <span className={`mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${style.icon}`}>
+                    <TermIcon keyName={term.key} />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-[10px] font-semibold text-slate-500 leading-snug">{term.label}</span>
+                    <span className={`block text-lg font-extrabold font-mono leading-tight mt-1 ${style.count}`}>{fmt(item.bills)}</span>
+                    <span className="block text-[10px] text-slate-400">Bills</span>
+                  </span>
+                </div>
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       {/* Filters */}
@@ -523,12 +651,9 @@ export default function DebtManagement() {
           <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(0) }}
             className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
             <option value="">ທັງໝົດ</option>
-            <option value="pending_submission">Pending Insurance Submission</option>
-            <option value="pending_payment">Pending Insurance Payment</option>
-            <option value="outstanding">Outstanding Receivables</option>
-            <option value="current">Current Receivables</option>
-            <option value="past_due">Past Due Receivables</option>
-            <option value="paid">ຊຳລະແລ້ວ</option>
+            {COLLECTION_STATUS_OPTIONS.map(option => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
           </select>
         </div>
         <div>
@@ -638,6 +763,7 @@ export default function DebtManagement() {
                   : 'bg-red-100 text-red-700 border border-red-200'
                 const isPaid = debt <= 0
                 const paymentStatus = resolvePaymentStatus(agingRow)
+                const collectionStatus = getCollectionStatus(agingRow, insuranceDueDays)
                 return (
                   <tr key={row.id} className="group hover:bg-slate-50 transition-colors">
                     <td className="table-td font-mono text-xs font-semibold text-primary-600">{row.bill_no}</td>
@@ -669,7 +795,9 @@ export default function DebtManagement() {
                       <span className={`badge text-[10px] ${AGING_COLOR[currentAging] || 'bg-slate-100 text-slate-600'}`}>{getAgingLabel(currentAging)}</span>
                     </td>
                     <td className="table-td text-center">
-                      {paymentStatus ? (
+                      {collectionStatus ? (
+                        <span className={`badge text-[10px] ${collectionStatusBadgeClass(collectionStatus.key)}`}>{collectionStatus.shortLabel}</span>
+                      ) : paymentStatus ? (
                         <span className={`badge ${statusBadgeClass(paymentStatus)}`}>{paymentStatus}</span>
                       ) : isPaid ? (
                         <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold bg-emerald-100 text-emerald-700 rounded-lg border border-emerald-200">
@@ -779,6 +907,7 @@ export default function DebtManagement() {
           onSubmit={handleEditSubmit}
           onCancel={() => setEditModal(null)}
           loading={saving}
+          insuranceDueDays={insuranceDueDays}
         />
       </Modal>
 

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import InsuranceSelect from '../InsuranceSelect'
 import RecorderSelect from '../RecorderSelect'
-import { PAYMENT_TYPES } from '../../lib/debtUtils'
+import { DEFAULT_DUE_DAYS, PAYMENT_TYPES, calcDueDate, getDueDaysForInsurance } from '../../lib/debtUtils'
 
 const WORKLOADS   = ['8AM-4PM', '4PM-12AM', '12AM-8AM']
 const CUST_TYPES  = ['GN', 'INS', 'B2B']
@@ -25,7 +25,7 @@ const EMPTY = {
   svc_chronic: 0, svc_pharma: 0, svc_support: 0, svc_admin: 0, svc_homecare: 0,
   total: 0, discounts: 0, grand_total: 0,
   cash: 0, bcel: 0, bcel2: 0, ldb: 0,
-  debt: 0, prepayment: 0, payment_type: '', bill_issued_at: '', note: '', aging_group: 'Current Receivables', recorded_by: '',
+  debt: 0, prepayment: 0, payment_type: '', bill_issued_at: '', submit_date: '', due_date: '', note: '', aging_group: 'Current Receivables', recorded_by: '',
 }
 
 function Field({ label, required, children, hint }) {
@@ -126,26 +126,33 @@ function recalcAmounts(values) {
   return next
 }
 
-export default function BillForm({ initial, onSubmit, onCancel, loading, submitError }) {
+export default function BillForm({ initial, onSubmit, onCancel, loading, submitError, insuranceDueDays = {} }) {
   const [form, setForm]       = useState(() => getDefaultForm(initial))
   const [showSvc, setShowSvc] = useState(true)
   const [bookingDiscountPercent, setBookingDiscountPercent] = useState(30)
+  const isDebtEdit = initial?.balance !== undefined || initial?.debt_amount !== undefined || initial?.submit_date !== undefined
 
   useEffect(() => {
     const nextForm = getDefaultForm(initial)
+    if (isDebtEdit && nextForm.submit_date && !nextForm.due_date) {
+      nextForm.due_date = calcDueDate(nextForm.submit_date, insuranceDueDays, nextForm.insurance) || ''
+    }
     setForm(nextForm)
     if (isBookingPayment(nextForm.payment_type) && (parseFloat(nextForm.total) || 0) > 0) {
       setBookingDiscountPercent(Number((((parseFloat(nextForm.discounts) || 0) / (parseFloat(nextForm.total) || 1)) * 100).toFixed(2)))
     } else {
       setBookingDiscountPercent(30)
     }
-  }, [initial])
+  }, [initial, insuranceDueDays, isDebtEdit])
 
   function set(k, v) {
     setForm(prev => {
       const next = { ...prev, [k]: v }
       if (k === 'date') {
         next.week = getWeekFromDate(v)
+      }
+      if (isDebtEdit && (k === 'submit_date' || k === 'insurance')) {
+        next.due_date = calcDueDate(next.submit_date || next.date, insuranceDueDays, next.insurance) || ''
       }
       if ((k === 'payment_type' && isBookingPayment(v)) || (SERVICE_FIELDS.includes(k) && isBookingPayment(next.payment_type))) {
         next.discounts = getBookingDiscount(getServiceTotal(next), bookingDiscountPercent)
@@ -191,6 +198,7 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
   }
 
   const isEdit = !!initial?.id
+  const dueDays = getDueDaysForInsurance(insuranceDueDays, form.insurance)
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
@@ -241,6 +249,25 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
           </Field>
         </div>
       </div>
+
+      {isDebtEdit && (
+        <div className="rounded-xl border border-sky-100 bg-sky-50/60 p-4">
+          <p className="text-xs font-bold text-sky-700 uppercase tracking-wider mb-3">ຂໍ້ມູນສົ່ງເອກະສານປະກັນ</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <Field label="ວັນທີສົ່ງເອກະສານ" hint="ໃຊ້ເພື່ອແຍກ Pending Submission / Pending Payment">
+              <input type="date" value={form.submit_date || ''} onChange={txt('submit_date')} className={inputCls} />
+            </Field>
+            <Field label="ກຳນົດຊຳລະ" hint={`${form.insurance || 'Default'} · ${dueDays || DEFAULT_DUE_DAYS} ມື້`}>
+              <input type="date" value={form.due_date || ''} onChange={txt('due_date')} className={inputCls} />
+            </Field>
+            <Field label="Collection Term">
+              <div className="px-3 py-2 rounded-lg border border-sky-100 bg-white text-sm font-semibold text-slate-700">
+                {form.submit_date ? 'Pending Insurance Payment' : 'Pending Insurance Submission'}
+              </div>
+            </Field>
+          </div>
+        </div>
+      )}
 
       {/* ── Section 2: Patient ── */}
       <div>

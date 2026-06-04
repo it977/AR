@@ -28,6 +28,15 @@ export const STATUS_LABELS = {
 
 export const AGING_BUCKETS = ['0-30', '31-60', '61-90', '90+']
 
+export const COLLECTION_TERMS = [
+  { key: 'pending_submission', label: 'Pending Insurance Submission', shortLabel: 'Pending Submission' },
+  { key: 'pending_payment', label: 'Pending Insurance Payment', shortLabel: 'Pending Payment' },
+  { key: 'denied', label: 'Denied Claims', shortLabel: 'Denied Claims' },
+  { key: 'outstanding', label: 'Outstanding Receivables', shortLabel: 'Outstanding' },
+  { key: 'current', label: 'Current Receivables', shortLabel: 'Current' },
+  { key: 'past_due', label: 'Past Due Receivables', shortLabel: 'Past Due' },
+]
+
 export const SERVICE_FIELDS = [
   { key: 'svc_opd', label: 'OPD' },
   { key: 'svc_diag_image', label: 'Diag & Image' },
@@ -176,6 +185,56 @@ export function getDueDaysForInsurance(insuranceDueDays = {}, insurance) {
 
 export function calcDueDate(submitDate, insuranceDueDays = {}, insurance) {
   return addDays(submitDate, getDueDaysForInsurance(insuranceDueDays, insurance))
+}
+
+export function isDeniedClaim(row = {}) {
+  const note = String(row.note || '').toLowerCase()
+  return note.includes('denied') ||
+    note.includes('reject') ||
+    note.includes('rejected') ||
+    note.includes('ປະຕິເສດ')
+}
+
+export function matchesCollectionTerm(row = {}, termKey, insuranceDueDays = {}) {
+  const balance = toNumber(row.balance ?? row.debt)
+  const dueDate = row.due_date || calcDueDate(row.submit_date || row.date, insuranceDueDays, row.insurance)
+  const today = todayIso()
+
+  if (termKey === 'pending_submission') return balance > 0 && !row.submit_date
+  if (termKey === 'pending_payment') return balance > 0 && !!row.submit_date
+  if (termKey === 'denied') return isDeniedClaim(row)
+  if (termKey === 'outstanding') return balance > 0
+  if (termKey === 'current') return balance > 0 && (!dueDate || dueDate >= today)
+  if (termKey === 'past_due') return balance > 0 && !!dueDate && dueDate < today
+  return true
+}
+
+export function computeCollectionTermSummary(rows = [], insuranceDueDays = {}) {
+  return Object.fromEntries(COLLECTION_TERMS.map(term => {
+    const termRows = rows.filter(row => matchesCollectionTerm(row, term.key, insuranceDueDays))
+    const bills = new Set(termRows.map(row => row.bill_no || row.id).filter(Boolean)).size
+    const amount = termRows.reduce((sum, row) => sum + toNumber(row.balance ?? row.debt), 0)
+    return [term.key, { ...term, bills, amount }]
+  }))
+}
+
+export function getCollectionStatus(row = {}, insuranceDueDays = {}) {
+  const balance = toNumber(row.balance ?? row.debt)
+  const dueDate = row.due_date || calcDueDate(row.submit_date || row.date, insuranceDueDays, row.insurance)
+
+  if (isDeniedClaim(row)) {
+    return { key: 'denied', label: 'Denied Claims', shortLabel: 'Denied Claims' }
+  }
+  if (balance <= 0) {
+    return { key: 'paid', label: 'ຊຳລະແລ້ວ', shortLabel: 'Paid' }
+  }
+  if (!row.submit_date) {
+    return { key: 'pending_submission', label: 'Pending Insurance Submission', shortLabel: 'Pending Submission' }
+  }
+  if (dueDate && dueDate < todayIso()) {
+    return { key: 'past_due', label: 'Past Due Receivables', shortLabel: 'Past Due' }
+  }
+  return { key: 'pending_payment', label: 'Pending Insurance Payment', shortLabel: 'Pending Payment' }
 }
 
 export function calcDaysSince(dateStr) {

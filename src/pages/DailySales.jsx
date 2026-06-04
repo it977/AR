@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import ReactApexChart from 'react-apexcharts'
 import DateFilter, { FilterSelect } from '../components/DateFilter'
 import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
@@ -11,6 +11,7 @@ import {
 import { formatLAK, formatNumber } from '../lib/excelParser'
 import PDFButton from '../components/PDFButton'
 import { useGlobalFilters } from '../context/FilterContext'
+import { COLLECTION_TERMS, computeCollectionTermSummary } from '../lib/debtUtils'
 
 const SHIFT_COLORS = ['#4f46e5', '#06b6d4', '#10b981']
 const SHIFT_OPTIONS = [
@@ -161,10 +162,12 @@ function CollectionMetric({ label, sublabel, value, isLAK = true, tone = 'slate'
 
 export default function DailySales() {
   const { filters, updateFilters } = useGlobalFilters()
+  const [selectedCollectionTerm, setSelectedCollectionTerm] = useState('')
 
   const { data: rows,      loading }  = useARData(filters)
   // Collection = ເງິນທີ່ເກັບໄດ້ໃນວັນທີ filter (cash flow view) → filter ດ້ວຍ date_paid
   const { data: debtRows }            = usePayoffData({ ...filters, payoffDateField: 'date_paid' })
+  const { data: termDebtRows }        = usePayoffData(filters)
 
   const kpis      = useMemo(() => computeKPIs(rows || []), [rows])
   const shiftData = useMemo(() => computeShiftData(rows || []), [rows])
@@ -219,6 +222,14 @@ export default function DailySales() {
       ? { ...collectionStats, amount: LOOKER_DAILY_FALLBACK.collectionAmount }
       : collectionStats
   ), [collectionStats, useLookerFallback])
+
+  const collectionTermSummary = useMemo(
+    () => computeCollectionTermSummary(termDebtRows || []),
+    [termDebtRows],
+  )
+  const selectedTermSummary = selectedCollectionTerm
+    ? collectionTermSummary[selectedCollectionTerm]
+    : null
 
   const viewShiftData = useMemo(() => (
     useLookerFallback ? LOOKER_DAILY_FALLBACK.shifts : shiftData
@@ -365,6 +376,55 @@ export default function DailySales() {
           <CollectionMetric label="Discounts Bill / Day" sublabel="Discounted bill count" value={viewKpis.discountedBills} isLAK={false} tone="amber" />
           <CollectionMetric label="Discount Amount / Day" sublabel="Total discount amount" value={viewKpis.totalDiscounts} tone="amber" />
           <CollectionMetric label="Collected Bill" sublabel="Unpaid bills collected" value={viewKpis.collectionBills} isLAK={false} tone="blue" />
+        </div>
+        <div className="mt-5 pt-4 border-t border-slate-100">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <div>
+              <h4 className="text-sm font-bold text-slate-700">Collection Term Status</h4>
+              <p className="text-xs text-slate-400">ສະຫຼຸບຈຳນວນບິນຕາມ term ທີ່ທີມ Collection ໃຊ້ຕິດຕາມ</p>
+            </div>
+            <select
+              value={selectedCollectionTerm}
+              onChange={e => setSelectedCollectionTerm(e.target.value)}
+              className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400"
+              data-pdf-hidden="true"
+            >
+              <option value="">All Terms</option>
+              {COLLECTION_TERMS.map(term => (
+                <option key={term.key} value={term.key}>{term.label}</option>
+              ))}
+            </select>
+          </div>
+          {selectedTermSummary && (
+            <div className="mb-3 rounded-xl border border-primary-100 bg-primary-50 p-3 flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold text-primary-700">{selectedTermSummary.label}</p>
+                <p className="text-[11px] text-slate-500">Selected term</p>
+              </div>
+              <div className="text-right">
+                <p className="text-2xl font-extrabold font-mono text-primary-700">{formatNumber(selectedTermSummary.bills, 0)}</p>
+                <p className="text-[11px] text-slate-500">Bills</p>
+              </div>
+            </div>
+          )}
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+            {COLLECTION_TERMS.map(term => {
+              const item = collectionTermSummary[term.key] || { bills: 0 }
+              const active = selectedCollectionTerm === term.key
+              return (
+                <button
+                  key={term.key}
+                  type="button"
+                  onClick={() => setSelectedCollectionTerm(active ? '' : term.key)}
+                  className={`text-left rounded-xl border p-3 transition-colors ${active ? 'border-primary-300 bg-primary-50' : 'border-slate-100 bg-slate-50/70 hover:bg-slate-50'}`}
+                >
+                  <p className="text-[11px] font-semibold text-slate-500 leading-tight min-h-[28px]">{term.label}</p>
+                  <p className="text-xl font-extrabold font-mono text-slate-800 mt-2">{formatNumber(item.bills, 0)}</p>
+                  <p className="text-[10px] text-slate-400">Bills</p>
+                </button>
+              )
+            })}
+          </div>
         </div>
       </div>
 
