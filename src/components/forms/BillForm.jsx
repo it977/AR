@@ -16,6 +16,7 @@ const SERVICE_FIELDS = [
   'svc_opd','svc_diag_image','svc_ipd','svc_surg_ot','svc_emergency',
   'svc_chronic','svc_pharma','svc_support','svc_admin','svc_homecare',
 ]
+const EMPTY_INSURANCE_DUE_DAYS = {}
 
 const EMPTY = {
   date: '', week: '', workload: '8AM-4PM', bill_no: '',
@@ -100,33 +101,42 @@ function isAutoPayment(type) {
 }
 
 function deriveAutoPaymentType(values) {
-  const cash = parseFloat(values.cash) || 0
-  const transfer = (parseFloat(values.bcel) || 0) + (parseFloat(values.bcel2) || 0) + (parseFloat(values.ldb) || 0)
+  const cash = toAmountNumber(values.cash)
+  const transfer = toAmountNumber(values.bcel) + toAmountNumber(values.bcel2) + toAmountNumber(values.ldb)
   if (cash > 0 && transfer > 0) return 'Cash/Transfer'
   if (cash > 0) return 'Cash'
   if (transfer > 0) return 'Transfer'
   return ''
 }
 
+function toAmountNumber(value) {
+  if (value === null || value === undefined || value === '') return 0
+  return parseFloat(String(value).replace(/,/g, '').replace(/\s+/g, '')) || 0
+}
+
+function amountInputValue(value) {
+  return value === 0 || value === '0' ? '' : (value ?? '')
+}
+
 function getServiceTotal(values) {
-  return SERVICE_FIELDS.reduce((sum, field) => sum + (parseFloat(values[field]) || 0), 0)
+  return SERVICE_FIELDS.reduce((sum, field) => sum + toAmountNumber(values[field]), 0)
 }
 
 function getBookingDiscount(total, percent) {
-  return Math.round((parseFloat(total) || 0) * (parseFloat(percent) || 0) / 100)
+  return Math.round(toAmountNumber(total) * toAmountNumber(percent) / 100)
 }
 
 function recalcAmounts(values) {
   const next = { ...values }
   const svcTotal = getServiceTotal(next)
   next.total = svcTotal
-  next.grand_total = svcTotal - (parseFloat(next.discounts) || 0)
-  const collected = (parseFloat(next.cash)||0)+(parseFloat(next.bcel)||0)+(parseFloat(next.bcel2)||0)+(parseFloat(next.ldb)||0)+(parseFloat(next.prepayment)||0)
+  next.grand_total = svcTotal - toAmountNumber(next.discounts)
+  const collected = toAmountNumber(next.cash) + toAmountNumber(next.bcel) + toAmountNumber(next.bcel2) + toAmountNumber(next.ldb) + toAmountNumber(next.prepayment)
   next.debt = Math.max(0, next.grand_total - collected)
   return next
 }
 
-export default function BillForm({ initial, onSubmit, onCancel, loading, submitError, insuranceDueDays = {} }) {
+export default function BillForm({ initial, onSubmit, onCancel, loading, submitError, insuranceDueDays = EMPTY_INSURANCE_DUE_DAYS }) {
   const [form, setForm]       = useState(() => getDefaultForm(initial))
   const [showSvc, setShowSvc] = useState(true)
   const [bookingDiscountPercent, setBookingDiscountPercent] = useState(30)
@@ -138,8 +148,8 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
       nextForm.due_date = calcDueDate(nextForm.submit_date, insuranceDueDays, nextForm.insurance) || ''
     }
     setForm(nextForm)
-    if (isBookingPayment(nextForm.payment_type) && (parseFloat(nextForm.total) || 0) > 0) {
-      setBookingDiscountPercent(Number((((parseFloat(nextForm.discounts) || 0) / (parseFloat(nextForm.total) || 1)) * 100).toFixed(2)))
+    if (isBookingPayment(nextForm.payment_type) && toAmountNumber(nextForm.total) > 0) {
+      setBookingDiscountPercent(Number(((toAmountNumber(nextForm.discounts) / (toAmountNumber(nextForm.total) || 1)) * 100).toFixed(2)))
     } else {
       setBookingDiscountPercent(30)
     }
@@ -166,7 +176,7 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
   }
 
   function setBookingPercent(value) {
-    const percent = parseFloat(value) || 0
+    const percent = toAmountNumber(value)
     setBookingDiscountPercent(percent)
     setForm(prev => recalcAmounts({
       ...prev,
@@ -177,7 +187,7 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
   function num(k) {
     return e => {
       const value = e.target.value
-      const numericValue = parseFloat(value) || 0
+      const numericValue = toAmountNumber(value)
       if (k === 'discounts' && isBookingPayment(form.payment_type)) {
         const total = getServiceTotal(form)
         setBookingDiscountPercent(total > 0 ? Number(((numericValue / total) * 100).toFixed(2)) : 0)
@@ -185,7 +195,6 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
       set(k, value)
     }
   }
-  function numberFocus(e) { e.target.select() }
   function txt(k) { return e => set(k, e.target.value) }
 
   function handleSubmit(e) {
@@ -195,7 +204,7 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
     const numericKeys = ['svc_opd','svc_diag_image','svc_ipd','svc_surg_ot','svc_emergency',
       'svc_chronic','svc_pharma','svc_support','svc_admin','svc_homecare',
       'total','discounts','grand_total','cash','bcel','bcel2','ldb','debt','prepayment']
-    numericKeys.forEach(k => { out[k] = parseFloat(out[k]) || 0 })
+    numericKeys.forEach(k => { out[k] = toAmountNumber(out[k]) })
     onSubmit(out)
   }
 
@@ -312,7 +321,7 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
               ['svc_pharma','Pharma'],['svc_support','Support'],['svc_admin','Admin'],['svc_homecare','Home Care'],
             ].map(([k, lbl]) => (
               <Field key={k} label={lbl}>
-                <input type="number" min="0" step="any" value={form[k]} onChange={num(k)} onFocus={numberFocus} className={numCls} />
+                <input type="text" inputMode="decimal" value={amountInputValue(form[k])} onChange={num(k)} placeholder="0" className={numCls} />
               </Field>
             ))}
           </div>
@@ -324,29 +333,29 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
         <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">ຍອດເງິນ & ການຊຳລະ</p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <Field label="ສ່ວນຫຼຸດ (Discounts)">
-            <input type="number" min="0" step="any" value={form.discounts} onChange={num('discounts')} onFocus={numberFocus} className={numCls} />
+            <input type="text" inputMode="decimal" value={amountInputValue(form.discounts)} onChange={num('discounts')} placeholder="0" className={numCls} />
           </Field>
           <Field label="ຍອດລວມສຸດທິ" hint="ຄຳນວນອັດຕະໂນມັດ">
             <input type="number" value={form.grand_total} readOnly className={numCls + ' bg-slate-50 cursor-not-allowed'} />
           </Field>
           <Field label="ເງິນສົດ (Cash)">
-            <input type="number" min="0" step="any" value={form.cash} onChange={num('cash')} onFocus={numberFocus} className={numCls} />
+            <input type="text" inputMode="decimal" value={amountInputValue(form.cash)} onChange={num('cash')} placeholder="0" className={numCls} />
           </Field>
           <Field label="BCEL">
-            <input type="number" min="0" step="any" value={form.bcel} onChange={num('bcel')} onFocus={numberFocus} className={numCls} />
+            <input type="text" inputMode="decimal" value={amountInputValue(form.bcel)} onChange={num('bcel')} placeholder="0" className={numCls} />
           </Field>
           <Field label="BCEL 2">
-            <input type="number" min="0" step="any" value={form.bcel2} onChange={num('bcel2')} onFocus={numberFocus} className={numCls} />
+            <input type="text" inputMode="decimal" value={amountInputValue(form.bcel2)} onChange={num('bcel2')} placeholder="0" className={numCls} />
           </Field>
           <Field label="LDB Bank">
-            <input type="number" min="0" step="any" value={form.ldb} onChange={num('ldb')} onFocus={numberFocus} className={numCls} />
+            <input type="text" inputMode="decimal" value={amountInputValue(form.ldb)} onChange={num('ldb')} placeholder="0" className={numCls} />
           </Field>
           <Field label="ໜີ້ຄ້າງ" hint="ຄຳນວນອັດຕະໂນມັດ">
-            <input type="number" min="0" step="any" value={form.debt} onChange={num('debt')} onFocus={numberFocus}
+            <input type="text" inputMode="decimal" value={amountInputValue(form.debt)} onChange={num('debt')} placeholder="0"
               className={numCls + ' text-red-600 font-semibold'} />
           </Field>
           <Field label="Prepayment">
-            <input type="number" min="0" step="any" value={form.prepayment} onChange={num('prepayment')} onFocus={numberFocus} className={numCls} />
+            <input type="text" inputMode="decimal" value={amountInputValue(form.prepayment)} onChange={num('prepayment')} placeholder="0" className={numCls} />
           </Field>
           <Field label="Payment Type">
             <select value={form.payment_type || ''} onChange={txt('payment_type')} className={inputCls}>
@@ -366,12 +375,11 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
                   step="any"
                   value={bookingDiscountPercent}
                   onChange={e => setBookingPercent(e.target.value)}
-                  onFocus={numberFocus}
                   className={numCls}
                 />
               </Field>
               <Field label="ຈຳນວນເງິນສ່ວນຫຼຸດ" hint="ປັບຈຳນວນເງິນໄດ້ໂດຍກົງ">
-                <input type="number" min="0" step="any" value={form.discounts} onChange={num('discounts')} onFocus={numberFocus} className={numCls} />
+                <input type="text" inputMode="decimal" value={amountInputValue(form.discounts)} onChange={num('discounts')} placeholder="0" className={numCls} />
               </Field>
             </div>
           </div>

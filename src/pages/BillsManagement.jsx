@@ -661,6 +661,7 @@ export default function BillsManagement() {
           onCancel={() => { setModal(null); setSubmitError('') }}
           loading={saving}
           submitError={submitError}
+          insuranceDueDays={insuranceDueDays}
         />
       </Modal>
 
