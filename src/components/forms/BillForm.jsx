@@ -176,14 +176,16 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
 
   function num(k) {
     return e => {
-      const value = parseFloat(e.target.value) || 0
+      const value = e.target.value
+      const numericValue = parseFloat(value) || 0
       if (k === 'discounts' && isBookingPayment(form.payment_type)) {
         const total = getServiceTotal(form)
-        setBookingDiscountPercent(total > 0 ? Number(((value / total) * 100).toFixed(2)) : 0)
+        setBookingDiscountPercent(total > 0 ? Number(((numericValue / total) * 100).toFixed(2)) : 0)
       }
       set(k, value)
     }
   }
+  function numberFocus(e) { e.target.select() }
   function txt(k) { return e => set(k, e.target.value) }
 
   function handleSubmit(e) {
@@ -310,7 +312,7 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
               ['svc_pharma','Pharma'],['svc_support','Support'],['svc_admin','Admin'],['svc_homecare','Home Care'],
             ].map(([k, lbl]) => (
               <Field key={k} label={lbl}>
-                <input type="number" min="0" step="any" value={form[k]} onChange={num(k)} className={numCls} />
+                <input type="number" min="0" step="any" value={form[k]} onChange={num(k)} onFocus={numberFocus} className={numCls} />
               </Field>
             ))}
           </div>
@@ -322,29 +324,29 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
         <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">ຍອດເງິນ & ການຊຳລະ</p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <Field label="ສ່ວນຫຼຸດ (Discounts)">
-            <input type="number" min="0" step="any" value={form.discounts} onChange={num('discounts')} className={numCls} />
+            <input type="number" min="0" step="any" value={form.discounts} onChange={num('discounts')} onFocus={numberFocus} className={numCls} />
           </Field>
           <Field label="ຍອດລວມສຸດທິ" hint="ຄຳນວນອັດຕະໂນມັດ">
             <input type="number" value={form.grand_total} readOnly className={numCls + ' bg-slate-50 cursor-not-allowed'} />
           </Field>
           <Field label="ເງິນສົດ (Cash)">
-            <input type="number" min="0" step="any" value={form.cash} onChange={num('cash')} className={numCls} />
+            <input type="number" min="0" step="any" value={form.cash} onChange={num('cash')} onFocus={numberFocus} className={numCls} />
           </Field>
           <Field label="BCEL">
-            <input type="number" min="0" step="any" value={form.bcel} onChange={num('bcel')} className={numCls} />
+            <input type="number" min="0" step="any" value={form.bcel} onChange={num('bcel')} onFocus={numberFocus} className={numCls} />
           </Field>
           <Field label="BCEL 2">
-            <input type="number" min="0" step="any" value={form.bcel2} onChange={num('bcel2')} className={numCls} />
+            <input type="number" min="0" step="any" value={form.bcel2} onChange={num('bcel2')} onFocus={numberFocus} className={numCls} />
           </Field>
           <Field label="LDB Bank">
-            <input type="number" min="0" step="any" value={form.ldb} onChange={num('ldb')} className={numCls} />
+            <input type="number" min="0" step="any" value={form.ldb} onChange={num('ldb')} onFocus={numberFocus} className={numCls} />
           </Field>
           <Field label="ໜີ້ຄ້າງ" hint="ຄຳນວນອັດຕະໂນມັດ">
-            <input type="number" min="0" step="any" value={form.debt} onChange={num('debt')}
+            <input type="number" min="0" step="any" value={form.debt} onChange={num('debt')} onFocus={numberFocus}
               className={numCls + ' text-red-600 font-semibold'} />
           </Field>
           <Field label="Prepayment">
-            <input type="number" min="0" step="any" value={form.prepayment} onChange={num('prepayment')} className={numCls} />
+            <input type="number" min="0" step="any" value={form.prepayment} onChange={num('prepayment')} onFocus={numberFocus} className={numCls} />
           </Field>
           <Field label="Payment Type">
             <select value={form.payment_type || ''} onChange={txt('payment_type')} className={inputCls}>
@@ -364,11 +366,12 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
                   step="any"
                   value={bookingDiscountPercent}
                   onChange={e => setBookingPercent(e.target.value)}
+                  onFocus={numberFocus}
                   className={numCls}
                 />
               </Field>
               <Field label="ຈຳນວນເງິນສ່ວນຫຼຸດ" hint="ປັບຈຳນວນເງິນໄດ້ໂດຍກົງ">
-                <input type="number" min="0" step="any" value={form.discounts} onChange={num('discounts')} className={numCls} />
+                <input type="number" min="0" step="any" value={form.discounts} onChange={num('discounts')} onFocus={numberFocus} className={numCls} />
               </Field>
             </div>
           </div>
