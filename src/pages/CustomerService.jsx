@@ -16,7 +16,7 @@ const SHIFT_OPTIONS = [
 
 const formatDonutBillLabel = (val, opts) => {
   const billCount = opts?.w?.config?.series?.[opts.seriesIndex] || 0
-  return `${formatNumber(billCount)} ບິນ (${val.toFixed(1)}%)`
+  return `${formatNumber(billCount)} bills (${val.toFixed(1)}%)`
 }
 
 const getBillPercent = (value, total) => {
@@ -36,7 +36,7 @@ function DonutBillSummary({ items }) {
             <span className="truncate font-medium text-slate-700">{item.label}</span>
           </div>
           <span className="whitespace-nowrap font-semibold text-slate-800">
-            {formatNumber(item.value)} ບິນ ({getBillPercent(item.value, total)})
+            {formatNumber(item.value)} bills ({getBillPercent(item.value, total)})
           </span>
         </div>
       ))}
@@ -81,7 +81,7 @@ export default function CustomerService() {
       labels: { colors: '#64748b' },
       formatter: (seriesName, opts) => {
         const billCount = opts?.w?.globals?.series?.[opts.seriesIndex] || 0
-        return `${seriesName} (${formatNumber(billCount)} ບິນ)`
+        return `${seriesName} (${formatNumber(billCount)} bills)`
       },
     },
     plotOptions: {
@@ -92,9 +92,9 @@ export default function CustomerService() {
             show: true,
             total: {
               show: true,
-              label: 'ລວມ',
+              label: 'Total',
               color: '#64748b',
-              formatter: w => `${formatNumber(w.globals.seriesTotals.reduce((sum, value) => sum + value, 0))} ບິນ`,
+              formatter: w => `${formatNumber(w.globals.seriesTotals.reduce((sum, value) => sum + value, 0))} bills`,
             },
           },
         },
@@ -104,7 +104,7 @@ export default function CustomerService() {
       formatter: formatDonutBillLabel,
       style: { fontSize: '11px', fontWeight: 700 },
     },
-    tooltip: { y: { formatter: v => `${formatNumber(v)} ບິນ` } },
+    tooltip: { y: { formatter: v => `${formatNumber(v)} bills` } },
   }
 
   const insiteDonutOpts = {
@@ -143,7 +143,7 @@ export default function CustomerService() {
       style: { fontSize: '13px', fontWeight: 700, colors: ['#334155'] },
       formatter: v => formatNumber(v),
     },
-    tooltip: { y: { formatter: v => `${formatNumber(v)} ຄົນ` } },
+    tooltip: { y: { formatter: v => `${formatNumber(v)} people` } },
   }
 
   if (loading) return <div className="p-6"><LoadingSpinner /></div>
@@ -153,19 +153,19 @@ export default function CustomerService() {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="section-title">ການວິເຄາະລູກຄ້າ & ການບໍລິການ</h2>
-          <p className="text-sm text-slate-500">ວິເຄາະລູກຄ້າ ແລະ ການບໍລິການ</p>
+          <h2 className="section-title">Customer & Service Analysis</h2>
+          <p className="text-sm text-slate-500">Customer and service analysis</p>
         </div>
         <div className="flex flex-wrap items-center gap-2" data-pdf-hidden="true">
-          <PDFButton elementId="full-report-export" filename="AR_Finance_LXH_Report" label="ດາວໂຫລດ PDF" />
+          <PDFButton elementId="full-report-export" filename="AR_Finance_LXH_Report" label="Download PDF" />
           <DateFilter filters={filters} onChange={updateFilters} />
-          <FilterSelect label="ກະວຽກ" value={filters.workload}
+          <FilterSelect label="Shift" value={filters.workload}
             onChange={v => updateFilters({ workload: v })}
             options={SHIFT_OPTIONS} />
-          <FilterSelect label="ປະເພດລູກຄ້າ" value={filters.customerType}
+          <FilterSelect label="Customer Type" value={filters.customerType}
             onChange={v => updateFilters({ customerType: v })}
             options={['GN','INS','B2B']} />
-          <FilterSelect label="ເພດ" value={filters.gender}
+          <FilterSelect label="Gender" value={filters.gender}
             onChange={v => updateFilters({ gender: v })}
             options={['Male','Female']} />
           <FilterSelect label="Insite/Onsite" value={filters.insiteOnsite}
@@ -179,14 +179,14 @@ export default function CustomerService() {
 
       {/* Top KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
-        <CountCard label="ລູກຄ້າທັງໝົດ" sublabel="ຈຳນວນລູກຄ້າລວມ" value={stats.total} color="indigo"
+        <CountCard label="Total Customers" sublabel="Total customer count" value={stats.total} color="indigo"
           icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>}
           isLAK={false}
         />
-        <CountCard label="ຍິງ" sublabel="Female" value={stats.female} color="purple" isLAK={false}
+        <CountCard label="Female" sublabel="Female" value={stats.female} color="purple" isLAK={false}
           icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>}
         />
-        <CountCard label="ຊາຍ" sublabel="Male" value={stats.male} color="blue" isLAK={false}
+        <CountCard label="Male" sublabel="Male" value={stats.male} color="blue" isLAK={false}
           icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>}
         />
         <CountCard label="Insite" sublabel="Inside Hospital" value={stats.insite} color="green" isLAK={false}
@@ -230,7 +230,7 @@ export default function CustomerService() {
       {/* Donut charts */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="chart-card">
-          <h3 className="section-title mb-1">ເພດ</h3>
+          <h3 className="section-title mb-1">Gender</h3>
           <p className="text-xs text-slate-400 mb-2">Gender Distribution</p>
           {stats.total > 0 ? (
             <>
@@ -246,7 +246,7 @@ export default function CustomerService() {
                 ]}
               />
             </>
-          ) : <EmptyState message="ບໍ່ມີຂໍ້ມູນ" />}
+          ) : <EmptyState message="No data" />}
         </div>
 
         <div className="chart-card">
@@ -266,11 +266,11 @@ export default function CustomerService() {
                 ]}
               />
             </>
-          ) : <EmptyState message="ບໍ່ມີຂໍ້ມູນ" />}
+          ) : <EmptyState message="No data" />}
         </div>
 
         <div className="chart-card">
-          <h3 className="section-title mb-1">ປະເພດລູກຄ້າ</h3>
+          <h3 className="section-title mb-1">Customer Type</h3>
           <p className="text-xs text-slate-400 mb-2">Customer Type</p>
           {stats.total > 0 ? (
             <ReactApexChart
@@ -282,13 +282,13 @@ export default function CustomerService() {
               ]}
               type="bar" height={220}
             />
-          ) : <EmptyState message="ບໍ່ມີຂໍ້ມູນ" />}
+          ) : <EmptyState message="No data" />}
         </div>
       </div>
 
       {/* Service Revenue */}
       <div className="chart-card">
-        <h3 className="section-title mb-1">ລາຍຮັບຕາມການບໍລິການ</h3>
+        <h3 className="section-title mb-1">Revenue by Service</h3>
         <p className="text-xs text-slate-400 mb-4">Revenue by Service Type (LAK)</p>
         {serviceEntries.length > 0 ? (
           <ReactApexChart
@@ -299,22 +299,22 @@ export default function CustomerService() {
             series={[{ name: 'Revenue', data: serviceEntries.map(([, v]) => v) }]}
             type="bar" height={Math.max(280, serviceEntries.length * 40)}
           />
-        ) : <EmptyState message="ບໍ່ມີຂໍ້ມູນ" sublabel="ກະລຸນາອັບໂຫຼດ Excel ກ່ອນ" />}
+        ) : <EmptyState message="No data" sublabel="Please upload Excel first" />}
       </div>
 
       {/* Summary Table */}
       {serviceEntries.length > 0 && (
         <div className="chart-card overflow-hidden">
-          <h3 className="section-title mb-4">ສະຫຼຸບ 10 Services</h3>
+          <h3 className="section-title mb-4">Top 10 Services Summary</h3>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr>
-                  <th className="table-th rounded-tl-lg">ການບໍລິການ</th>
+                  <th className="table-th rounded-tl-lg">Service</th>
                   <th className="table-th text-right">Bill</th>
-                  <th className="table-th text-right">ລາຍຮັບ (LAK)</th>
+                  <th className="table-th text-right">Revenue (LAK)</th>
                   <th className="table-th text-right">Average / Client</th>
-                  <th className="table-th text-right rounded-tr-lg">ສ່ວນແບ່ງ</th>
+                  <th className="table-th text-right rounded-tr-lg">Share</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">

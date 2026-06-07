@@ -15,7 +15,7 @@ import { formatNumber } from '../lib/excelParser'
 import { useGlobalFilters } from '../context/FilterContext'
 
 const METHODS = [
-  { key: 'cash',  label: 'ເງິນສົດ', sublabel: 'Cash',               color: '#10b981', bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-100' },
+  { key: 'cash',  label: 'Cash', sublabel: 'Cash',               color: '#10b981', bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-100' },
   { key: 'bcel',  label: 'BCEL',    sublabel: 'BCEL Bank Transfer',  color: '#cc1c2e', bg: 'bg-red-50',     text: 'text-red-700',     border: 'border-red-100' },
   { key: 'bcel2', label: 'BCEL 2',  sublabel: 'BCEL2 Bank Transfer', color: '#1a56a0', bg: 'bg-blue-50',    text: 'text-blue-700',    border: 'border-blue-100' },
   { key: 'ldb',   label: 'LDB',     sublabel: 'Lao Dev Bank',        color: '#e07b00', bg: 'bg-amber-50',   text: 'text-amber-700',   border: 'border-amber-100' },
@@ -103,9 +103,9 @@ export default function PaymentChannel() {
   const { filters, updateFilters } = useGlobalFilters()
 
   const { data: rows, loading } = useARData(filters)
-  // ສອງມຸມຂອງ ar_debt:
-  //  - debtRows (date_paid)   → cash flow / collection channels ໃນວັນທີ filter (ກົງກັບ Daily Sales)
-  //  - outstandingRows (date) → ໜີ້ຄ້າງຂອງໃບບິນທີ່ອອກໃນວັນທີ filter
+  // Two ar_debt views:
+  //  - debtRows (date_paid) for cash-flow collection channels.
+  //  - outstandingRows (date) for debt from bills issued in the filter date range.
   const { data: debtRows }        = usePayoffData({ ...filters, payoffDateField: 'date_paid' })
   const { data: outstandingRows } = usePayoffData(filters)
   const { data: cashflowRows } = useCashflowData(filters)
@@ -117,7 +117,7 @@ export default function PaymentChannel() {
   const hasActiveFilters = !!(filters.dateFrom || filters.dateTo || filters.customerType || filters.workload)
   const useLookerFallback = !hasCashflow && !hasActiveFilters && rows?.length === 4763 && debtRows?.length === 1285
 
-  // Collection stats from ar_debt — channel-by-channel (ຕາມ Summary_CashFlow)
+  // Collection stats from ar_debt by channel.
   const collectionStats = useMemo(() => {
     const dr = debtRows || []
     const cash  = dr.reduce((s, r) => s + (r.cash_paid  || 0), 0)
@@ -127,7 +127,7 @@ export default function PaymentChannel() {
     return { amount: cash + bcel + bcel2 + ldb, cash, bcel, bcel2, ldb }
   }, [debtRows])
 
-  // ຮວມ billing (ar_bills) + Pay off (ar_debt) ທຸກ channel
+  // Combine billing (ar_bills) and Pay off (ar_debt) for every channel.
   const totals = useMemo(() => {
     const t = { cash: 0, bcel: 0, bcel2: 0, ldb: 0 }
     if (useLookerFallback) {
@@ -153,7 +153,7 @@ export default function PaymentChannel() {
       t.bcel2 += r.bcel2 || 0
       t.ldb   += r.ldb   || 0
     })
-    // ເພີ່ມ Pay off payment channels
+    // Add Pay off payment channels.
     t.cash  += collectionStats.cash
     t.bcel  += collectionStats.bcel
     t.bcel2 += collectionStats.bcel2
@@ -166,7 +166,7 @@ export default function PaymentChannel() {
   const remainingBalance = useMemo(() => {
     if (useLookerFallback) return LOOKER_CASHFLOW_FALLBACK.balance
     if (hasCashflow) return (cashflowRows || []).reduce((s, r) => s + (r.balance || 0), 0)
-    // ໃຊ້ outstandingRows (filter by bill date) ບໍ່ແມ່ນ debtRows (filter by date_paid)
+    // Use outstandingRows filtered by bill date, not debtRows filtered by date_paid.
     return (outstandingRows || []).reduce((s, r) => s + (r.balance || 0), 0)
   }, [cashflowRows, outstandingRows, hasCashflow, useLookerFallback])
 
@@ -216,7 +216,7 @@ export default function PaymentChannel() {
     labels: METHODS.map(m => m.label),
     colors: METHODS.map(m => m.color),
     legend: { position: 'bottom', labels: { colors: '#64748b' } },
-    plotOptions: { pie: { donut: { size: '65%', labels: { show: true, total: { show: true, label: 'ລວມ', color: '#64748b', formatter: () => formatNumber(totalCollected) } } } } },
+    plotOptions: { pie: { donut: { size: '65%', labels: { show: true, total: { show: true, label: 'Total', color: '#64748b', formatter: () => formatNumber(totalCollected) } } } } },
     dataLabels: { formatter: v => `${v.toFixed(1)}%` },
     tooltip: { y: { formatter: v => `${formatNumber(v)} LAK` } },
   }
@@ -239,46 +239,46 @@ export default function PaymentChannel() {
   return (
     <div id="payment-channel-content" className="p-6 space-y-6">
 
-      {/* ── Header ── */}
+      {/* -- Header -- */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-800">ຊ່ອງທາງການຊຳລະ</h2>
-          <p className="text-sm text-slate-500 mt-0.5">ວິເຄາະຊ່ອງທາງຊຳລະ • ໜ່ວຍ: LAK</p>
+          <h2 className="text-xl font-bold text-slate-800">Payment Channels</h2>
+          <p className="text-sm text-slate-500 mt-0.5">Payment channel analysis - Unit: LAK</p>
         </div>
         <div className="flex flex-wrap items-center gap-2" data-pdf-hidden="true">
-          <PDFButton elementId="full-report-export" filename="AR_Finance_LXH_Report" label="ດາວໂຫລດ PDF" />
+          <PDFButton elementId="full-report-export" filename="AR_Finance_LXH_Report" label="Download PDF" />
           <DateFilter filters={filters} onChange={updateFilters} />
-          <FilterSelect label="ປະເພດລູກຄ້າ" value={filters.customerType}
+          <FilterSelect label="Customer Type" value={filters.customerType}
             onChange={v => updateFilters({ customerType: v })}
             options={['GN','INS','B2B']} />
-          <FilterSelect label="ກະວຽກ" value={filters.workload}
+          <FilterSelect label="Shift" value={filters.workload}
             onChange={v => updateFilters({ workload: v })}
             options={SHIFT_OPTIONS} />
         </div>
       </div>
 
-      {/* ── Row 1: 4 Summary KPI Cards ── */}
+      {/* -- Row 1: 4 Summary KPI Cards -- */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         {/* Actual Income */}
         <div className="rounded-2xl p-5 text-white bg-gradient-to-br from-indigo-500 to-indigo-700 shadow-lg shadow-indigo-200">
-          <p className="text-xs font-semibold text-indigo-200 uppercase tracking-wider">ລາຍຮັບຈິງ</p>
+          <p className="text-xs font-semibold text-indigo-200 uppercase tracking-wider">Actual Income</p>
           <p className="text-xs text-indigo-200 mb-3">Actual Income</p>
           <p className="text-2xl font-extrabold leading-tight">{formatNumber(actualIncomeTotal)}</p>
-          <p className="text-xs text-indigo-200 mt-1">= ເກັບໄດ້ + Pay off</p>
+          <p className="text-xs text-indigo-200 mt-1">= Collected + Pay off</p>
         </div>
         {/* Collected at billing */}
         <div className="rounded-2xl p-5 text-white bg-gradient-to-br from-cyan-500 to-cyan-700 shadow-lg shadow-cyan-200">
-          <p className="text-xs font-semibold text-cyan-200 uppercase tracking-wider">ເກັບໄດ້ (ເວລາອອກບິນ)</p>
+          <p className="text-xs font-semibold text-cyan-200 uppercase tracking-wider">Collected at Billing</p>
           <p className="text-xs text-cyan-200 mb-3">Collected at Billing</p>
           <p className="text-2xl font-extrabold leading-tight">{formatNumber(totalCollected)}</p>
-          <p className="text-xs text-cyan-200 mt-1">{collectedPct}% ຂອງຍອດລວມ</p>
+          <p className="text-xs text-cyan-200 mt-1">{collectedPct}% of total</p>
         </div>
         {/* Pay off collection */}
         <div className="rounded-2xl p-5 text-white bg-gradient-to-br from-violet-500 to-violet-700 shadow-lg shadow-violet-200">
-          <p className="text-xs font-semibold text-violet-200 uppercase tracking-wider">ເກັບໜີ້ (Pay off)</p>
-          <p className="text-xs text-violet-200 mb-3">ຍອດເກັບໜີ້</p>
+          <p className="text-xs font-semibold text-violet-200 uppercase tracking-wider">Debt Collection (Pay off)</p>
+          <p className="text-xs text-violet-200 mb-3">Debt collection amount</p>
           <p className="text-2xl font-extrabold leading-tight">{formatNumber(useLookerFallback ? LOOKER_CASHFLOW_FALLBACK.debtCollection : collectionStats.amount)}</p>
-          <p className="text-xs text-violet-200 mt-1">ຈາກ ar_debt</p>
+          <p className="text-xs text-violet-200 mt-1">From ar_debt</p>
         </div>
         <div className="rounded-2xl p-5 text-white bg-gradient-to-br from-amber-500 to-amber-700 shadow-lg shadow-amber-200">
           <p className="text-xs font-semibold text-amber-100 uppercase tracking-wider">All Dept Deposit</p>
@@ -288,14 +288,14 @@ export default function PaymentChannel() {
         </div>
         {/* Outstanding */}
         <div className="rounded-2xl p-5 text-white bg-gradient-to-br from-rose-500 to-rose-700 shadow-lg shadow-rose-200">
-          <p className="text-xs font-semibold text-rose-200 uppercase tracking-wider">ໜີ້ຄ້າງ</p>
+          <p className="text-xs font-semibold text-rose-200 uppercase tracking-wider">Outstanding Debt</p>
           <p className="text-xs text-rose-200 mb-3">Outstanding Balance</p>
           <p className="text-2xl font-extrabold leading-tight">{formatNumber(remainingBalance)}</p>
-          <p className="text-xs text-rose-200 mt-1">{outstandingPct}% ຂອງຍອດລວມ</p>
+          <p className="text-xs text-rose-200 mt-1">{outstandingPct}% of total</p>
         </div>
       </div>
 
-      {/* ── Row 2: Payment Method Cards ── */}
+      {/* -- Row 2: Payment Method Cards -- */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {METHODS.map(m => {
           const val = totals[m.key] || 0
@@ -339,10 +339,10 @@ export default function PaymentChannel() {
         })}
       </div>
 
-      {/* ── Row 3: Stacked bar proportion ── */}
+      {/* -- Row 3: Stacked bar proportion -- */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-        <h3 className="font-bold text-slate-700 text-sm mb-1">ສ່ວນແບ່ງຊ່ອງທາງການຊຳລະ</h3>
-        <p className="text-xs text-slate-400 mb-4">ສັດສ່ວນຊ່ອງທາງຊຳລະ</p>
+        <h3 className="font-bold text-slate-700 text-sm mb-1">SharePayment Channels</h3>
+        <p className="text-xs text-slate-400 mb-4">Payment channel proportion</p>
         <div className="flex rounded-xl overflow-hidden h-8 mb-3">
           {METHODS.map(m => {
             const pct = totalCollected > 0 ? (totals[m.key] || 0) / totalCollected * 100 : 0
@@ -365,12 +365,12 @@ export default function PaymentChannel() {
         </div>
       </div>
 
-      {/* ── Row 3b: Collected VS Outstanding  +  Cash VS Transfer ── */}
+      {/* -- Row 3b: Collected VS Outstanding  +  Cash VS Transfer -- */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
         {/* Collected vs Outstanding */}
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-          <h3 className="font-bold text-slate-700 text-sm mb-1">ເກັບໄດ້ VS ໜີ້ຄ້າງ</h3>
+          <h3 className="font-bold text-slate-700 text-sm mb-1">Collected vs Outstanding Debt</h3>
           <p className="text-xs text-slate-400 mb-4">Collected (Amount) VS Outstanding (Balance)</p>
           <ReactApexChart
             options={{
@@ -379,7 +379,7 @@ export default function PaymentChannel() {
               colors: ['#06b6d4', '#f43f5e'],
               legend: { position: 'bottom', labels: { colors: '#64748b' } },
               plotOptions: { pie: { donut: { size: '68%', labels: { show: true,
-                total: { show: true, label: 'ລວມ', color: '#64748b',
+                total: { show: true, label: 'Total', color: '#64748b',
                   formatter: () => formatNumber(totalCollected + remainingBalance) }
               } } } },
               dataLabels: { formatter: v => `${v.toFixed(1)}%` },
@@ -402,7 +402,7 @@ export default function PaymentChannel() {
 
         {/* Cash vs Transfer */}
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-          <h3 className="font-bold text-slate-700 text-sm mb-1">ເງິນສົດ VS ໂອນ</h3>
+          <h3 className="font-bold text-slate-700 text-sm mb-1">Cash vs Transfer</h3>
           <p className="text-xs text-slate-400 mb-4">Cash Received VS Bank Transfer</p>
           {(() => {
             const transfer = (totals.bcel || 0) + (totals.bcel2 || 0) + (totals.ldb || 0)
@@ -414,11 +414,11 @@ export default function PaymentChannel() {
                 <ReactApexChart
                   options={{
                     chart: { type: 'donut', fontFamily: 'Inter, Noto Sans Lao, sans-serif' },
-                    labels: ['ເງິນສົດ (Cash)', 'ໂອນ (Transfer)'],
+                    labels: ['Cash (Cash)', 'Transfer'],
                     colors: ['#10b981', '#4f46e5'],
                     legend: { position: 'bottom', labels: { colors: '#64748b' } },
                     plotOptions: { pie: { donut: { size: '68%', labels: { show: true,
-                      total: { show: true, label: 'ລວມ', color: '#64748b',
+                      total: { show: true, label: 'Total', color: '#64748b',
                         formatter: () => formatNumber(totalCollected) }
                     } } } },
                     dataLabels: { formatter: v => `${v.toFixed(1)}%` },
@@ -429,11 +429,11 @@ export default function PaymentChannel() {
                 />
                 <div className="mt-3 grid grid-cols-2 gap-3">
                   <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-3 text-center">
-                    <p className="text-xs text-emerald-600 font-medium">ເງິນສົດ · {cashPct}%</p>
+                    <p className="text-xs text-emerald-600 font-medium">Cash - {cashPct}%</p>
                     <p className="text-base font-extrabold text-emerald-700">{formatNumber(cash)}</p>
                   </div>
                   <div className="rounded-xl bg-indigo-50 border border-indigo-100 p-3 text-center">
-                    <p className="text-xs text-indigo-600 font-medium">ໂອນ · {tranPct}%</p>
+                    <p className="text-xs text-indigo-600 font-medium">Transfer - {tranPct}%</p>
                     <p className="text-base font-extrabold text-indigo-700">{formatNumber(transfer)}</p>
                   </div>
                 </div>
@@ -443,42 +443,42 @@ export default function PaymentChannel() {
         </div>
       </div>
 
-      {/* ── Row 4: Trend chart + Donut ── */}
+      {/* -- Row 4: Trend chart + Donut -- */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-          <h3 className="font-bold text-slate-700 text-sm mb-1">ທ່າອ່ຽງລາຍຮັບຕາມຊ່ອງທາງ</h3>
-          <p className="text-xs text-slate-400 mb-4">ແນວໂນ້ມຊ່ອງທາງຊຳລະລາຍເດືອນ</p>
+          <h3 className="font-bold text-slate-700 text-sm mb-1">Revenue Trend by Channel</h3>
+          <p className="text-xs text-slate-400 mb-4">Monthly payment channel trend</p>
           {months.length > 0 ? (
             <ReactApexChart
               options={trendOpts}
               series={METHODS.map(m => ({ name: m.label, data: months.map(mo => monthly[mo]?.[m.key] || 0) }))}
               type="bar" height={280}
             />
-          ) : <EmptyState message="ບໍ່ມີຂໍ້ມູນ" sublabel="ກະລຸນາອັບໂຫຼດ Excel ກ່ອນ" />}
+          ) : <EmptyState message="No data" sublabel="Please upload Excel first" />}
         </div>
 
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-          <h3 className="font-bold text-slate-700 text-sm mb-1">ສ່ວນແບ່ງຊ່ອງທາງ</h3>
+          <h3 className="font-bold text-slate-700 text-sm mb-1">Channel Share</h3>
           <p className="text-xs text-slate-400 mb-4">Payment Method Share</p>
           {totalCollected > 0 ? (
             <ReactApexChart options={pieOpts} series={METHODS.map(m => totals[m.key] || 0)} type="donut" height={280} />
-          ) : <EmptyState message="ບໍ່ມີຂໍ້ມູນ" />}
+          ) : <EmptyState message="No data" />}
         </div>
       </div>
 
-      {/* ── Row 5: Summary Table ── */}
+      {/* -- Row 5: Summary Table -- */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-100">
-          <h3 className="font-bold text-slate-700 text-sm">ສະຫຼຸບຊ່ອງທາງການຊຳລະ</h3>
-          <p className="text-xs text-slate-400">ສະຫຼຸບຊ່ອງທາງຊຳລະ</p>
+          <h3 className="font-bold text-slate-700 text-sm">Payment Channel Summary</h3>
+          <p className="text-xs text-slate-400">Payment channel summary</p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-slate-50">
               <tr>
-                <th className="table-th">ຊ່ອງທາງ / Channel</th>
-                <th className="table-th text-right">ຈຳນວນ (LAK)</th>
-                <th className="table-th text-right">ສ່ວນແບ່ງ</th>
+                <th className="table-th">Channel</th>
+                <th className="table-th text-right">Amount (LAK)</th>
+                <th className="table-th text-right">Share</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -525,7 +525,7 @@ export default function PaymentChannel() {
                 </td>
               </tr>
               <tr className="bg-slate-50">
-                <td className="table-td font-bold text-slate-700">ລວມທັງໝົດ (Collected)</td>
+                <td className="table-td font-bold text-slate-700">Total Collected</td>
                 <td className="table-td text-right font-mono font-bold text-slate-800">{formatNumber(totalCollected)}</td>
                 <td className="table-td text-right font-bold text-slate-600">100%</td>
               </tr>

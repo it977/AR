@@ -132,13 +132,13 @@ export default function OutstandingDebt() {
     <div id="outstanding-debt-content" className="p-6 space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="section-title">ໜີ້ຄ້າງຊຳລະ</h2>
-          <p className="text-sm text-slate-500">ລາຍງານໜີ້ຄ້າງຊຳລະ</p>
+          <h2 className="section-title">Outstanding Debt</h2>
+          <p className="text-sm text-slate-500">Outstanding debt report</p>
         </div>
         <div className="flex flex-wrap items-center gap-2" data-pdf-hidden="true">
-          <PDFButton elementId="full-report-export" filename="AR_Finance_LXH_Report" label="ດາວໂຫລດ PDF" />
+          <PDFButton elementId="full-report-export" filename="AR_Finance_LXH_Report" label="Download PDF" />
           <DateFilter filters={filters} onChange={updateFilters} />
-          <FilterSelect label="ປະເພດລູກຄ້າ" value={filters.customerType}
+          <FilterSelect label="Customer Type" value={filters.customerType}
             onChange={v => updateFilters({ customerType: v })}
             options={CUSTOMER_TYPES} />
           <FilterSelect label="OPD/IPD" value={filters.opdIpd}
@@ -148,16 +148,16 @@ export default function OutstandingDebt() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <KPICard label="ໜີ້ຄ້າງທັງໝົດ" sublabel="ຍອດຄ້າງລວມ"
+        <KPICard label="Total Outstanding Debt" sublabel="Total outstanding amount"
           value={totalOutstanding} color="red" fullNumber
           icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" /></svg>}
-          badge={`${formatNumber(totalDebtBills)} ໃບ`} badgeColor="bg-red-100 text-red-700"
+          badge={`${formatNumber(totalDebtBills)} bills`} badgeColor="bg-red-100 text-red-700"
         />
-        <KPICard label="ເກັບໄດ້" sublabel="Collected"
+        <KPICard label="Collected" sublabel="Collected"
           value={totalCollected} color="green" fullNumber
           icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
         />
-        <KPICard label="ຍອດຄ້າງເຫຼືອ" sublabel="Remaining Balance"
+        <KPICard label="Remaining Balance" sublabel="Remaining Balance"
           value={remainingBalance} color="orange" fullNumber
           icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
         />
@@ -165,26 +165,26 @@ export default function OutstandingDebt() {
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <div className="chart-card">
-          <h3 className="section-title mb-1">ໜີ້ຕາມປະເພດລູກຄ້າ</h3>
-          <p className="text-xs text-slate-400 mb-4">ໜີ້ຄ້າງຕາມປະເພດລູກຄ້າ</p>
+          <h3 className="section-title mb-1">Debt by Customer Type</h3>
+          <p className="text-xs text-slate-400 mb-4">Outstanding debt by customer type</p>
           {rows?.length > 0 ? (
             <ReactApexChart
               options={byTypeChartOpts}
               series={[
-                { name: 'ເກັບໄດ້',  data: CUSTOMER_TYPES.map(t => byType[t]?.collected || 0) },
-                { name: 'ຍັງຄ້າງ', data: CUSTOMER_TYPES.map(t => byType[t]?.balance   || 0) },
+                { name: 'Collected',  data: CUSTOMER_TYPES.map(t => byType[t]?.collected || 0) },
+                { name: 'Remaining', data: CUSTOMER_TYPES.map(t => byType[t]?.balance   || 0) },
               ]}
               type="bar" height={260}
             />
-          ) : <EmptyState message="ບໍ່ມີຂໍ້ມູນ" />}
+          ) : <EmptyState message="No data" />}
         </div>
 
         <div className="chart-card">
-          <h3 className="section-title mb-1">ທ່າອ່ຽງໜີ້ຄ້າງ</h3>
-          <p className="text-xs text-slate-400 mb-4">ແນວໂນ້ມໜີ້ຄ້າງຊຳລະ</p>
+          <h3 className="section-title mb-1">Outstanding Debt Trend</h3>
+          <p className="text-xs text-slate-400 mb-4">Outstanding debt trend</p>
           {trendData.length > 0 ? (
             <ReactApexChart options={trendOpts} series={[{ name: 'Outstanding', data: trendData }]} type="area" height={260} />
-          ) : <EmptyState message="ບໍ່ມີຂໍ້ມູນ" />}
+          ) : <EmptyState message="No data" />}
         </div>
       </div>
 
@@ -203,11 +203,11 @@ export default function OutstandingDebt() {
             </div>
             <div className="space-y-2 mt-1">
               <div className="flex justify-between text-sm">
-                <span className="text-slate-500">ເກັບໄດ້</span>
+                <span className="text-slate-500">Collected</span>
                 <span className="font-semibold text-slate-800">{formatNumber(byType[type]?.collected || 0)}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-slate-500">ຍັງຄ້າງ</span>
+                <span className="text-slate-500">Remaining</span>
                 <span className="font-semibold text-red-600">{formatNumber(byType[type]?.balance || 0)}</span>
               </div>
               <div className="w-full bg-white/60 rounded-full h-2">
@@ -227,22 +227,22 @@ export default function OutstandingDebt() {
         <div className="chart-card overflow-hidden">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="section-title">ລາຍການໜີ້ຄ້າງ</h3>
-              <p className="text-xs text-slate-400 mt-0.5">{formatNumber(totalDebtBills)} ລາຍການ</p>
+              <h3 className="section-title">Outstanding Debt List</h3>
+              <p className="text-xs text-slate-400 mt-0.5">{formatNumber(totalDebtBills)} items</p>
             </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr>
-                  <th className="table-th">ວັນທີ</th>
-                  <th className="table-th">ເລກໃບບິນ</th>
+                  <th className="table-th">Date</th>
+                  <th className="table-th">Bill No.</th>
                   <th className="table-th">HN</th>
-                  <th className="table-th">ຊື່ຄົນເຈັບ</th>
-                  <th className="table-th">ປະເພດ</th>
-                  <th className="table-th">ປະກັນ</th>
-                  <th className="table-th text-right">ຍອດລວມ</th>
-                  <th className="table-th text-right">ໜີ້ຄ້າງ</th>
+                  <th className="table-th">Patient Name</th>
+                  <th className="table-th">Type</th>
+                  <th className="table-th">Insurance</th>
+                  <th className="table-th text-right">Grand Total</th>
+                  <th className="table-th text-right">Outstanding Debt</th>
                   <th className="table-th">Aging</th>
                 </tr>
               </thead>
@@ -258,7 +258,7 @@ export default function OutstandingDebt() {
                         {r.customer_type}
                       </span>
                     </td>
-                    <td className="table-td text-xs text-slate-500">{r.insurance || '—'}</td>
+                    <td className="table-td text-xs text-slate-500">{r.insurance || '-'}</td>
                     <td className="table-td text-right font-mono text-xs">{formatNumber(r.grand_total)}</td>
                     <td className="table-td text-right font-mono text-xs font-semibold text-red-600">{formatNumber(r.balance ?? r.debt)}</td>
                     <td className="table-td">
@@ -275,11 +275,11 @@ export default function OutstandingDebt() {
           {totalPages > 1 && (
             <div className="flex items-center justify-between pt-4 border-t border-slate-100 mt-2" data-pdf-hidden="true">
               <p className="text-xs text-slate-500">
-                {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, outstanding.length)} / {outstanding.length}
+                {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, outstanding.length)} / {outstanding.length}
               </p>
               <div className="flex items-center gap-1">
-                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-                  className="btn-secondary py-1 px-2 text-xs disabled:opacity-40">‹</button>
+                  <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+                    className="btn-secondary py-1 px-2 text-xs disabled:opacity-40">&lt;</button>
                 {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
                   const p = Math.min(Math.max(page - 2, 1) + i, totalPages)
                   return (
@@ -289,8 +289,8 @@ export default function OutstandingDebt() {
                     </button>
                   )
                 })}
-                <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-                  className="btn-secondary py-1 px-2 text-xs disabled:opacity-40">›</button>
+                  <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+                    className="btn-secondary py-1 px-2 text-xs disabled:opacity-40">&gt;</button>
               </div>
             </div>
           )}

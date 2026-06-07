@@ -65,7 +65,7 @@ const STEPS = [
 const BATCH_SIZE = 200   // smaller batch to avoid conflicts
 const OPTIONAL_COLUMNS = {
   ar_bills: [
-    'payment_type', 'due_date', 'bill_issued_at',
+    'payment_type', 'due_date', 'bill_issued_at', 'submit_date', 'recorded_by',
   ],
   ar_debt: [
     'insite_onsite', 'opd_ipd', 'payment_type',

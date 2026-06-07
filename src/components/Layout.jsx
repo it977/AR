@@ -3,11 +3,11 @@ import { NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { PERMISSIONS } from '../lib/rbac'
 
-// AR Items (ລາຍຮັບ) - ຈັດລຽງໃໝ່: ຈັດການໃບບິນ ແລະ ຈັດການໜີ້ ໄວ້ເທິງ
+// AR finance navigation items.
 const arItems = [
   {
-    label: 'ຈັດການໃບບິນ',
-    sublabel: 'ຈັດການໃບບິນ',
+    label: 'Bill Management',
+    sublabel: 'Bill Management',
     path: '/bills',
     permission: PERMISSIONS.PAGE_BILLS,
     icon: (
@@ -17,8 +17,8 @@ const arItems = [
     ),
   },
   {
-    label: 'ຈັດການໜີ້',
-    sublabel: 'ຈັດການໜີ້ຄ້າງ',
+    label: 'Debt Management',
+    sublabel: 'Debt Management',
     path: '/debt',
     permission: PERMISSIONS.PAGE_DEBT,
     icon: (
@@ -28,8 +28,8 @@ const arItems = [
     ),
   },
   {
-    label: 'ລາຍງານປະຈຳວັນ',
-    sublabel: 'ລາຍງານປະຈຳວັນ',
+    label: 'Daily Report',
+    sublabel: 'Daily Report',
     path: '/',
     permission: PERMISSIONS.PAGE_DAILY_SALES,
     icon: (
@@ -39,8 +39,8 @@ const arItems = [
     ),
   },
   {
-    label: 'ລູກຄ້າ & ການບໍລິການ',
-    sublabel: 'ລູກຄ້າ ແລະ ບໍລິການ',
+    label: 'Customers & Services',
+    sublabel: 'Customers and Services',
     path: '/customer-service',
     permission: PERMISSIONS.PAGE_CUSTOMER_SERVICE,
     icon: (
@@ -50,8 +50,8 @@ const arItems = [
     ),
   },
   {
-    label: 'ຊ່ອງທາງການຊຳລະ',
-    sublabel: 'ຊ່ອງທາງຊຳລະ',
+    label: 'Payment Channels',
+    sublabel: 'Payment Channels',
     path: '/payment-channel',
     permission: PERMISSIONS.PAGE_PAYMENT_CHANNEL,
     icon: (
@@ -61,8 +61,8 @@ const arItems = [
     ),
   },
   {
-    label: 'ໜີ້ຄ້າງຊຳລະ',
-    sublabel: 'ໜີ້ຄ້າງຊຳລະ',
+    label: 'Outstanding Debt',
+    sublabel: 'Outstanding Debt',
     path: '/outstanding-debt',
     permission: PERMISSIONS.PAGE_OUTSTANDING_DEBT,
     icon: (
@@ -72,8 +72,8 @@ const arItems = [
     ),
   },
   {
-    label: 'ລາຍງານອາຍຸໜີ້',
-    sublabel: 'ລາຍງານອາຍຸໜີ້',
+    label: 'Aging Report',
+    sublabel: 'Aging Report',
     path: '/aging-report',
     permission: PERMISSIONS.PAGE_AGING_REPORT,
     icon: (
@@ -87,7 +87,7 @@ const arItems = [
 // Other Items
 const otherItems = [
   {
-    label: 'ອັບໂຫຼດ Excel',
+    label: 'Upload Excel',
     sublabel: 'Upload Data',
     path: '/upload',
     permission: PERMISSIONS.PAGE_UPLOAD,
@@ -101,8 +101,8 @@ const otherItems = [
 
 const adminItems = [
   {
-    label: 'ຕັ້ງຄ່າທົ່ວໄປ',
-    sublabel: 'ຕັ້ງຄ່າທົ່ວໄປ',
+    label: 'General Settings',
+    sublabel: 'General Settings',
     path: '/settings',
     permission: PERMISSIONS.PAGE_SETTINGS,
     icon: (
@@ -148,19 +148,19 @@ function NavItem({ item, collapsed, isActive }) {
 
 function NavGroup({ label, items, collapsed, defaultOpen = false, isSubgroup = false }) {
   const location = useLocation()
-  const [isOpen, setIsOpen] = useState(true) // ເປີດທັງໝົດດຍຄ່າເລີ່ມຕົ້ນ
+  const [isOpen, setIsOpen] = useState(true) // Open by default
   
-  // ກວດວ່າມີ path ໃດໜຶ່ງ active ໃນກຸ່ມນີ້ບໍ່
+  // Check whether any path in this group is active.
   const hasActive = items.some(item => {
     if (item.path === '/') return location.pathname === '/'
     return location.pathname.startsWith(item.path)
   })
   
-  // ຖ້າມີ active ໃຫ້ເປີດກຸ່ມໄວ້
+  // Keep the active group open.
   if (hasActive && !isOpen) setIsOpen(true)
   
   if (isSubgroup) {
-    // ສຳລັບ subgroup ບໍ່ມີປຸ່ມ collapse
+    // Subgroups do not have a collapse control.
     return (
       <div className="ml-2 mt-1 space-y-0.5">
         {items.map((item, idx) => (
@@ -235,7 +235,7 @@ export default function Layout({ children }) {
           </div>
           {!collapsed && (
             <div>
-              <p className="text-white font-bold text-sm leading-tight">ລະບົບ AR Finance</p>
+              <p className="text-white font-bold text-sm leading-tight">AR Finance System</p>
               <p className="text-slate-400 text-xs">OneMeds Dashboard</p>
             </div>
           )}
@@ -254,7 +254,7 @@ export default function Layout({ children }) {
           {/* Other Group */}
           {visibleOtherItems.length > 0 && (
             <NavGroup
-              label="ອື່ນໆ"
+              label="Other"
               items={visibleOtherItems}
               collapsed={collapsed}
               defaultOpen={false}
@@ -290,7 +290,7 @@ export default function Layout({ children }) {
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 12h16m0 0l-4-4m4 4l-4 4" />
             </svg>
-            {!collapsed && <span className="text-xs">ເຊື່ອງອັດຕະໂນມັດ</span>}
+            {!collapsed && <span className="text-xs">Auto-hide</span>}
           </div>
         </div>
       </aside>

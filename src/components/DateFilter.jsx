@@ -3,7 +3,7 @@ const selCls = 'text-xs border border-slate-200 rounded-lg px-3 py-1.5 bg-white 
 export function FilterSelect({ label, value, onChange, options }) {
   return (
     <select value={value || ''} onChange={e => onChange(e.target.value)} className={selCls} title={label}>
-      <option value="">ທັງໝົດ {label}</option>
+      <option value="">All {label}</option>
       {options.map(o => <option key={o.value ?? o} value={o.value ?? o}>{o.label ?? o}</option>)}
     </select>
   )
@@ -11,11 +11,11 @@ export function FilterSelect({ label, value, onChange, options }) {
 
 export default function DateFilter({ filters, onChange }) {
   const presets = [
-    { label: 'ທັງໝົດ', days: null },
-    { label: 'ມື້ນີ້',  days: 0 },
-    { label: '7 ວັນ',  days: 7 },
-    { label: '30 ວັນ', days: 30 },
-    { label: '90 ວັນ', days: 90 },
+    { label: 'All', days: null },
+    { label: 'Today',  days: 0 },
+    { label: '7 Days',  days: 7 },
+    { label: '30 Days', days: 30 },
+    { label: '90 Days', days: 90 },
   ]
 
   function applyPreset(days) {
@@ -59,7 +59,7 @@ export default function DateFilter({ filters, onChange }) {
           onChange={e => onChange({ ...filters, dateFrom: e.target.value })}
           className="text-xs text-slate-700 outline-none bg-transparent"
         />
-        <span className="text-slate-300">—</span>
+        <span className="text-slate-300">-</span>
         <input
           type="date"
           value={filters.dateTo || ''}

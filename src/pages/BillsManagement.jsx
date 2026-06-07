@@ -60,6 +60,38 @@ const CHANNEL_BADGE = {
   ldb:   'bg-sky-50 text-sky-700 border-sky-200',
 }
 const CHANNEL_LABEL = { cash: 'Cash', bcel: 'BCEL', bcel2: 'BCEL2', ldb: 'LDB' }
+const EMPTY_BILL_SUMMARY = {
+  total: { amount: 0, bills: 0 },
+  cash: { amount: 0, bills: 0 },
+  transfer: { amount: 0, bills: 0 },
+  mixed: { amount: 0, bills: 0 },
+  debt: { amount: 0, bills: 0 },
+  banks: {
+    bcel: { amount: 0, bills: 0 },
+    bcel2: { amount: 0, bills: 0 },
+    ldb: { amount: 0, bills: 0 },
+  },
+}
+const AR_BILL_COLUMNS = [
+  'date', 'week', 'workload', 'bill_no', 'insite_onsite', 'opd_ipd',
+  'customer_type', 'insurance', 'hn', 'patient_name', 'gender',
+  'svc_opd', 'svc_diag_image', 'svc_ipd', 'svc_surg_ot', 'svc_emergency',
+  'svc_chronic', 'svc_pharma', 'svc_support', 'svc_admin', 'svc_homecare',
+  'total', 'discounts', 'grand_total', 'cash', 'bcel', 'bcel2', 'ldb',
+  'debt', 'prepayment', 'payment_type', 'bill_issued_at', 'due_date',
+  'debt_status', 'note', 'aging_group', 'recorded_by',
+]
+const OPTIONAL_AR_BILL_COLUMNS = [
+  'payment_type', 'due_date', 'bill_issued_at', 'recorded_by',
+]
+
+function buildArBillPayload(form) {
+  const payload = {}
+  for (const key of AR_BILL_COLUMNS) {
+    if (form[key] !== undefined) payload[key] = form[key]
+  }
+  return payload
+}
 
 function displayPaymentType(row) {
   if (row.payment_type) return row.payment_type
@@ -69,6 +101,145 @@ function displayPaymentType(row) {
   if (cash > 0) return 'Cash'
   if (transfer > 0) return 'Transfer'
   return ''
+}
+
+function applyBillFilters(query, filters) {
+  const { search, dateFrom, dateTo, workload, customerTypeFilter, paymentTypeFilter, bankFilter } = filters
+  if (search) query = query.or(`bill_no.ilike.%${search}%,patient_name.ilike.%${search}%`)
+  if (dateFrom) query = query.gte('date', dateFrom)
+  if (dateTo) query = query.lte('date', dateTo)
+  if (workload) query = query.eq('workload', workload)
+  if (customerTypeFilter) query = query.eq('customer_type', customerTypeFilter)
+  if (paymentTypeFilter) query = query.eq('payment_type', paymentTypeFilter)
+  if (bankFilter === 'cash') query = query.gt('cash', 0)
+  if (bankFilter === 'bcel') query = query.gt('bcel', 0)
+  if (bankFilter === 'bcel2') query = query.gt('bcel2', 0)
+  if (bankFilter === 'ldb') query = query.gt('ldb', 0)
+  if (bankFilter === 'debt') query = query.gt('debt', 0)
+  return query
+}
+
+function addMetric(metric, amount) {
+  if (amount <= 0) return
+  metric.amount += amount
+  metric.bills += 1
+}
+
+function computeBillSummary(rows) {
+  const summary = {
+    ...EMPTY_BILL_SUMMARY,
+    total: { ...EMPTY_BILL_SUMMARY.total },
+    cash: { ...EMPTY_BILL_SUMMARY.cash },
+    transfer: { ...EMPTY_BILL_SUMMARY.transfer },
+    mixed: { ...EMPTY_BILL_SUMMARY.mixed },
+    debt: { ...EMPTY_BILL_SUMMARY.debt },
+    banks: {
+      bcel: { ...EMPTY_BILL_SUMMARY.banks.bcel },
+      bcel2: { ...EMPTY_BILL_SUMMARY.banks.bcel2 },
+      ldb: { ...EMPTY_BILL_SUMMARY.banks.ldb },
+    },
+  }
+
+  for (const row of rows || []) {
+    const cash = Number(row.cash) || 0
+    const bcel = Number(row.bcel) || 0
+    const bcel2 = Number(row.bcel2) || 0
+    const ldb = Number(row.ldb) || 0
+    const transfer = bcel + bcel2 + ldb
+    const debt = Number(row.debt) || 0
+
+    summary.total.amount += Number(row.grand_total) || 0
+    summary.total.bills += 1
+    if (cash > 0 && transfer > 0) addMetric(summary.mixed, cash + transfer)
+    else if (cash > 0) addMetric(summary.cash, cash)
+    else if (transfer > 0) addMetric(summary.transfer, transfer)
+    addMetric(summary.banks.bcel, bcel)
+    addMetric(summary.banks.bcel2, bcel2)
+    addMetric(summary.banks.ldb, ldb)
+    addMetric(summary.debt, debt)
+  }
+
+  return summary
+}
+
+function SummaryIcon({ type, tone, className = 'h-9 w-9 rounded-lg', iconClassName = 'h-5 w-5' }) {
+  const paths = {
+    total: (
+      <>
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h8M8 11h8M8 15h5" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 3h12a1 1 0 0 1 1 1v16l-3-2-3 2-3-2-3 2-3-2V4a1 1 0 0 1 1-1Z" />
+      </>
+    ),
+    cash: (
+      <>
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7h16v10H4z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M16 12h.01M12 9v6" />
+      </>
+    ),
+    transfer: (
+      <>
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h11m0 0-3-3m3 3-3 3" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17H6m0 0 3 3m-3-3 3-3" />
+      </>
+    ),
+    mixed: (
+      <>
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 16h14" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m15 5 4 3-4 3M9 13l-4 3 4 3" />
+      </>
+    ),
+    debt: (
+      <>
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v5" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 17h.01" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.3 4.3 2.8 17.3A2 2 0 0 0 4.5 20h15a2 2 0 0 0 1.7-2.7L13.7 4.3a2 2 0 0 0-3.4 0Z" />
+      </>
+    ),
+  }
+
+  return (
+    <div className={`flex shrink-0 items-center justify-center ${className} ${tone}`}>
+      <svg className={iconClassName} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        {paths[type]}
+      </svg>
+    </div>
+  )
+}
+
+function SummaryCard({ label, metric, accent, icon, iconTone, loading }) {
+  return (
+    <div className={`min-w-0 rounded-md bg-slate-50/70 px-3 py-2 border-l-4 ${accent}`}>
+      <div className="flex min-w-0 items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide leading-tight truncate">{label}</p>
+          <p className="mt-1 text-base font-bold text-slate-800 font-mono leading-tight truncate">
+            {loading ? '...' : fmt(metric.amount)}
+          </p>
+          <p className="mt-0.5 text-[10px] text-slate-500 leading-tight">
+            {loading ? '...' : fmt(metric.bills)} ບິນ
+          </p>
+        </div>
+        <SummaryIcon type={icon} tone={iconTone} />
+      </div>
+    </div>
+  )
+}
+
+function BankStrip({ label, metric, color, loading }) {
+  return (
+    <div className="flex min-w-0 items-center justify-between gap-1 rounded-md border border-slate-100 bg-white px-1.5 py-0.5">
+      <div className="flex min-w-0 items-center gap-0.5">
+        <span className={`h-2 w-2 rounded-full shrink-0 ${color}`} />
+        <span className="text-[8px] font-bold text-slate-500 shrink-0 leading-tight">{label}</span>
+      </div>
+      <div className="flex min-w-0 flex-col items-end justify-center">
+        <span className="text-[8px] font-bold text-slate-800 font-mono truncate leading-tight">
+          {loading ? '...' : fmt(metric.amount)}
+        </span>
+        <span className="text-[7px] text-slate-400 leading-tight shrink-0">{loading ? '...' : fmt(metric.bills)} ບິນ</span>
+      </div>
+    </div>
+  )
 }
 
 function PaymentChannels({ row }) {
@@ -100,6 +271,8 @@ export default function BillsManagement() {
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving]   = useState(false)
+  const [summary, setSummary] = useState(EMPTY_BILL_SUMMARY)
+  const [summaryLoading, setSummaryLoading] = useState(false)
 
   const [search, setSearch]   = useState('')
   const [dateFrom, setDateFrom] = useState('')
@@ -132,19 +305,10 @@ export default function BillsManagement() {
 
   const fetchRows = useCallback(async () => {
     setLoading(true)
-    let q = supabase.from('ar_bills').select('*', { count: 'exact' })
-
-    if (search)   q = q.or(`bill_no.ilike.%${search}%,patient_name.ilike.%${search}%`)
-    if (dateFrom) q = q.gte('date', dateFrom)
-    if (dateTo)   q = q.lte('date', dateTo)
-    if (workload) q = q.eq('workload', workload)
-    if (customerTypeFilter) q = q.eq('customer_type', customerTypeFilter)
-    if (paymentTypeFilter) q = q.eq('payment_type', paymentTypeFilter)
-    if (bankFilter === 'cash') q = q.gt('cash', 0)
-    if (bankFilter === 'bcel') q = q.gt('bcel', 0)
-    if (bankFilter === 'bcel2') q = q.gt('bcel2', 0)
-    if (bankFilter === 'ldb') q = q.gt('ldb', 0)
-    if (bankFilter === 'debt') q = q.gt('debt', 0)
+    let q = applyBillFilters(
+      supabase.from('ar_bills').select('*', { count: 'exact' }),
+      { search, dateFrom, dateTo, workload, customerTypeFilter, paymentTypeFilter, bankFilter },
+    )
 
     const { data, count, error } = await q
       .order('date', { ascending: false })
@@ -155,7 +319,38 @@ export default function BillsManagement() {
     setLoading(false)
   }, [search, dateFrom, dateTo, workload, customerTypeFilter, paymentTypeFilter, bankFilter, page, pageSize])
 
+  const fetchBillSummary = useCallback(async () => {
+    setSummaryLoading(true)
+    const PAGE = 1000
+    let all = []
+    let from = 0
+    let expectedTotal = null
+
+    try {
+      while (true) {
+        let q = applyBillFilters(
+          supabase
+            .from('ar_bills')
+            .select('id,grand_total,cash,bcel,bcel2,ldb,debt', { count: 'exact' }),
+          { search, dateFrom, dateTo, workload, customerTypeFilter, paymentTypeFilter, bankFilter },
+        )
+        const { data, count, error } = await q.range(from, from + PAGE - 1)
+        if (error) throw error
+        if (expectedTotal === null) expectedTotal = count ?? 0
+        if (data?.length) all = all.concat(data)
+        if (!data?.length || all.length >= expectedTotal || data.length < PAGE) break
+        from += PAGE
+      }
+      setSummary(computeBillSummary(all))
+    } catch (err) {
+      setSummary(EMPTY_BILL_SUMMARY)
+    } finally {
+      setSummaryLoading(false)
+    }
+  }, [search, dateFrom, dateTo, workload, customerTypeFilter, paymentTypeFilter, bankFilter])
+
   useEffect(() => { fetchRows() }, [fetchRows])
+  useEffect(() => { fetchBillSummary() }, [fetchBillSummary])
   useEffect(() => { fetchInsuranceDueDays() }, [fetchInsuranceDueDays])
 
   async function upsertArDebt(bill) {
@@ -206,16 +401,16 @@ export default function BillsManagement() {
       bill_issued_at: form.bill_issued_at || null,
       due_date: null,
     }
-    const payload = { ...normalizedForm, debt_status: resolvePaymentStatus(normalizedForm) }
+    const payload = buildArBillPayload({ ...normalizedForm, debt_status: resolvePaymentStatus(normalizedForm) })
     let error
     if (modal.mode === 'add') {
       ;({ error } = await supabase.from('ar_bills').insert(payload))
     } else {
       ;({ error } = await supabase.from('ar_bills').update(payload).eq('id', form.id))
     }
-    if (error && ['payment_type', 'due_date', 'bill_issued_at'].some(col => error.message?.includes(col))) {
+    if (error && OPTIONAL_AR_BILL_COLUMNS.some(col => error.message?.includes(col))) {
       const fallbackPayload = { ...payload }
-      ;['payment_type', 'due_date', 'bill_issued_at'].forEach(col => {
+      OPTIONAL_AR_BILL_COLUMNS.forEach(col => {
         delete fallbackPayload[col]
       })
       if (modal.mode === 'add') {
@@ -237,7 +432,7 @@ export default function BillsManagement() {
         await logAction({ action: modal.mode === 'add' ? 'ເພີ່ມໃບບິນ' : 'ແກ້ໄຂໃບບິນ', bill_no: form.bill_no, patient_name: form.patient_name, amount: form.grand_total, recorder: form.recorded_by })
       } catch (logErr) {
       }
-      setModal(null); fetchRows()
+      setModal(null); fetchRows(); fetchBillSummary()
     } else {
       if (error.message?.includes('duplicate key') || error.code === '23505') {
         setSubmitError('ໃບບິນເລກ "' + form.bill_no + '" ວັນທີ "' + form.date + '" ກະວຽກ "' + form.workload + '" ມີຢູ່ໃນລະບົບແລ້ວ — ກວດສອບຂໍ້ມູນຄືນ')
@@ -260,7 +455,7 @@ export default function BillsManagement() {
         await logAction({ action: 'ລົບໃບບິນ', bill_no: delTarget.bill_no, patient_name: delTarget.patient_name, amount: delTarget.grand_total })
       } catch (logErr) {
       }
-      setDelTarget(null); fetchRows()
+      setDelTarget(null); fetchRows(); fetchBillSummary()
     } else {
       alert('Error: ' + error.message)
     }
@@ -277,94 +472,9 @@ export default function BillsManagement() {
         await logAction({ action: 'ລຶບຂໍ້ມູນທັງໝົດ', details: 'ລຶບທັງ ar_bills ແລະ ar_debt' })
       } catch (logErr) {
       }
-      setDelAll(false); fetchRows()
+      setDelAll(false); fetchRows(); fetchBillSummary()
     } else {
       alert('Error: ' + (errorBills?.message || errorDebt?.message || 'Unknown error'))
-    }
-  }
-
-  async function syncDebtToArDebt() {
-    setSaving(true)
-    try {
-      // ດຶງໃບບິນທີ່ມີໜີ້ຄ້າງຈາກ ar_bills (ກວດ debt > 0)
-      const { data: billsWithDebt, error: fetchError } = await supabase
-        .from('ar_bills')
-        .select('*')
-        .gt('debt', 0)
-        .in('debt_status', ['pending', 'overdue', 'deposit']) // ເອົາສະເພາະຍັງບໍ່ທັນສົ່ງໄປ ar_debt
-      if (fetchError) throw fetchError
-
-      if (!billsWithDebt || billsWithDebt.length === 0) {
-        alert('ບໍ່ມີໃບບິນທີ່ມີໜີ້ຄ້າງທີ່ຍັງບໍ່ທັນສົ່ງ')
-        setSaving(false)
-        return
-      }
-
-      // ສ້າງຂໍ້ມູນສຳລັບ ar_debt
-      const submitDate = todayIso()
-      const debtRecords = billsWithDebt.map(bill => ({
-        date: bill.date,
-        bill_no: bill.bill_no,
-        insite_onsite: bill.insite_onsite,
-        opd_ipd: bill.opd_ipd,
-        payment_type: displayPaymentType(bill) || null,
-        customer_type: bill.customer_type,
-        insurance: bill.insurance,
-        hn: bill.hn,
-        patient_name: bill.patient_name,
-        gender: bill.gender,
-        workload: bill.workload,
-        grand_total: bill.grand_total,
-        debt_amount: bill.debt,
-        date_paid: null,
-        submit_date: submitDate,
-        amount_paid: 0,
-        cash_paid: 0,
-        bcel_paid: 0,
-        bcel2_paid: 0,
-        ldb_paid: 0,
-        balance: bill.debt,
-        due_date: bill.due_date || calcDueDate(submitDate, insuranceDueDays, bill.insurance),
-        aging_group: calcAging({
-          submit_date: submitDate,
-          due_date: bill.due_date || calcDueDate(submitDate, insuranceDueDays, bill.insurance),
-          balance: bill.debt,
-        }),
-      }))
-
-      // ກວດສອບວ່າມີໃນ ar_debt ແລ້ວຫຼືຍັງ (ຕາມ bill_no)
-      const { data: existingDebt } = await supabase
-        .from('ar_debt')
-        .select('bill_no')
-        .in('bill_no', billsWithDebt.map(b => b.bill_no))
-      
-      const existingBillNos = new Set(existingDebt?.map(d => d.bill_no) || [])
-      const newRecords = debtRecords.filter(r => !existingBillNos.has(r.bill_no))
-      if (newRecords.length === 0) {
-        alert('ໃບບິນທັງໝົດຖືກສົ່ງໄປໜ້າຈັດການໜີ້ຄ້າງແລ້ວ')
-        setSaving(false)
-        return
-      }
-
-      // ບັນທກລົງ ar_debt
-      const { error: insertError } = await supabase.from('ar_debt').insert(newRecords)
-      if (insertError) throw insertError
-
-      try {
-        await logAction({
-          action: 'ສົ່ງໜີ້ຄ້າງໄປໜ້າຈັດການໜີ້ຄ້າງ',
-          details: `ສົ່ງ ${newRecords.length} ໃບບິນ`,
-          amount: newRecords.reduce((s, r) => s + (r.debt_amount || 0), 0)
-        })
-      } catch (logErr) {
-      }
-
-      alert(`ສົ່ງ ${newRecords.length} ໃບບິນ ໄປໜ້າຈັດການໜີ້ຄ້າງສຳເລັດ!`)
-      fetchRows()
-    } catch (err) {
-      alert('ຜິດພາດ: ' + err.message)
-    } finally {
-      setSaving(false)
     }
   }
 
@@ -403,6 +513,7 @@ export default function BillsManagement() {
       } catch (_) {}
       setUploadState(s => ({ ...s, log: [...log], progress: 100 }))
       fetchRows()
+      fetchBillSummary()
     } catch (err) {
       addLog(`✗ ${err.message}`, false)
       setUploadState(s => ({ ...(s || { progress: 0, done: 0, total: 0, fileName: file.name }), error: err.message, log: [...log] }))
@@ -422,15 +533,6 @@ export default function BillsManagement() {
           <p className="text-xs text-slate-500 mt-0.5">ທັງໝົດ {fmt(total)} ໃບ</p>
         </div>
         <div className="flex items-center gap-2" data-pdf-hidden="true">
-          <Can permission={PERMISSIONS.RECORDS_WRITE}>
-          <button onClick={syncDebtToArDebt}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 text-sm font-semibold rounded-xl border border-amber-200 transition-colors">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-            </svg>
-            ສົ່ງໜີ້ຄ້າງ
-          </button>
-          </Can>
           <Can permission={PERMISSIONS.RECORDS_DELETE}>
           <button onClick={() => setDelAll(true)}
             className="inline-flex items-center gap-2 px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-sm font-semibold rounded-xl border border-red-200 transition-colors">
@@ -471,6 +573,68 @@ export default function BillsManagement() {
             ເພີ່ມໃບບິນ
           </button>
           </Can>
+        </div>
+      </div>
+
+      {/* Summary */}
+      <div className="rounded-xl border border-slate-100 bg-white p-2 shadow-sm">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 items-stretch">
+        <SummaryCard
+          label="ລາຍຮັບທັງໝົດ"
+          metric={summary.total}
+          accent="border-indigo-400"
+          icon="total"
+          iconTone="bg-indigo-50 text-indigo-500"
+          loading={summaryLoading}
+        />
+        <SummaryCard
+          label="Cash"
+          metric={summary.cash}
+          accent="border-emerald-400"
+          icon="cash"
+          iconTone="bg-emerald-50 text-emerald-500"
+          loading={summaryLoading}
+        />
+        <div className="min-w-0 rounded-md bg-slate-50/70 px-2 py-2 border-l-4 border-sky-400">
+          <div className="grid h-full min-w-0 grid-cols-1 gap-1 xl:grid-cols-[minmax(0,1fr)_minmax(112px,40%)] xl:gap-2">
+            <div className="min-w-0">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <SummaryIcon
+                    type="transfer"
+                    tone="bg-sky-50 text-sky-500"
+                    className="h-6 w-6 rounded-md"
+                    iconClassName="h-4 w-4"
+                  />
+                  <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wide leading-tight truncate">Transfers</p>
+                </div>
+                  <p className="mt-1 text-sm font-bold text-slate-800 font-mono leading-tight truncate">
+                    {summaryLoading ? '...' : fmt(summary.transfer.amount)}
+                  </p>
+                  <p className="mt-0.5 text-[8px] text-slate-500 leading-tight truncate">{summaryLoading ? '...' : fmt(summary.transfer.bills)} ບິນ</p>
+                </div>
+            <div className="mt-1 grid w-full min-w-0 max-w-full shrink-0 self-start grid-rows-3 gap-0.5 xl:mt-0">
+              <BankStrip label="BCEL1" metric={summary.banks.bcel} color="bg-red-500" loading={summaryLoading} />
+              <BankStrip label="BCEL2" metric={summary.banks.bcel2} color="bg-rose-500" loading={summaryLoading} />
+              <BankStrip label="LDB" metric={summary.banks.ldb} color="bg-sky-500" loading={summaryLoading} />
+            </div>
+          </div>
+        </div>
+        <SummaryCard
+          label="Cash/Transfer"
+          metric={summary.mixed}
+          accent="border-violet-400"
+          icon="mixed"
+          iconTone="bg-violet-50 text-violet-500"
+          loading={summaryLoading}
+        />
+        <SummaryCard
+          label="ລວມໜີ້"
+          metric={summary.debt}
+          accent="border-red-400"
+          icon="debt"
+          iconTone="bg-red-50 text-red-500"
+          loading={summaryLoading}
+        />
         </div>
       </div>
 

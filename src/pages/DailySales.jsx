@@ -44,7 +44,7 @@ const LOOKER_DAILY_FALLBACK = {
 }
 
 const PAYMENT_METHODS = [
-  { key: 'cash',  label: 'ເງິນສົດ', sub: 'Cash' },
+  { key: 'cash',  label: 'Cash', sub: 'Cash' },
   { key: 'bcel',  label: 'BCEL',    sub: 'BCEL Bank' },
   { key: 'bcel2', label: 'BCEL 2',  sub: 'BCEL2 Bank' },
   { key: 'ldb',   label: 'LDB',     sub: 'Lao Dev Bank' },
@@ -92,7 +92,7 @@ function PaymentIcon({ method }) {
   return null
 }
 
-// ── Compact sub-card used inside breakdown sections ──────────────────────
+// -- Compact sub-card used inside breakdown sections ----------------------
 function BreakdownCard({ label, sublabel, value, isLAK = true, color = 'indigo', icon }) {
   const colorMap = {
     indigo: { bg: 'bg-indigo-50',  border: 'border-indigo-100', text: 'text-indigo-700',  bar: 'bg-indigo-400' },
@@ -120,7 +120,7 @@ function BreakdownCard({ label, sublabel, value, isLAK = true, color = 'indigo',
   )
 }
 
-// ── Top KPI card ─────────────────────────────────────────────────────────
+// -- Top KPI card ---------------------------------------------------------
 function TopCard({ label, sublabel, value, isLAK = true, color = 'indigo' }) {
   const colorMap = {
     indigo: 'from-indigo-500 to-indigo-600',
@@ -135,27 +135,7 @@ function TopCard({ label, sublabel, value, isLAK = true, color = 'indigo' }) {
       <p className="text-2xl font-bold mt-1 leading-tight">
         {isLAK ? formatNumber(value) : formatNumber(value, 0)}
       </p>
-      <p className="text-[11px] text-white/60 mt-1">{label}{isLAK ? ' • LAK' : ''}</p>
-    </div>
-  )
-}
-
-function CollectionMetric({ label, sublabel, value, isLAK = true, tone = 'slate' }) {
-  const tones = {
-    slate: 'border-slate-200 bg-white text-slate-800',
-    green: 'border-emerald-100 bg-emerald-50 text-emerald-700',
-    red: 'border-red-100 bg-red-50 text-red-700',
-    blue: 'border-blue-100 bg-blue-50 text-blue-700',
-    amber: 'border-amber-100 bg-amber-50 text-amber-700',
-    violet: 'border-violet-100 bg-violet-50 text-violet-700',
-  }
-  return (
-    <div className={`rounded-xl border p-4 ${tones[tone] || tones.slate}`}>
-      <p className="text-[11px] font-bold uppercase tracking-wide opacity-70">{label}</p>
-      <p className="mt-1 text-xl font-extrabold leading-tight">
-        {isLAK ? formatNumber(value) : formatNumber(value, 0)}
-      </p>
-      <p className="mt-0.5 text-[11px] text-slate-400">{sublabel || (isLAK ? 'LAK' : 'Bills')}</p>
+      <p className="text-[11px] text-white/60 mt-1">{label}{isLAK ? ' - LAK' : ''}</p>
     </div>
   )
 }
@@ -165,7 +145,7 @@ export default function DailySales() {
   const [selectedCollectionTerm, setSelectedCollectionTerm] = useState('')
 
   const { data: rows,      loading }  = useARData(filters)
-  // Collection = ເງິນທີ່ເກັບໄດ້ໃນວັນທີ filter (cash flow view) → filter ດ້ວຍ date_paid
+  // Collection is filtered by date_paid for the cash-flow view.
   const { data: debtRows }            = usePayoffData({ ...filters, payoffDateField: 'date_paid' })
   const { data: termDebtRows }        = usePayoffData(filters)
 
@@ -177,14 +157,14 @@ export default function DailySales() {
   // Collection stats from ar_debt (Pay off sheet)
   const collectionStats = useMemo(() => {
     const dr = debtRows || []
-    // ຄິດໄລ່ຍອດຊຳລະໜີ້: ໃຊ້ຜົນບວກຂອງ channel payments ຫຼື debt_amount - balance
+    // Calculate debt collection from channel payments, amount_paid, or debt_amount - balance.
     const amount = dr.reduce((s, r) => {
-      // ພະຍາຍາມໃຊ້ channel payments ກ່ອນ
+      // Prefer channel payments first.
       const channelPaid = (r.cash_paid || 0) + (r.bcel_paid || 0) + (r.bcel2_paid || 0) + (r.ldb_paid || 0)
       if (channelPaid > 0) return s + channelPaid
-      // ຖ້າບໍ່ມີ channel payments, ໃຊ້ amount_paid
+      // Fall back to amount_paid.
       if (r.amount_paid) return s + r.amount_paid
-      // ຖ້າບໍ່ມີອີກ, ຄິດໄລ່ຈາກ debt_amount - balance
+      // Finally use debt_amount - balance.
       const debtPaid = (r.debt_amount || 0) - (r.balance || 0)
       return s + (debtPaid > 0 ? debtPaid : 0)
     }, 0)
@@ -235,17 +215,17 @@ export default function DailySales() {
     useLookerFallback ? LOOKER_DAILY_FALLBACK.shifts : shiftData
   ), [shiftData, useLookerFallback])
 
-  // Actual Income = ລາຍຮັບຈິງທີ່ເກັບໄດ້ທັງໝົດ
-  // ສູດ: Daily Income + Collection
-  // Daily Income = Actual Total Sale - Outstanding Debts (ເງິນທີ່ເກັບໄດ້ຕອນອອກບິນ)
-  // Collection = ງິນທີ່ເກັບໄດ້ຈາກໜີ້ຄ້າງ (Pay off)
+  // Actual Income is the full collected income.
+  // Formula: Daily Income + Collection.
+  // Daily Income = Actual Total Sale - Outstanding Debts.
+  // Collection is income collected from outstanding debt.
   const dailyIncome = useLookerFallback ? viewKpis.dailyIncome : viewKpis.totalSales - viewKpis.outstandingDebt
   const actualIncomeTotal = useLookerFallback
     ? LOOKER_DAILY_FALLBACK.actualIncome
     : dailyIncome + viewCollectionStats.amount
 
   // Expected values - calculated dynamically from actual data
-  // ຄ່າທີ່ຄາດຫວັງຄິດໄລ່ຈາກຂໍ້ມູນຈິງໃນ Database
+  // Expected values are derived from actual database data.
   const expectedValues = {
     // Expected Collection = Outstanding Debt - Remaining Balance (debt not yet collected)
     // This is calculated based on debt that SHOULD have been collected
@@ -257,7 +237,7 @@ export default function DailySales() {
   }
 
   // Data quality checks
-  // ກວດສອບວ່າມີຂໍ້ມູນ Pay off ຄົບຖ້ວນຫຼືບໍ່
+  // Data quality checks for Pay off completeness.
   const dataQuality = {
     // Check if Collection is significantly lower than expected
     // Expected collection should be close to Outstanding Debt (minus remaining unpaid)
@@ -294,7 +274,7 @@ export default function DailySales() {
     colors: ['#818cf8', '#22d3ee', '#34d399'],
     dataLabels: { ...revenueChartOpts.dataLabels, formatter: v => formatNumber(v) },
     yaxis: { labels: { formatter: v => formatNumber(v), style: { colors: '#94a3b8', fontSize: '11px' } } },
-    tooltip: { y: { formatter: v => `${formatNumber(v)} ໃບ` } },
+    tooltip: { y: { formatter: v => `${formatNumber(v)} bills` } },
   }
 
   const dailyTrendOpts = {
@@ -328,8 +308,8 @@ export default function DailySales() {
   }, [rows])
 
   const trendSeries = [
-    { name: 'ຍອດຂາຍລວມ',  data: dailyByDate.map(r => ({ x: r.date, y: r.income })) },
-    { name: 'ໜີ້ຄ້າງ',  data: dailyByDate.map(r => ({ x: r.date, y: r.debt }))   },
+    { name: 'Gross Sales',  data: dailyByDate.map(r => ({ x: r.date, y: r.income })) },
+    { name: 'Outstanding Debt',  data: dailyByDate.map(r => ({ x: r.date, y: r.debt }))   },
   ]
 
   if (loading) return <div className="p-6"><LoadingSpinner /></div>
@@ -337,64 +317,43 @@ export default function DailySales() {
   return (
     <div id="daily-sales-content" className="p-6 space-y-6">
 
-      {/* ── Header ── */}
+      {/* -- Header -- */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-800">ລາຍງານປະຈຳວັນ</h2>
-          <p className="text-sm text-slate-500 mt-0.5">ລາຍງານຍອດຂາຍປະຈຳວັນ • ໜ່ວຍ: LAK</p>
+          <h2 className="text-xl font-bold text-slate-800">Daily Report</h2>
+          <p className="text-sm text-slate-500 mt-0.5">Daily sales report - Unit: LAK</p>
         </div>
         <div className="flex flex-wrap items-center gap-2" data-pdf-hidden="true">
-          <PDFButton elementId="full-report-export" filename="AR_Finance_LXH_Report" label="ດາວໂຫລດ PDF" />
+          <PDFButton elementId="full-report-export" filename="AR_Finance_LXH_Report" label="Download PDF" />
           <DateFilter filters={filters} onChange={updateFilters} />
-          <FilterSelect label="ກະວຽກ" value={filters.workload}
+          <FilterSelect label="Shift" value={filters.workload}
             onChange={v => updateFilters({ workload: v })}
             options={SHIFT_OPTIONS} />
-          <FilterSelect label="ປະເພດລູກຄ້າ" value={filters.customerType}
+          <FilterSelect label="Customer Type" value={filters.customerType}
             onChange={v => updateFilters({ customerType: v })}
             options={['GN','INS','B2B']} />
         </div>
       </div>
 
-      {/* Collection Team daily KPIs */}
+      {/* Collection term status */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-        <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
           <div>
-            <h3 className="section-title">Collection Team Daily KPIs</h3>
-            <p className="text-xs text-slate-400 mt-0.5">Daily sales, unpaid bills, cash-in, collection, and discount tracking</p>
+            <h3 className="section-title">Collection Term Status</h3>
+            <p className="text-xs text-slate-400 mt-0.5">Bill count summary by collection tracking term</p>
           </div>
+          <select
+            value={selectedCollectionTerm}
+            onChange={e => setSelectedCollectionTerm(e.target.value)}
+            className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400"
+            data-pdf-hidden="true"
+          >
+            <option value="">All Terms</option>
+            {COLLECTION_TERMS.map(term => (
+              <option key={term.key} value={term.key}>{term.label}</option>
+            ))}
+          </select>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <CollectionMetric label="Sale Revenue / Day" sublabel="Net sales revenue" value={viewKpis.totalSales} tone="blue" />
-          <CollectionMetric label="Bill Out / Day" sublabel="Bills issued today" value={viewKpis.totalBills} isLAK={false} tone="slate" />
-          <CollectionMetric label="Unpaid Bill / Day" sublabel="Under sales revenue" value={viewKpis.outstandingBills} isLAK={false} tone="red" />
-          <CollectionMetric label="Total Bill / Day" sublabel="All daily bills" value={viewKpis.totalBills} isLAK={false} tone="violet" />
-          <CollectionMetric label="Paid Bill / Day" sublabel="Paid at billing" value={viewKpis.paidBills} isLAK={false} tone="green" />
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-3">
-          <CollectionMetric label="Cash In / Day" sublabel="Daily collected sales" value={dailyIncome} tone="green" />
-          <CollectionMetric label="Collection From Unpaid / Day" sublabel="Pay off collection" value={viewCollectionStats.amount} tone="violet" />
-          <CollectionMetric label="Discounts Bill / Day" sublabel="Discounted bill count" value={viewKpis.discountedBills} isLAK={false} tone="amber" />
-          <CollectionMetric label="Discount Amount / Day" sublabel="Total discount amount" value={viewKpis.totalDiscounts} tone="amber" />
-          <CollectionMetric label="Collected Bill" sublabel="Unpaid bills collected" value={viewKpis.collectionBills} isLAK={false} tone="blue" />
-        </div>
-        <div className="mt-5 pt-4 border-t border-slate-100">
-          <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-            <div>
-              <h4 className="text-sm font-bold text-slate-700">Collection Term Status</h4>
-              <p className="text-xs text-slate-400">ສະຫຼຸບຈຳນວນບິນຕາມ term ທີ່ທີມ Collection ໃຊ້ຕິດຕາມ</p>
-            </div>
-            <select
-              value={selectedCollectionTerm}
-              onChange={e => setSelectedCollectionTerm(e.target.value)}
-              className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400"
-              data-pdf-hidden="true"
-            >
-              <option value="">All Terms</option>
-              {COLLECTION_TERMS.map(term => (
-                <option key={term.key} value={term.key}>{term.label}</option>
-              ))}
-            </select>
-          </div>
           {selectedTermSummary && (
             <div className="mb-3 rounded-xl border border-primary-100 bg-primary-50 p-3 flex items-center justify-between">
               <div>
@@ -426,46 +385,45 @@ export default function DailySales() {
               )
             })}
           </div>
-        </div>
       </div>
 
-      {/* ── Row 1: 5 Top KPIs (PDF style) ── */}
+      {/* -- Row 1: 5 Top KPIs (PDF style) -- */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <TopCard label="ຍອດຂາຍລວມ"  sublabel="ຍອດກ່ອນຫັກສ່ວນຫຼຸດ"     value={viewKpis.totalSalesGross}  color="indigo" />
-        <TopCard label="ສ່ວນຫຼຸດ"     sublabel="Discounts"       value={viewKpis.totalDiscounts}    color="orange" />
-        <TopCard label="ຍອດຂາຍສຸດທິ"  sublabel="ຍອດຂາຍທີ່ແທ້ຈິງ" value={viewKpis.totalSales}    color="teal" />
-        <TopCard label="ໃບບິນທັງໝົດ"  sublabel="ຈຳນວນໃບບິນລວມ"     value={viewKpis.totalBills}  isLAK={false} color="blue"   />
-        <TopCard label="ລູກຄ້າທັງໝົດ" sublabel="ຈຳນວນລູກຄ້າລວມ" value={viewKpis.uniqueCustomers} isLAK={false} color="purple" />
+        <TopCard label="Gross Sales"  sublabel="Before discounts"     value={viewKpis.totalSalesGross}  color="indigo" />
+        <TopCard label="Discounts"     sublabel="Discount amount"       value={viewKpis.totalDiscounts}    color="orange" />
+        <TopCard label="Net Sales"  sublabel="Actual net sales" value={viewKpis.totalSales}    color="teal" />
+        <TopCard label="Total Bills"  sublabel="Total bill count"     value={viewKpis.totalBills}  isLAK={false} color="blue"   />
+        <TopCard label="Total Customers" sublabel="Total customer count" value={viewKpis.uniqueCustomers} isLAK={false} color="purple" />
       </div>
 
-      {/* ── Row 2: Two Breakdown Sections ── */}
+      {/* -- Row 2: Two Breakdown Sections -- */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
 
         {/* Total Sales Breakdown */}
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
           <div className="flex items-center gap-2 mb-4">
             <div className="w-1 h-5 rounded-full bg-indigo-500" />
-            <h3 className="font-bold text-slate-700 text-sm">ລາຍລະອຽດຍອດຂາຍ</h3>
+            <h3 className="font-bold text-slate-700 text-sm">Sales Breakdown</h3>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <BreakdownCard
-              label="ລາຍຮັບຈິງ" sublabel="ລາຍຮັບປະຈຳວັນ + ຍອດເກັບໜີ້"
-              value={actualIncomeTotal} color="green"
+              label="Sale Revenue / Day" sublabel="Net sales revenue"
+              value={viewKpis.totalSales} color="sky"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>}
             />
             <BreakdownCard
-              label="ໜີ້ຄ້າງທັງໝົດ" sublabel="ໜີ້ທີ່ຍັງຕ້ອງຕິດຕາມ"
-              value={viewKpis.outstandingDebt} color="red"
+              label="Cash In / Day" sublabel="Daily collected sales"
+              value={dailyIncome} color="green"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>}
             />
             <BreakdownCard
-              label="ລາຍຮັບປະຈຳວັນ" sublabel="ຍອດຂາຍສຸດທິ - ໜີ້ຄ້າງ"
-              value={dailyIncome} color="sky"
+              label="Collection From Unpaid / Day" sublabel="Pay off collection"
+              value={viewCollectionStats.amount} color="teal"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>}
             />
             <BreakdownCard
-              label="Collection" sublabel="ຍອດເກັບໄດ້ (Pay off)"
-              value={viewCollectionStats.amount} color="teal"
+              label="Discount Amount / Day" sublabel="Total discount amount"
+              value={viewKpis.totalDiscounts} color="amber"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" /></svg>}
             />
           </div>
@@ -475,26 +433,26 @@ export default function DailySales() {
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
           <div className="flex items-center gap-2 mb-4">
             <div className="w-1 h-5 rounded-full bg-emerald-500" />
-            <h3 className="font-bold text-slate-700 text-sm">ລາຍລະອຽດໃບບິນ</h3>
+            <h3 className="font-bold text-slate-700 text-sm">Bill Breakdown</h3>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <BreakdownCard
-              label="ໃບບິນຊຳລະແລ້ວ" sublabel="ຈ່າຍແລ້ວ"
+              label="Paid Bill / Day" sublabel="Paid at billing"
               value={viewKpis.paidBills} isLAK={false} color="green"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>}
             />
             <BreakdownCard
-              label="ໃບບິນຄ້າງ" sublabel="ຍັງບໍ່ຊຳລະ"
+              label="Unpaid Bill / Day" sublabel="Under sales revenue"
               value={viewKpis.outstandingBills} isLAK={false} color="red"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>}
             />
             <BreakdownCard
-              label="ໃບບິນມີສ່ວນຫຼຸດ" sublabel="ໃບບິນສ່ວນຫຼຸດ"
+              label="Discounts Bill / Day" sublabel="Discounted bill count"
               value={viewKpis.discountedBills} isLAK={false} color="amber"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>}
             />
             <BreakdownCard
-              label="ໃບບິນເກັບໜີ້ໄດ້" sublabel="ໃບບິນທີ່ປິດຍອດແລ້ວ"
+              label="Collected Bill" sublabel="Unpaid bills collected"
               value={viewKpis.collectionBills} isLAK={false} color="purple"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>}
             />
@@ -507,7 +465,7 @@ export default function DailySales() {
         </div>
       </div>
 
-      {/* ── Row 3: Shift breakdown cards ── */}
+      {/* -- Row 3: Shift breakdown cards -- */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {SHIFTS.map((shift, i) => {
           const sd = viewShiftData[shift] || { revenue: 0, bills: 0 }
@@ -516,7 +474,7 @@ export default function DailySales() {
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <p className="font-bold text-slate-700">{SHIFT_LABELS[shift] || shift}</p>
-                  <p className="text-xs text-slate-400">ກະວຽກ / Shift</p>
+                  <p className="text-xs text-slate-400">Shift / Shift</p>
                 </div>
                 <span className="text-2xl font-bold" style={{ color: SHIFT_COLORS[i] }}>
                   {shiftPcts[i]}%
@@ -524,12 +482,12 @@ export default function DailySales() {
               </div>
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-500">ລາຍຮັບ</span>
+                  <span className="text-slate-500">Revenue</span>
                   <span className="font-semibold text-slate-800">{formatNumber(sd.revenue)} LAK</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-500">ໃບບິນ</span>
-                  <span className="font-semibold text-slate-800">{formatNumber(sd.bills, 0)} ໃບ</span>
+                  <span className="text-slate-500">billsbills</span>
+                  <span className="font-semibold text-slate-800">{formatNumber(sd.bills, 0)} bills</span>
                 </div>
                 <div className="w-full bg-slate-100 rounded-full h-2 mt-2">
                   <div className="h-2 rounded-full transition-all duration-700"
@@ -541,10 +499,10 @@ export default function DailySales() {
         })}
       </div>
 
-      {/* ── Row 4: Charts ── */}
+      {/* -- Row 4: Charts -- */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <div className="chart-card">
-          <h3 className="section-title mb-1">ລາຍຮັບຕາມກະວຽກ</h3>
+          <h3 className="section-title mb-1">Revenue by Shift</h3>
           <p className="text-xs text-slate-400 mb-4">Revenue by Shift</p>
           {rows?.length ? (
             <ReactApexChart
@@ -552,28 +510,28 @@ export default function DailySales() {
               series={[{ name: 'Revenue (LAK)', data: SHIFTS.map(s => viewShiftData[s]?.revenue || 0) }]}
               type="bar" height={260}
             />
-          ) : <EmptyState message="ບໍ່ມີຂໍ້ມູນ" sublabel="ກະລຸນາອັບໂຫຼດ Excel ກ່ອນ" />}
+          ) : <EmptyState message="No data" sublabel="Please upload Excel first" />}
         </div>
         <div className="chart-card">
-          <h3 className="section-title mb-1">ໃບບິນຕາມກະວຽກ</h3>
-          <p className="text-xs text-slate-400 mb-4">ຈຳນວນໃບບິນຕາມກະວຽກ</p>
+          <h3 className="section-title mb-1">Bills by Shift</h3>
+          <p className="text-xs text-slate-400 mb-4">Bill count by shift</p>
           {rows?.length ? (
             <ReactApexChart
               options={billsChartOpts}
-              series={[{ name: 'ໃບບິນ', data: SHIFTS.map(s => viewShiftData[s]?.bills || 0) }]}
+              series={[{ name: 'billsbills', data: SHIFTS.map(s => viewShiftData[s]?.bills || 0) }]}
               type="bar" height={260}
             />
-          ) : <EmptyState message="ບໍ່ມີຂໍ້ມູນ" sublabel="ກະລຸນາອັບໂຫຼດ Excel ກ່ອນ" />}
+          ) : <EmptyState message="No data" sublabel="Please upload Excel first" />}
         </div>
       </div>
 
-      {/* ── Row 5: Daily trend ── */}
+      {/* -- Row 5: Daily trend -- */}
       <div className="chart-card">
-        <h3 className="section-title mb-1">ທ່າອ່ຽງຍອດຂາຍລາຍວັນ</h3>
-        <p className="text-xs text-slate-400 mb-4">ແນວໂນ້ມຍອດຂາຍປະຈຳວັນ</p>
+        <h3 className="section-title mb-1">Daily Sales Trend</h3>
+        <p className="text-xs text-slate-400 mb-4">Daily sales trend</p>
         {dailyByDate.length > 0 ? (
           <ReactApexChart options={dailyTrendOpts} series={trendSeries} type="bar" height={280} />
-        ) : <EmptyState message="ບໍ່ມີຂໍ້ມູນ" sublabel="ກະລຸນາອັບໂຫຼດ Excel ກ່ອນ" />}
+        ) : <EmptyState message="No data" sublabel="Please upload Excel first" />}
       </div>
     </div>
   )
