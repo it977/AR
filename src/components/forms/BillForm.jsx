@@ -85,6 +85,7 @@ function getDefaultForm(initial = {}) {
     date,
     week: initial.week || (date ? getWeekFromDate(date) : ''),
     workload: initial.workload || (isEdit ? '' : getWorkloadFromTime()),
+    hn: initial.hn || (isEdit ? '' : 'LXH'),
     bill_issued_at: initial.bill_issued_at || (isEdit ? '' : localNowDateTime()),
   }
   if (!form.week && form.date) form.week = getWeekFromDate(form.date)
@@ -114,8 +115,23 @@ function toAmountNumber(value) {
   return parseFloat(String(value).replace(/,/g, '').replace(/\s+/g, '')) || 0
 }
 
+function formatAmountInput(value) {
+  if (value === null || value === undefined || value === '' || value === 0 || value === '0') return ''
+  const raw = String(value)
+    .replace(/,/g, '')
+    .replace(/[^\d.]/g, '')
+  if (!raw) return ''
+
+  const hasDecimal = raw.includes('.')
+  const [integerPart = '', ...decimalParts] = raw.split('.')
+  const normalizedInteger = integerPart.replace(/^0+(?=\d)/, '') || '0'
+  const formattedInteger = normalizedInteger.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  if (!hasDecimal) return formattedInteger
+  return `${formattedInteger}.${decimalParts.join('')}`
+}
+
 function amountInputValue(value) {
-  return value === 0 || value === '0' ? '' : (value ?? '')
+  return formatAmountInput(value)
 }
 
 function getServiceTotal(values) {
@@ -186,7 +202,7 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
 
   function num(k) {
     return e => {
-      const value = e.target.value
+      const value = formatAmountInput(e.target.value)
       const numericValue = toAmountNumber(value)
       if (k === 'discounts' && isBookingPayment(form.payment_type)) {
         const total = getServiceTotal(form)
@@ -233,7 +249,7 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
           </Field>
           <Field label="ເລກໃບບິນ" required>
             <input type="text" value={form.bill_no} onChange={txt('bill_no')} required
-              placeholder="BILL-001" className={inputCls} disabled={isEdit} />
+              placeholder="INV" className={inputCls} disabled={isEdit} />
           </Field>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
@@ -285,7 +301,7 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
         <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">ຂໍ້ມູນຄົນເຈັບ</p>
         <div className="grid grid-cols-3 gap-3">
           <Field label="HN">
-            <input type="text" value={form.hn} onChange={txt('hn')} placeholder="HN001" className={inputCls} />
+            <input type="text" value={form.hn} onChange={txt('hn')} placeholder="LXH" className={inputCls} />
           </Field>
           <Field label="ຊື່ - ນາມສະກຸນ" required>
             <input type="text" value={form.patient_name} onChange={txt('patient_name')} required
@@ -336,7 +352,7 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
             <input type="text" inputMode="decimal" value={amountInputValue(form.discounts)} onChange={num('discounts')} placeholder="0" className={numCls} />
           </Field>
           <Field label="ຍອດລວມສຸດທິ" hint="ຄຳນວນອັດຕະໂນມັດ">
-            <input type="number" value={form.grand_total} readOnly className={numCls + ' bg-slate-50 cursor-not-allowed'} />
+            <input type="text" value={amountInputValue(form.grand_total)} readOnly className={numCls + ' bg-slate-50 cursor-not-allowed'} />
           </Field>
           <Field label="ເງິນສົດ (Cash)">
             <input type="text" inputMode="decimal" value={amountInputValue(form.cash)} onChange={num('cash')} placeholder="0" className={numCls} />

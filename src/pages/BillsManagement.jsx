@@ -349,6 +349,11 @@ export default function BillsManagement() {
     }
   }, [search, dateFrom, dateTo, workload, customerTypeFilter, paymentTypeFilter, bankFilter])
 
+  const openAddModal = useCallback(() => {
+    setSubmitError('')
+    setModal({ mode: 'add', row: { bill_no: 'INV' } })
+  }, [])
+
   useEffect(() => { fetchRows() }, [fetchRows])
   useEffect(() => { fetchBillSummary() }, [fetchBillSummary])
   useEffect(() => { fetchInsuranceDueDays() }, [fetchInsuranceDueDays])
@@ -566,7 +571,7 @@ export default function BillsManagement() {
           </button>
           </Can>
           <Can permission={PERMISSIONS.RECORDS_WRITE}>
-          <button onClick={() => setModal({ mode: 'add' })} className="btn-primary">
+          <button onClick={openAddModal} className="btn-primary">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
@@ -820,7 +825,7 @@ export default function BillsManagement() {
         size="xl"
       >
         <BillForm
-          initial={modal?.mode === 'edit' ? modal.row : {}}
+          initial={modal?.mode === 'edit' ? modal.row : (modal?.row || {})}
           onSubmit={handleSubmit}
           onCancel={() => { setModal(null); setSubmitError('') }}
           loading={saving}
