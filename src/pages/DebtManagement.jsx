@@ -211,7 +211,7 @@ function ChannelStrip({ label, metric, color }) {
       </div>
       <div className="flex min-w-0 flex-col items-end justify-center">
         <span className="truncate font-mono text-[8px] font-bold leading-tight text-slate-800">{fmt(metric.amount)}</span>
-        <span className="shrink-0 text-[7px] leading-tight text-slate-400">{fmt(metric.bills)} ບິນ</span>
+        <span className="shrink-0 text-[7px] leading-tight text-slate-400">{fmt(metric.bills)} Bills</span>
       </div>
     </div>
   )
@@ -658,7 +658,7 @@ export default function DebtManagement() {
               <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${TERM_CARD_STYLE.outstanding.icon}`}>
                 <TermIcon keyName="outstanding" />
               </span>
-              <span className="block min-w-0 truncate text-[9px] font-semibold leading-tight text-slate-500">ຈຳນວນໜີ້ທີ່ຍັງຄ້າງ</span>
+              <span className="block min-w-0 truncate text-[9px] font-semibold leading-tight text-slate-500">Outstanding Debt</span>
               </div>
               <span className={`mt-1 block truncate font-mono text-[13px] font-extrabold leading-tight ${TERM_CARD_STYLE.outstanding.count}`}>{fmt(outstandingSummary.amount)}</span>
               <span className="mt-0.5 block text-[10px] text-slate-400">{fmt(outstandingSummary.bills)} Bills</span>
@@ -670,7 +670,7 @@ export default function DebtManagement() {
               <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${TERM_CARD_STYLE.paid_today.icon}`}>
                 <TermIcon keyName="paid_today" />
               </span>
-              <span className="block min-w-0 truncate text-[9px] font-semibold leading-tight text-slate-500">ຈຳນວນຊຳລະແລ້ວ</span>
+              <span className="block min-w-0 truncate text-[9px] font-semibold leading-tight text-slate-500">Paid Amount</span>
               </div>
               <span className={`mt-1 block truncate font-mono text-[13px] font-extrabold leading-tight ${TERM_CARD_STYLE.paid_today.count}`}>{fmt(paidSummary.amount)}</span>
               <span className="mt-0.5 block text-[10px] text-slate-400">{fmt(paidSummary.bills)} Bills</span>
@@ -688,7 +688,7 @@ export default function DebtManagement() {
                 <span className="truncate text-[10px] font-bold text-slate-500">{channel.label}</span>
               </div>
               <div className={`mt-1 truncate font-mono text-[13px] font-extrabold leading-tight ${channel.value}`}>{fmt(channel.metric.amount)}</div>
-              <div className="mt-0.5 text-[10px] text-slate-400">{fmt(channel.metric.bills)} ບິນ</div>
+              <div className="mt-0.5 text-[10px] text-slate-400">{fmt(channel.metric.bills)} Bills</div>
             </div>
           ))}
         </div>
@@ -733,7 +733,7 @@ export default function DebtManagement() {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h3 className="font-bold text-slate-700 text-sm">Collection Term Summary</h3>
-            <p className="text-xs text-slate-400">ຈຳນວນບິນຕາມ term ສຳລັບທີມ Collection</p>
+            <p className="text-xs text-slate-400">Bill totals by collection term</p>
           </div>
           <select
             value={statusFilter}
@@ -779,153 +779,85 @@ export default function DebtManagement() {
       </div>
 
       {/* Filters */}
-      <div className="bg-white rounded-xl border border-slate-100 p-3 flex flex-nowrap gap-2 items-end overflow-x-auto" data-pdf-hidden="true">
-        <div className="w-[260px] shrink-0">
-          <label className="block text-xs font-semibold text-slate-500 mb-1">ຄົ້ນຫາ</label>
+      <div className="relative bg-white rounded-xl border border-slate-100 p-2 grid grid-cols-[minmax(120px,1.6fr)_minmax(82px,1fr)_minmax(82px,1fr)_minmax(70px,.9fr)_minmax(70px,.85fr)_minmax(95px,1.05fr)_minmax(105px,1.15fr)_minmax(64px,.75fr)] gap-1.5 items-end" data-pdf-hidden="true">
+        <div className="min-w-0">
+          <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">ຄົ້ນຫາ</label>
           <input
             type="text" value={search} onChange={e => { setSearch(e.target.value); setPage(0) }}
             placeholder="ເລກໃບບິນ, ຊື່ຄົນເຈັບ..."
-            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100"
+            className="h-9 w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100"
           />
         </div>
-        <div className="w-[210px] shrink-0">
-          <label className="block text-xs font-semibold text-slate-500 mb-1">ສະຖານະ</label>
+        <div className="min-w-0">
+          <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">ສະຖານະ</label>
           <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(0) }}
-            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            className="h-9 w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:border-primary-400">
             <option value="">ທັງໝົດ</option>
             {COLLECTION_STATUS_OPTIONS.map(option => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
         </div>
-        <div className="w-[170px] shrink-0">
-          <label className="block text-xs font-semibold text-slate-500 mb-1">ປະເພດຊຳລະ</label>
+        <div className="min-w-0">
+          <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">ປະເພດຊຳລະ</label>
           <select value={paymentTypeFilter} onChange={e => { setPaymentTypeFilter(e.target.value); setPage(0) }}
-            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            className="h-9 w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:border-primary-400">
             <option value="">ທັງໝົດ</option>
             <option value="Deposit">Deposit</option>
             <option value="Advance">Advance</option>
           </select>
         </div>
-        <div className="w-[170px] shrink-0">
-          <label className="block text-xs font-semibold text-slate-500 mb-1">Aging</label>
+        <div className="min-w-0">
+          <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Aging</label>
           <select value={aging} onChange={e => { setAging(e.target.value); setPage(0) }}
-            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            className="h-9 w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:border-primary-400">
             {AGING_OPTS.map(a => <option key={a} value={a}>{a ? getAgingLabel(a) : 'ທັງໝົດ'}</option>)}
           </select>
         </div>
-        <div className="w-[150px] shrink-0">
-          <label className="block text-xs font-semibold text-slate-500 mb-1">ປະກັນ</label>
+        <div className="min-w-0">
+          <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">ປະກັນ</label>
           <select value={insuranceFilter} onChange={e => { setInsuranceFilter(e.target.value); setPage(0) }}
-            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            className="h-9 w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:border-primary-400">
             <option value="">ທັງໝົດ</option>
             {insuranceOptions.map(name => <option key={name} value={name}>{name}</option>)}
           </select>
         </div>
-        <div className="relative w-[180px] shrink-0">
-          <label className="block text-xs font-semibold text-slate-500 mb-1">ເລືອກບີນວັນທີ</label>
-          <details className="group">
-          <summary
-            className={`flex h-[42px] w-full cursor-pointer list-none items-center justify-between gap-2 rounded-lg border px-3 text-left text-sm outline-none transition-colors [&::-webkit-details-marker]:hidden ${dateFrom || dateTo ? 'border-primary-200 bg-primary-50 text-primary-700' : 'border-slate-200 bg-white text-slate-600 hover:border-primary-300'}`}
-          >
-            <span className="min-w-0">
-              <span className="block truncate font-medium">
-                {dateFrom || dateTo ? `${dateFrom || '...'} - ${dateTo || '...'}` : 'ເລືອກວັນທີ'}
-              </span>
-            </span>
-            <svg className="h-4 w-4 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3M5 11h14M6 21h12a2 2 0 002-2V7a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
-          </summary>
-          <div className="absolute left-0 top-full z-30 mt-2 hidden w-[320px] rounded-xl border border-slate-200 bg-white p-3 shadow-xl shadow-slate-200/70 group-open:block">
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="mb-1 block text-[11px] font-semibold text-slate-500">ຈາກວັນທີ</label>
-                <input
-                  type="date"
-                  value={dateFrom}
-                  onChange={e => { setDateFrom(e.target.value); setPage(0) }}
-                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-[11px] font-semibold text-slate-500">ຫາວັນທີ</label>
-                <input
-                  type="date"
-                  value={dateTo}
-                  onChange={e => { setDateTo(e.target.value); setPage(0) }}
-                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400"
-                />
-              </div>
-            </div>
-            {(dateFrom || dateTo) && (
-              <div className="mt-3 flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => { setDateFrom(''); setDateTo(''); setPage(0) }}
-                  className="px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800"
-                >
-                  ລ້າງ
-                </button>
-              </div>
-            )}
-          </div>
-          </details>
+        <div className="min-w-0">
+          <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">ເລືອກບີນວັນທີ</label>
+          <input
+            type="date"
+            value={dateFrom && dateFrom === dateTo ? dateFrom : dateFrom}
+            onClick={e => e.currentTarget.showPicker?.()}
+            onChange={e => {
+              const value = e.target.value
+              setDateFrom(value)
+              setDateTo(value)
+              setPage(0)
+            }}
+            className={`h-9 w-full min-w-0 rounded-lg border px-2 py-1.5 text-[11px] outline-none transition-colors ${dateFrom ? 'border-primary-200 bg-primary-50 text-primary-700' : 'border-slate-200 bg-white text-slate-600 hover:border-primary-300'} focus:border-primary-400`}
+            title="ເລືອກບີນວັນທີ"
+          />
         </div>
-        <div className="relative w-[200px] shrink-0">
-          <label className="block text-xs font-semibold text-slate-500 mb-1">ວັນທີຊຳລະບີນ</label>
-          <details className="group">
-          <summary
-            className={`flex h-[42px] w-full cursor-pointer list-none items-center justify-between gap-2 rounded-lg border px-3 text-left text-sm outline-none transition-colors [&::-webkit-details-marker]:hidden ${paidDateFrom || paidDateTo ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300'}`}
-          >
-            <span className="min-w-0">
-              <span className="block truncate font-medium">
-                {paidDateFrom || paidDateTo ? `${paidDateFrom || '...'} - ${paidDateTo || '...'}` : 'ເລືອກວັນທີຊຳລະ'}
-              </span>
-            </span>
-            <svg className="h-4 w-4 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m5-9v14a2 2 0 01-2 2H6a2 2 0 01-2-2V5a2 2 0 012-2h8l6 6z" />
-            </svg>
-          </summary>
-          <div className="absolute left-0 top-full z-30 mt-2 hidden w-[320px] rounded-xl border border-slate-200 bg-white p-3 shadow-xl shadow-slate-200/70 group-open:block">
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="mb-1 block text-[11px] font-semibold text-slate-500">ຈາກວັນທີ</label>
-                <input
-                  type="date"
-                  value={paidDateFrom}
-                  onChange={e => { setPaidDateFrom(e.target.value); setPage(0) }}
-                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-[11px] font-semibold text-slate-500">ຫາວັນທີ</label>
-                <input
-                  type="date"
-                  value={paidDateTo}
-                  onChange={e => { setPaidDateTo(e.target.value); setPage(0) }}
-                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
-                />
-              </div>
-            </div>
-            {(paidDateFrom || paidDateTo) && (
-              <div className="mt-3 flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => { setPaidDateFrom(''); setPaidDateTo(''); setPage(0) }}
-                  className="px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800"
-                >
-                  ລ້າງ
-                </button>
-              </div>
-            )}
-          </div>
-          </details>
+        <div className="min-w-0">
+          <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">ວັນທີຊຳລະບີນ</label>
+          <input
+            type="date"
+            value={paidDateFrom && paidDateFrom === paidDateTo ? paidDateFrom : paidDateFrom}
+            onClick={e => e.currentTarget.showPicker?.()}
+            onChange={e => {
+              const value = e.target.value
+              setPaidDateFrom(value)
+              setPaidDateTo(value)
+              setPage(0)
+            }}
+            className={`h-9 w-full min-w-0 rounded-lg border px-2 py-1.5 text-[11px] outline-none transition-colors ${paidDateFrom ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300'} focus:border-emerald-400`}
+            title="ວັນທີຊຳລະບີນ"
+          />
         </div>
-        <div className="w-[130px] shrink-0">
-          <label className="block text-xs font-semibold text-slate-500 mb-1">ຈຳນວນແຖວ</label>
+        <div className="min-w-0">
+          <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">ຈຳນວນແຖວ</label>
           <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(0) }}
-            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            className="h-9 w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:border-primary-400">
             <option value={20}>20 ແຖວ</option>
             <option value={50}>50 ແຖວ</option>
             <option value={100}>100 ແຖວ</option>
@@ -935,7 +867,7 @@ export default function DebtManagement() {
         </div>
         {(search || aging || statusFilter || paymentTypeFilter || insuranceFilter || dateFrom || dateTo || paidDateFrom || paidDateTo) && (
           <button onClick={() => { setSearch(''); setAging(''); setStatusFilter(''); setPaymentTypeFilter(''); setInsuranceFilter(''); setDateFrom(''); setDateTo(''); setPaidDateFrom(''); setPaidDateTo(''); setPage(0) }}
-            className="shrink-0 pb-3 text-xs text-slate-500 hover:text-slate-800 underline">
+            className="absolute -bottom-5 right-2 text-[10px] font-semibold text-slate-500 hover:text-slate-800 underline">
             ລ້າງ
           </button>
         )}
