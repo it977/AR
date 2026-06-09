@@ -77,6 +77,14 @@ function getPaidAmount(row = {}) {
   if (toNumber(row.balance) <= 0) return toNumber(row.debt_amount) || toNumber(row.grand_total)
   return 0
 }
+function getDebtPaymentChannels(row = {}) {
+  return [
+    { label: 'Cash', amount: toNumber(row.cash_paid), className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+    { label: 'BCEL1', amount: toNumber(row.bcel_paid), className: 'bg-red-50 text-red-700 border-red-200' },
+    { label: 'BCEL2', amount: toNumber(row.bcel2_paid), className: 'bg-rose-50 text-rose-700 border-rose-200' },
+    { label: 'LDB', amount: toNumber(row.ldb_paid), className: 'bg-sky-50 text-sky-700 border-sky-200' },
+  ].filter(channel => channel.amount > 0)
+}
 
 const AGING_COLOR = {
   'Current Receivables': 'bg-sky-100 text-sky-700',
@@ -237,6 +245,7 @@ export default function DebtManagement() {
 
   const [modal, setModal]         = useState(null)
   const [editModal, setEditModal] = useState(null)
+  const [viewModal, setViewModal] = useState(null)
   const [delTarget, setDelTarget] = useState(null)
   const [delAll, setDelAll]       = useState(false)
 
@@ -328,11 +337,14 @@ export default function DebtManagement() {
         ['bcel2', Number(row.bcel2_paid) || 0],
         ['ldb', Number(row.ldb_paid) || 0],
       ]
+      const primaryChannel = channelAmounts.reduce((best, current) => (
+        current[1] > best[1] ? current : best
+      ), ['', 0])
       channelAmounts.forEach(([key, amount]) => {
         if (amount <= 0) return
         paidChannels[key].amount += amount
-        paidChannels[key].bills += 1
       })
+      if (primaryChannel[1] > 0) paidChannels[primaryChannel[0]].bills += 1
     })
     const paidAmount = paidRows.reduce((sum, row) => sum + getPaidAmount(row), 0)
 
@@ -875,34 +887,33 @@ export default function DebtManagement() {
 
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1340px]">
+        <div className="w-full">
+          <table className="w-full table-fixed text-[11px]">
             <thead>
-              <tr className="border-b border-slate-100">
-                <th className="table-th">ເລກໃບບິນ</th>
-                <th className="table-th">ວັນທີ</th>
-                <th className="table-th">ວັນທີຊຳລະ</th>
-                <th className="table-th">ຊື່ຄົນເຈັບ</th>
-                <th className="table-th">ປະເພດ</th>
-                <th className="table-th">ປະກັນ</th>
-                <th className="table-th text-right">ຍອດລວມ</th>
-                <th className="table-th text-right">ເກັບໄດ້</th>
-                <th className="table-th text-right">ໜີ້ຄ້າງ</th>
-                <th className="table-th">ວັນສົ່ງເອກະສານ</th>
-                <th className="table-th">Due Date</th>
-                <th className="table-th text-center">ວັນຄ້າງ</th>
-                <th className="table-th">Aging</th>
-                <th className="table-th text-center">ສະຖານະ</th>
-                <th className="table-th">ຜູ້ບັນທຶກໜີ້</th>
-                <th className={actionThCls}>ຈັດການ</th>
+              <tr className="border-b border-slate-100 [&_th]:px-1.5 [&_th]:py-2 [&_th]:text-[10px] [&_th]:font-semibold [&_th]:text-slate-500 [&_th]:uppercase [&_th]:bg-slate-50 [&_th]:whitespace-nowrap">
+                <th className="text-left w-[7%]">ບິນ</th>
+                <th className="text-left w-[6%]">ວັນທີ</th>
+                <th className="text-left w-[6%]">ຊຳລະ</th>
+                <th className="text-left w-[13%]">ຊື່ຄົນເຈັບ</th>
+                <th className="text-left w-[4%]">ປະເພດ</th>
+                <th className="text-left w-[5%]">ປະກັນ</th>
+                <th className="text-right w-[7%]">ຍອດລວມ</th>
+                <th className="text-right w-[7%]">ໜີ້ຄ້າງ</th>
+                <th className="text-left w-[9%]">ປະເພດຊຳລະ</th>
+                <th className="text-left w-[7%]">ສົ່ງເອກະສານ</th>
+                <th className="text-left w-[7%]">Due</th>
+                <th className="text-center w-[4%]">ຄ້າງ</th>
+                <th className="text-left w-[9%]">Aging</th>
+                <th className="text-center w-[6%]">ສະຖານະ</th>
+                <th className="text-center w-[6%]">ຈັດການ</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-50">
+            <tbody className="divide-y divide-slate-50 [&_td]:px-1.5 [&_td]:py-1.5 [&_td]:text-[11px] [&_td]:text-slate-700 [&_td]:align-middle [&_td]:truncate">
               {loading ? (
-                <tr><td colSpan={16} className="table-td text-center py-12 text-slate-400">ກຳລັງໂຫຼດ...</td></tr>
+                <tr><td colSpan={15} className="table-td text-center py-12 text-slate-400">ກຳລັງໂຫຼດ...</td></tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={16} className="table-td text-center py-16">
+                  <td colSpan={15} className="table-td text-center py-16">
                     <div className="flex flex-col items-center gap-2 text-slate-400">
                       <svg className="w-10 h-10 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -913,7 +924,7 @@ export default function DebtManagement() {
                 </tr>
               ) : rows.map(row => {
                 // ໃຊ້ຂໍ້ມູນຈາກ ar_debt: debt_amount, amount_paid, balance
-                const collected = (row.cash_paid || 0) + (row.bcel_paid || 0) + (row.bcel2_paid || 0) + (row.ldb_paid || 0)
+                const collected = getPaidAmount(row)
                 const debt = row.balance || 0
                 const dueDate = row.due_date || calcDueDate(row.submit_date || row.date, insuranceDueDays, row.insurance)
                 const agingRow = { ...row, due_date: dueDate, insuranceDueDays }
@@ -929,75 +940,98 @@ export default function DebtManagement() {
                 const isPaid = debt <= 0
                 const paymentStatus = resolvePaymentStatus(agingRow)
                 const collectionStatus = getCollectionStatus(agingRow, insuranceDueDays)
+                const paymentChannels = getDebtPaymentChannels(row)
                 return (
                   <tr key={row.id} className="group hover:bg-slate-50 transition-colors">
-                    <td className="table-td font-mono text-xs font-semibold text-primary-600">{row.bill_no}</td>
-                    <td className="table-td text-xs">{row.date}</td>
-                    <td className="table-td text-xs">{row.date_paid || <span className="text-slate-300">—</span>}</td>
-                    <td className="table-td max-w-[230px] truncate" title={row.patient_name}>{row.patient_name}</td>
-                    <td className="table-td">
-                      <span className={`badge ${row.customer_type === 'INS' ? 'bg-sky-100 text-sky-700' : row.customer_type === 'B2B' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                    <td className="font-mono font-semibold text-primary-600" title={row.bill_no}>{row.bill_no}</td>
+                    <td>{row.date}</td>
+                    <td>{row.date_paid || <span className="text-slate-300">—</span>}</td>
+                    <td title={row.patient_name}>{row.patient_name}</td>
+                    <td>
+                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${row.customer_type === 'INS' ? 'bg-sky-100 text-sky-700' : row.customer_type === 'B2B' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'}`}>
                         {row.customer_type}
                       </span>
                     </td>
-                    <td className="table-td text-xs text-slate-500">{row.insurance || '—'}</td>
-                    <td className="table-td text-right font-mono text-xs">{fmt(row.grand_total)}</td>
-                    <td className="table-td text-right font-mono text-xs text-emerald-600">{fmt(row.amount_paid || collected)}</td>
-                    <td className="table-td text-right font-mono text-xs font-semibold text-red-600">{fmt(debt)}</td>
-                    <td className="table-td text-xs">
+                    <td className="!text-slate-500" title={row.insurance || ''}>{row.insurance || '—'}</td>
+                    <td className="text-right font-mono">{fmt(row.grand_total)}</td>
+                    <td className="text-right font-mono font-semibold text-red-600">{fmt(debt)}</td>
+                    <td title={paymentChannels.map(c => `${c.label}: ${fmt(c.amount)}`).join(' / ')}>
+                      {paymentChannels.length ? (
+                        <div className="flex flex-wrap gap-0.5">
+                          {paymentChannels.map(channel => (
+                            <span
+                              key={channel.label}
+                              className={`inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0 text-[9px] font-bold ${channel.className}`}
+                            >
+                              <span>{channel.label}:</span>
+                              <span className="font-mono">{fmt(channel.amount)}</span>
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-slate-300">—</span>
+                      )}
+                    </td>
+                    <td>
                       <span className="font-medium text-slate-700">{row.submit_date || <span className="text-slate-300">—</span>}</span>
                     </td>
-                    <td className="table-td text-xs">
+                    <td>
                       <span className={resolvePaymentStatus(agingRow) === 'overdue' ? 'font-semibold text-red-600' : 'text-slate-600'}>
                         {dueDate || <span className="text-slate-300">—</span>}
                       </span>
                     </td>
-                    <td className="table-td text-center">
-                      <span className={`inline-flex items-center justify-center min-w-[48px] px-2 py-0.5 rounded-lg text-xs font-bold ${daysCls}`}>
-                        {days} ມື້
+                    <td className="text-center">
+                      <span className={`inline-flex items-center justify-center px-1.5 py-0 rounded-md text-[10px] font-bold ${daysCls}`}>
+                        {days}ມື້
                       </span>
                     </td>
-                    <td className="table-td">
-                      <span className={`badge text-[10px] ${AGING_COLOR[currentAging] || 'bg-slate-100 text-slate-600'}`}>{getAgingLabel(currentAging)}</span>
+                    <td>
+                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${AGING_COLOR[currentAging] || 'bg-slate-100 text-slate-600'}`} title={getAgingLabel(currentAging)}>{getAgingLabel(currentAging)}</span>
                     </td>
-                    <td className="table-td text-center">
+                    <td className="text-center">
                       {collectionStatus ? (
-                        <span className={`badge text-[10px] ${collectionStatusBadgeClass(collectionStatus.key)}`}>{collectionStatus.shortLabel}</span>
+                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${collectionStatusBadgeClass(collectionStatus.key)}`} title={collectionStatus.shortLabel}>{collectionStatus.shortLabel}</span>
                       ) : paymentStatus ? (
-                        <span className={`badge ${statusBadgeClass(paymentStatus)}`}>{paymentStatus}</span>
+                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${statusBadgeClass(paymentStatus)}`}>{paymentStatus}</span>
                       ) : isPaid ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold bg-emerald-100 text-emerald-700 rounded-lg border border-emerald-200">
-                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                          </svg>
-                          ຊຳລະແລ້ວ
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-semibold bg-emerald-100 text-emerald-700 rounded-md border border-emerald-200">
+                          ✓ ຊຳລະ
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold bg-red-50 text-red-600 rounded-lg border border-red-200">
-                          ຍັງຄ້າງ
+                        <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold bg-red-50 text-red-600 rounded-md border border-red-200">
+                          ຄ້າງ
                         </span>
                       )}
                     </td>
-                    <td className="table-td text-xs text-slate-600 max-w-[120px] truncate" title={row.recorded_by_debt || ''}>{row.recorded_by_debt || <span className="text-slate-300">—</span>}</td>
-                    <td className={actionTdCls}>
-                      <div className="flex items-center justify-center gap-1.5">
+                    <td>
+                      <div className="flex items-center justify-center gap-0.5">
+                        <button
+                          type="button"
+                          onClick={() => setViewModal(row)}
+                          className="p-1 text-slate-500 hover:text-primary-600 hover:bg-primary-50 rounded transition-colors"
+                          title="ເບິ່ງ"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.25 12s3.75-6.75 9.75-6.75S21.75 12 21.75 12s-3.75 6.75-9.75 6.75S2.25 12 2.25 12z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          </svg>
+                        </button>
                         <Can permission={PERMISSIONS.RECORDS_WRITE}>
                         <button
                           onClick={() => setModal({ row })}
-                          className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${isPaid ? 'bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100' : 'bg-primary-50 text-primary-600 border-primary-100 hover:bg-primary-100'}`}
+                          className={`p-1 rounded transition-colors ${isPaid ? 'text-slate-400 hover:bg-slate-100' : 'text-primary-600 hover:bg-primary-50'}`}
                           title="ຊຳລະໜີ້"
                         >
                           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
                           </svg>
-                          ຊຳລະ
                         </button>
                         <button
                           onClick={() => setEditModal(row)}
-                          className="p-1.5 text-slate-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg border border-slate-100 transition-colors"
+                          className="p-1 text-slate-500 hover:text-primary-600 hover:bg-primary-50 rounded transition-colors"
                           title="ແກ້ໄຂ"
                         >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                           </svg>
                         </button>
@@ -1005,10 +1039,10 @@ export default function DebtManagement() {
                         <Can permission={PERMISSIONS.RECORDS_DELETE}>
                         <button
                           onClick={() => setDelTarget(row)}
-                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg border border-slate-100 transition-colors"
+                          className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
                           title="ລົບ"
                         >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                           </svg>
                         </button>
@@ -1042,6 +1076,54 @@ export default function DebtManagement() {
           </div>
         )}
       </div>
+
+      {/* View Modal */}
+      <Modal
+        open={!!viewModal}
+        onClose={() => setViewModal(null)}
+        title={`View Bill: ${viewModal?.bill_no || ''}`}
+        subtitle={viewModal?.patient_name}
+        size="xl"
+      >
+        {viewModal && (() => {
+          const debt = toNumber(viewModal.balance)
+          const collected = getPaidAmount(viewModal)
+          const channels = getDebtPaymentChannels(viewModal)
+          const dueDate = viewModal.due_date || calcDueDate(viewModal.submit_date || viewModal.date, insuranceDueDays, viewModal.insurance)
+          const details = [
+            ['Bill No', viewModal.bill_no],
+            ['Bill Date', viewModal.date],
+            ['Paid Date', viewModal.date_paid || '—'],
+            ['Patient', viewModal.patient_name],
+            ['Customer Type', viewModal.customer_type],
+            ['Insurance', viewModal.insurance || '—'],
+            ['Total', `${fmt(viewModal.grand_total)} LAK`],
+            ['Paid Amount', `${fmt(collected)} LAK`],
+            ['Outstanding Debt', `${fmt(debt)} LAK`],
+            ['Payment Channels', channels.length ? channels.map(channel => `${channel.label}: ${fmt(channel.amount)}`).join(' / ') : '—'],
+            ['Submit Date', viewModal.submit_date || '—'],
+            ['Due Date', dueDate || '—'],
+            ['Recorded By', viewModal.recorded_by_debt || '—'],
+          ]
+          return (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                {details.map(([label, value]) => (
+                  <div key={label} className="rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</div>
+                    <div className="mt-1 break-words text-sm font-semibold text-slate-700">{value || '—'}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-end">
+                <button type="button" onClick={() => setViewModal(null)} className="btn-secondary">
+                  Close
+                </button>
+              </div>
+            </div>
+          )
+        })()}
+      </Modal>
 
       {/* Payment Modal */}
       <Modal
