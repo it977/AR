@@ -93,6 +93,22 @@ const AGING_COLOR = {
   '31-45 Days': 'bg-orange-100 text-orange-700',
   '46-90 Days':'bg-red-100 text-red-700',
 }
+const AGING_SHORT = {
+  'Current Receivables': 'Current',
+  '1-15 Days': '1-15d',
+  '16-30 Days': '16-30d',
+  '31-45 Days': '31-45d',
+  '46-90 Days': '46-90d',
+}
+const STATUS_SHORT = {
+  pending_submission: 'Submit',
+  pending_payment: 'Pending',
+  denied: 'Denied',
+  outstanding: 'Outstanding',
+  current: 'Current',
+  past_due: 'Overdue',
+  paid: 'Paid',
+}
 const COLLECTION_STATUS_OPTIONS = [
   ...COLLECTION_TERMS.map(term => ({ value: term.key, label: term.label })),
   { value: 'paid', label: 'ຊຳລະແລ້ວ' },
@@ -337,14 +353,11 @@ export default function DebtManagement() {
         ['bcel2', Number(row.bcel2_paid) || 0],
         ['ldb', Number(row.ldb_paid) || 0],
       ]
-      const primaryChannel = channelAmounts.reduce((best, current) => (
-        current[1] > best[1] ? current : best
-      ), ['', 0])
       channelAmounts.forEach(([key, amount]) => {
         if (amount <= 0) return
         paidChannels[key].amount += amount
+        paidChannels[key].bills += 1
       })
-      if (primaryChannel[1] > 0) paidChannels[primaryChannel[0]].bills += 1
     })
     const paidAmount = paidRows.reduce((sum, row) => sum + getPaidAmount(row), 0)
 
@@ -903,9 +916,9 @@ export default function DebtManagement() {
                 <th className="text-left w-[7%]">ສົ່ງເອກະສານ</th>
                 <th className="text-left w-[7%]">Due</th>
                 <th className="text-center w-[4%]">ຄ້າງ</th>
-                <th className="text-left w-[9%]">Aging</th>
-                <th className="text-center w-[6%]">ສະຖານະ</th>
-                <th className="text-center w-[6%]">ຈັດການ</th>
+                <th className="text-left w-[6%]">Aging</th>
+                <th className="text-center w-[5%]">ສະຖານະ</th>
+                <th className="text-center w-[10%]">ຈັດການ</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50 [&_td]:px-1.5 [&_td]:py-1.5 [&_td]:text-[11px] [&_td]:text-slate-700 [&_td]:align-middle [&_td]:truncate">
@@ -986,32 +999,32 @@ export default function DebtManagement() {
                       </span>
                     </td>
                     <td>
-                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${AGING_COLOR[currentAging] || 'bg-slate-100 text-slate-600'}`} title={getAgingLabel(currentAging)}>{getAgingLabel(currentAging)}</span>
+                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${AGING_COLOR[currentAging] || 'bg-slate-100 text-slate-600'}`} title={getAgingLabel(currentAging)}>{AGING_SHORT[currentAging] || getAgingLabel(currentAging)}</span>
                     </td>
                     <td className="text-center">
                       {collectionStatus ? (
-                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${collectionStatusBadgeClass(collectionStatus.key)}`} title={collectionStatus.shortLabel}>{collectionStatus.shortLabel}</span>
+                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${collectionStatusBadgeClass(collectionStatus.key)}`} title={collectionStatus.label || collectionStatus.shortLabel}>{STATUS_SHORT[collectionStatus.key] || collectionStatus.shortLabel}</span>
                       ) : paymentStatus ? (
-                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${statusBadgeClass(paymentStatus)}`}>{paymentStatus}</span>
+                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${statusBadgeClass(paymentStatus)}`} title={paymentStatus}>{paymentStatus}</span>
                       ) : isPaid ? (
-                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-semibold bg-emerald-100 text-emerald-700 rounded-md border border-emerald-200">
-                          ✓ ຊຳລະ
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-semibold bg-emerald-100 text-emerald-700 rounded-md border border-emerald-200" title="ຊຳລະແລ້ວ">
+                          ✓ Paid
                         </span>
                       ) : (
-                        <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold bg-red-50 text-red-600 rounded-md border border-red-200">
-                          ຄ້າງ
+                        <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold bg-red-50 text-red-600 rounded-md border border-red-200" title="ຍັງຄ້າງ">
+                          Due
                         </span>
                       )}
                     </td>
                     <td>
-                      <div className="flex items-center justify-center gap-0.5">
+                      <div className="flex items-center justify-center gap-1">
                         <button
                           type="button"
                           onClick={() => setViewModal(row)}
-                          className="p-1 text-slate-500 hover:text-primary-600 hover:bg-primary-50 rounded transition-colors"
-                          title="ເບິ່ງ"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:text-primary-600 hover:bg-slate-50 transition-colors shadow-sm"
+                          title="ເບິ່ງລາຍລະອຽດ"
                         >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.25 12s3.75-6.75 9.75-6.75S21.75 12 21.75 12s-3.75 6.75-9.75 6.75S2.25 12 2.25 12z" />
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                           </svg>
@@ -1019,19 +1032,19 @@ export default function DebtManagement() {
                         <Can permission={PERMISSIONS.RECORDS_WRITE}>
                         <button
                           onClick={() => setModal({ row })}
-                          className={`p-1 rounded transition-colors ${isPaid ? 'text-slate-400 hover:bg-slate-100' : 'text-primary-600 hover:bg-primary-50'}`}
+                          className={`inline-flex h-7 w-7 items-center justify-center rounded-md border bg-white shadow-sm transition-colors ${isPaid ? 'border-slate-200 text-slate-400 hover:bg-slate-50' : 'border-slate-200 text-primary-600 hover:bg-slate-50'}`}
                           title="ຊຳລະໜີ້"
                         >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
                           </svg>
                         </button>
                         <button
                           onClick={() => setEditModal(row)}
-                          className="p-1 text-slate-500 hover:text-primary-600 hover:bg-primary-50 rounded transition-colors"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:text-primary-600 hover:bg-slate-50 transition-colors shadow-sm"
                           title="ແກ້ໄຂ"
                         >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                           </svg>
                         </button>
@@ -1039,10 +1052,10 @@ export default function DebtManagement() {
                         <Can permission={PERMISSIONS.RECORDS_DELETE}>
                         <button
                           onClick={() => setDelTarget(row)}
-                          className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-400 hover:text-red-600 hover:bg-slate-50 transition-colors shadow-sm"
                           title="ລົບ"
                         >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                           </svg>
                         </button>
