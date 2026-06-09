@@ -52,13 +52,31 @@ import {
   calcDueDate,
   computeCollectionTermSummary,
   getCollectionStatus,
+  getDebtCollectedAmount,
   getAgingLabel,
   resolvePaymentStatus,
   statusBadgeClass,
   todayIso,
+  toNumber,
 } from '../lib/debtUtils'
 
 function fmt(v) { return new Intl.NumberFormat().format(v || 0) }
+function dateOnly(value) {
+  if (!value) return ''
+  const text = String(value)
+  const match = text.match(/\d{4}-\d{2}-\d{2}/)
+  if (match) return match[0]
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10)
+}
+function getPaidAmount(row = {}) {
+  const direct = getDebtCollectedAmount(row)
+  if (direct > 0) return direct
+  const debtDelta = toNumber(row.debt_amount) - toNumber(row.balance)
+  if (debtDelta > 0) return debtDelta
+  if (toNumber(row.balance) <= 0) return toNumber(row.debt_amount) || toNumber(row.grand_total)
+  return 0
+}
 
 const AGING_COLOR = {
   'Current Receivables': 'bg-sky-100 text-sky-700',
@@ -137,6 +155,12 @@ const TERM_CARD_STYLE = {
     icon: 'bg-red-100 text-red-700',
     count: 'text-red-700',
   },
+  paid_today: {
+    box: 'border-violet-100 bg-violet-50/70 hover:bg-violet-50',
+    active: 'border-violet-300 bg-violet-50',
+    icon: 'bg-violet-100 text-violet-700',
+    count: 'text-violet-700',
+  },
 }
 
 function TermIcon({ keyName }) {
@@ -166,10 +190,30 @@ function TermIcon({ keyName }) {
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3M5 11h14M6 21h12a2 2 0 002-2V7a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
     </svg>
   )
+  if (keyName === 'paid_today') return (
+    <svg className={base} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+    </svg>
+  )
   return (
     <svg className={base} fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
     </svg>
+  )
+}
+
+function ChannelStrip({ label, metric, color }) {
+  return (
+    <div className="flex min-w-0 items-center justify-between gap-1 rounded-md border border-slate-100 bg-white px-1.5 py-0.5">
+      <div className="flex min-w-0 items-center gap-0.5">
+        <span className={`h-2 w-2 shrink-0 rounded-full ${color}`} />
+        <span className="shrink-0 text-[8px] font-bold leading-tight text-slate-500">{label}</span>
+      </div>
+      <div className="flex min-w-0 flex-col items-end justify-center">
+        <span className="truncate font-mono text-[8px] font-bold leading-tight text-slate-800">{fmt(metric.amount)}</span>
+        <span className="shrink-0 text-[7px] leading-tight text-slate-400">{fmt(metric.bills)} ບິນ</span>
+      </div>
+    </div>
   )
 }
 
@@ -188,6 +232,8 @@ export default function DebtManagement() {
   const [insuranceFilter, setInsuranceFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo]     = useState('')
+  const [paidDateFrom, setPaidDateFrom] = useState('')
+  const [paidDateTo, setPaidDateTo]     = useState('')
 
   const [modal, setModal]         = useState(null)
   const [editModal, setEditModal] = useState(null)
@@ -199,10 +245,22 @@ export default function DebtManagement() {
   const [mismatchDialog, setMismatchDialog] = useState(null)
 
   const [collectionSummary, setCollectionSummary] = useState(() => computeCollectionTermSummary([]))
+  const [paidSummary, setPaidSummary] = useState({
+    bills: 0,
+    amount: 0,
+    channels: {
+      cash: { amount: 0, bills: 0 },
+      bcel: { amount: 0, bills: 0 },
+      bcel2: { amount: 0, bills: 0 },
+      ldb: { amount: 0, bills: 0 },
+    },
+  })
+  const [outstandingSummary, setOutstandingSummary] = useState({ bills: 0, amount: 0 })
   const [insuranceDueDays, setInsuranceDueDays] = useState({})
 
   const insuranceOptions = useMemo(
-    () => Object.keys(insuranceDueDays).filter(Boolean).sort((a, b) => a.localeCompare(b)),
+    () => [...new Set(['GN', ...Object.keys(insuranceDueDays).filter(Boolean)])]
+      .sort((a, b) => a.localeCompare(b)),
     [insuranceDueDays],
   )
 
@@ -232,8 +290,8 @@ export default function DebtManagement() {
       return all
     }
 
-    const summaryColumns = 'id,bill_no,date,insurance,note,submit_date,due_date,balance'
-    const fallbackColumns = 'id,bill_no,date,insurance,submit_date,due_date,balance'
+    const summaryColumns = 'id,bill_no,date,insurance,note,submit_date,due_date,balance,debt_amount,grand_total,date_paid,amount_paid,cash_paid,bcel_paid,bcel2_paid,ldb_paid'
+    const fallbackColumns = 'id,bill_no,date,insurance,submit_date,due_date,balance,debt_amount,grand_total,date_paid,amount_paid,cash_paid,bcel_paid,bcel2_paid,ldb_paid'
     let debtData = []
     try {
       debtData = await fetchAll((f, t) =>
@@ -246,8 +304,49 @@ export default function DebtManagement() {
       )
     }
 
+    const paidRows = debtData.filter(row => {
+      const paidDate = dateOnly(row.date_paid)
+      if (paidDateFrom || paidDateTo) {
+        if (!paidDate) return false
+        if (paidDateFrom && paidDate < paidDateFrom) return false
+        if (paidDateTo && paidDate > paidDateTo) return false
+        return true
+      }
+      return getPaidAmount(row) > 0 || toNumber(row.balance) <= 0
+    })
+    const outstandingRows = debtData.filter(row => toNumber(row.balance) > 0)
+    const paidChannels = {
+      cash: { amount: 0, bills: 0 },
+      bcel: { amount: 0, bills: 0 },
+      bcel2: { amount: 0, bills: 0 },
+      ldb: { amount: 0, bills: 0 },
+    }
+    paidRows.forEach(row => {
+      const channelAmounts = [
+        ['cash', Number(row.cash_paid) || 0],
+        ['bcel', Number(row.bcel_paid) || 0],
+        ['bcel2', Number(row.bcel2_paid) || 0],
+        ['ldb', Number(row.ldb_paid) || 0],
+      ]
+      channelAmounts.forEach(([key, amount]) => {
+        if (amount <= 0) return
+        paidChannels[key].amount += amount
+        paidChannels[key].bills += 1
+      })
+    })
+    const paidAmount = paidRows.reduce((sum, row) => sum + getPaidAmount(row), 0)
+
     setCollectionSummary(computeCollectionTermSummary(debtData, insuranceDueDays))
-  }, [insuranceDueDays])
+    setPaidSummary({
+      bills: paidRows.length,
+      amount: paidAmount,
+      channels: paidChannels,
+    })
+    setOutstandingSummary({
+      bills: outstandingRows.length,
+      amount: outstandingRows.reduce((sum, row) => sum + toNumber(row.balance), 0),
+    })
+  }, [insuranceDueDays, paidDateFrom, paidDateTo])
 
   const fetchRows = useCallback(async () => {
     setLoading(true)
@@ -264,10 +363,13 @@ export default function DebtManagement() {
     if (statusFilter === 'past_due') q = q.gt('balance', 0).lt('due_date', today)
     if (statusFilter === 'paid') q = q.lte('balance', 0)
     if (paymentTypeFilter) q = q.eq('payment_type', paymentTypeFilter)
-    if (insuranceFilter) q = q.eq('insurance', insuranceFilter)
+    if (insuranceFilter === 'GN') q = q.eq('customer_type', 'GN')
+    else if (insuranceFilter) q = q.eq('insurance', insuranceFilter)
     q = applyAgingFilter(q, aging)
     if (dateFrom) q = q.gte('date', dateFrom)
     if (dateTo)   q = q.lte('date', dateTo)
+    if (paidDateFrom) q = q.gte('date_paid', paidDateFrom)
+    if (paidDateTo)   q = q.lte('date_paid', paidDateTo)
 
     const { data, count, error } = await q
       .order('date', { ascending: false })
@@ -281,7 +383,7 @@ export default function DebtManagement() {
       setTotal(count || 0)
     }
     setLoading(false)
-  }, [search, aging, statusFilter, paymentTypeFilter, insuranceFilter, dateFrom, dateTo, page, pageSize])
+  }, [search, aging, statusFilter, paymentTypeFilter, insuranceFilter, dateFrom, dateTo, paidDateFrom, paidDateTo, page, pageSize])
 
   useEffect(() => { fetchRows(); fetchKpis() }, [fetchRows, fetchKpis])
   useEffect(() => { fetchInsuranceDueDays() }, [fetchInsuranceDueDays])
@@ -549,11 +651,48 @@ export default function DebtManagement() {
     <div id="ar-debt-content" className="p-5 space-y-4 text-sm">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h2 className="section-title">ຈັດການໜີ້ຄ້າງຊຳລະ</h2>
-          <p className="text-xs text-slate-500 mt-0.5">ທັງໝົດ {fmt(total)} ລາຍການ</p>
+        <div className="grid w-full grid-cols-6 gap-2">
+          <div className={`min-w-0 rounded-xl border px-2 py-2 ${TERM_CARD_STYLE.outstanding.box}`}>
+            <div className="min-w-0">
+              <div className="flex min-w-0 items-center gap-1.5">
+              <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${TERM_CARD_STYLE.outstanding.icon}`}>
+                <TermIcon keyName="outstanding" />
+              </span>
+              <span className="block min-w-0 truncate text-[9px] font-semibold leading-tight text-slate-500">ຈຳນວນໜີ້ທີ່ຍັງຄ້າງ</span>
+              </div>
+              <span className={`mt-1 block truncate font-mono text-[13px] font-extrabold leading-tight ${TERM_CARD_STYLE.outstanding.count}`}>{fmt(outstandingSummary.amount)}</span>
+              <span className="mt-0.5 block text-[10px] text-slate-400">{fmt(outstandingSummary.bills)} Bills</span>
+            </div>
+          </div>
+          <div className={`min-w-0 rounded-xl border px-2 py-2 ${TERM_CARD_STYLE.paid_today.box}`}>
+            <div className="min-w-0">
+              <div className="flex min-w-0 items-center gap-1.5">
+              <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${TERM_CARD_STYLE.paid_today.icon}`}>
+                <TermIcon keyName="paid_today" />
+              </span>
+              <span className="block min-w-0 truncate text-[9px] font-semibold leading-tight text-slate-500">ຈຳນວນຊຳລະແລ້ວ</span>
+              </div>
+              <span className={`mt-1 block truncate font-mono text-[13px] font-extrabold leading-tight ${TERM_CARD_STYLE.paid_today.count}`}>{fmt(paidSummary.amount)}</span>
+              <span className="mt-0.5 block text-[10px] text-slate-400">{fmt(paidSummary.bills)} Bills</span>
+            </div>
+          </div>
+          {[
+            { label: 'Cash', metric: paidSummary.channels.cash, dot: 'bg-emerald-500', box: 'border-emerald-100 bg-emerald-50/60', value: 'text-emerald-700' },
+            { label: 'BCEL1', metric: paidSummary.channels.bcel, dot: 'bg-red-500', box: 'border-red-100 bg-red-50/60', value: 'text-red-700' },
+            { label: 'BCEL2', metric: paidSummary.channels.bcel2, dot: 'bg-rose-500', box: 'border-rose-100 bg-rose-50/60', value: 'text-rose-700' },
+            { label: 'LDB', metric: paidSummary.channels.ldb, dot: 'bg-sky-500', box: 'border-sky-100 bg-sky-50/60', value: 'text-sky-700' },
+          ].map(channel => (
+            <div key={channel.label} className={`min-w-0 rounded-xl border px-2 py-2 ${channel.box}`}>
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${channel.dot}`} />
+                <span className="truncate text-[10px] font-bold text-slate-500">{channel.label}</span>
+              </div>
+              <div className={`mt-1 truncate font-mono text-[13px] font-extrabold leading-tight ${channel.value}`}>{fmt(channel.metric.amount)}</div>
+              <div className="mt-0.5 text-[10px] text-slate-400">{fmt(channel.metric.bills)} ບິນ</div>
+            </div>
+          ))}
         </div>
-        <div className="flex items-center gap-2" data-pdf-hidden="true">
+        <div className="hidden items-center gap-2" data-pdf-hidden="true">
           <Can permission={PERMISSIONS.RECORDS_DELETE}>
           <button onClick={() => setDelAll(true)}
             className="inline-flex items-center gap-2 px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-sm font-semibold rounded-xl border border-red-200 transition-colors">
@@ -590,8 +729,8 @@ export default function DebtManagement() {
       </div>
 
       {/* Collection term summary */}
-      <div className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h3 className="font-bold text-slate-700 text-sm">Collection Term Summary</h3>
             <p className="text-xs text-slate-400">ຈຳນວນບິນຕາມ term ສຳລັບທີມ Collection</p>
@@ -608,7 +747,7 @@ export default function DebtManagement() {
             ))}
           </select>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2.5">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
           {COLLECTION_TERMS.map(term => {
             const item = collectionSummary[term.key] || { bills: 0, amount: 0 }
             const active = statusFilter === term.key
@@ -618,17 +757,19 @@ export default function DebtManagement() {
                 key={term.key}
                 type="button"
                 onClick={() => { setStatusFilter(active ? '' : term.key); setPage(0) }}
-                className={`text-left rounded-xl border px-3 py-2.5 transition-colors ${active ? style.active : style.box}`}
+                className={`min-h-[70px] text-left rounded-xl border px-2 py-2 transition-colors ${active ? style.active : style.box}`}
               >
-                <div className="flex items-start gap-2.5">
-                  <span className={`mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${style.icon}`}>
+                <div className="flex h-full items-center gap-2">
+                  <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${style.icon}`}>
                     <TermIcon keyName={term.key} />
                   </span>
-                  <span className="min-w-0">
-                    <span className="block text-[10px] font-semibold text-slate-500 leading-snug">{term.label}</span>
-                    <span className={`block text-lg font-extrabold font-mono leading-tight mt-1 ${style.count}`}>{fmt(item.bills)}</span>
-                    <span className="block text-[10px] text-slate-400">Bills</span>
-                    <span className="block text-[11px] font-semibold font-mono text-slate-600 mt-1 truncate">{fmt(item.amount)} LAK</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[10px] font-semibold leading-tight text-slate-500">{term.label}</span>
+                    <span className="mt-1 flex min-w-0 items-baseline gap-1.5">
+                      <span className={`font-mono text-[13px] font-extrabold leading-none ${style.count}`}>{fmt(item.bills)}</span>
+                      <span className="text-[10px] leading-none text-slate-400">Bills</span>
+                    </span>
+                    <span className="mt-1 block truncate font-mono text-[10px] font-semibold leading-none text-slate-600">{fmt(item.amount)} LAK</span>
                   </span>
                 </div>
               </button>
@@ -638,8 +779,8 @@ export default function DebtManagement() {
       </div>
 
       {/* Filters */}
-      <div className="bg-white rounded-xl border border-slate-100 p-3 flex flex-wrap gap-2 items-end" data-pdf-hidden="true">
-        <div className="flex-1 min-w-[180px]">
+      <div className="bg-white rounded-xl border border-slate-100 p-3 flex flex-nowrap gap-2 items-end overflow-x-auto" data-pdf-hidden="true">
+        <div className="w-[260px] shrink-0">
           <label className="block text-xs font-semibold text-slate-500 mb-1">ຄົ້ນຫາ</label>
           <input
             type="text" value={search} onChange={e => { setSearch(e.target.value); setPage(0) }}
@@ -647,54 +788,144 @@ export default function DebtManagement() {
             className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100"
           />
         </div>
-        <div>
+        <div className="w-[210px] shrink-0">
           <label className="block text-xs font-semibold text-slate-500 mb-1">ສະຖານະ</label>
           <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(0) }}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
             <option value="">ທັງໝົດ</option>
             {COLLECTION_STATUS_OPTIONS.map(option => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
         </div>
-        <div>
+        <div className="w-[170px] shrink-0">
           <label className="block text-xs font-semibold text-slate-500 mb-1">ປະເພດຊຳລະ</label>
           <select value={paymentTypeFilter} onChange={e => { setPaymentTypeFilter(e.target.value); setPage(0) }}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
             <option value="">ທັງໝົດ</option>
             <option value="Deposit">Deposit</option>
             <option value="Advance">Advance</option>
           </select>
         </div>
-        <div>
+        <div className="w-[170px] shrink-0">
           <label className="block text-xs font-semibold text-slate-500 mb-1">Aging</label>
           <select value={aging} onChange={e => { setAging(e.target.value); setPage(0) }}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
             {AGING_OPTS.map(a => <option key={a} value={a}>{a ? getAgingLabel(a) : 'ທັງໝົດ'}</option>)}
           </select>
         </div>
-        <div>
+        <div className="w-[150px] shrink-0">
           <label className="block text-xs font-semibold text-slate-500 mb-1">ປະກັນ</label>
           <select value={insuranceFilter} onChange={e => { setInsuranceFilter(e.target.value); setPage(0) }}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
             <option value="">ທັງໝົດ</option>
             {insuranceOptions.map(name => <option key={name} value={name}>{name}</option>)}
           </select>
         </div>
-        <div>
-          <label className="block text-xs font-semibold text-slate-500 mb-1">ຈາກວັນທີ</label>
-          <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setPage(0) }}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400" />
+        <div className="relative w-[180px] shrink-0">
+          <label className="block text-xs font-semibold text-slate-500 mb-1">ເລືອກບີນວັນທີ</label>
+          <details className="group">
+          <summary
+            className={`flex h-[42px] w-full cursor-pointer list-none items-center justify-between gap-2 rounded-lg border px-3 text-left text-sm outline-none transition-colors [&::-webkit-details-marker]:hidden ${dateFrom || dateTo ? 'border-primary-200 bg-primary-50 text-primary-700' : 'border-slate-200 bg-white text-slate-600 hover:border-primary-300'}`}
+          >
+            <span className="min-w-0">
+              <span className="block truncate font-medium">
+                {dateFrom || dateTo ? `${dateFrom || '...'} - ${dateTo || '...'}` : 'ເລືອກວັນທີ'}
+              </span>
+            </span>
+            <svg className="h-4 w-4 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3M5 11h14M6 21h12a2 2 0 002-2V7a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+          </summary>
+          <div className="absolute left-0 top-full z-30 mt-2 hidden w-[320px] rounded-xl border border-slate-200 bg-white p-3 shadow-xl shadow-slate-200/70 group-open:block">
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold text-slate-500">ຈາກວັນທີ</label>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={e => { setDateFrom(e.target.value); setPage(0) }}
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold text-slate-500">ຫາວັນທີ</label>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={e => { setDateTo(e.target.value); setPage(0) }}
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400"
+                />
+              </div>
+            </div>
+            {(dateFrom || dateTo) && (
+              <div className="mt-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => { setDateFrom(''); setDateTo(''); setPage(0) }}
+                  className="px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800"
+                >
+                  ລ້າງ
+                </button>
+              </div>
+            )}
+          </div>
+          </details>
         </div>
-        <div>
-          <label className="block text-xs font-semibold text-slate-500 mb-1">ຫາວັນທີ</label>
-          <input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setPage(0) }}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400" />
+        <div className="relative w-[200px] shrink-0">
+          <label className="block text-xs font-semibold text-slate-500 mb-1">ວັນທີຊຳລະບີນ</label>
+          <details className="group">
+          <summary
+            className={`flex h-[42px] w-full cursor-pointer list-none items-center justify-between gap-2 rounded-lg border px-3 text-left text-sm outline-none transition-colors [&::-webkit-details-marker]:hidden ${paidDateFrom || paidDateTo ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300'}`}
+          >
+            <span className="min-w-0">
+              <span className="block truncate font-medium">
+                {paidDateFrom || paidDateTo ? `${paidDateFrom || '...'} - ${paidDateTo || '...'}` : 'ເລືອກວັນທີຊຳລະ'}
+              </span>
+            </span>
+            <svg className="h-4 w-4 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m5-9v14a2 2 0 01-2 2H6a2 2 0 01-2-2V5a2 2 0 012-2h8l6 6z" />
+            </svg>
+          </summary>
+          <div className="absolute left-0 top-full z-30 mt-2 hidden w-[320px] rounded-xl border border-slate-200 bg-white p-3 shadow-xl shadow-slate-200/70 group-open:block">
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold text-slate-500">ຈາກວັນທີ</label>
+                <input
+                  type="date"
+                  value={paidDateFrom}
+                  onChange={e => { setPaidDateFrom(e.target.value); setPage(0) }}
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold text-slate-500">ຫາວັນທີ</label>
+                <input
+                  type="date"
+                  value={paidDateTo}
+                  onChange={e => { setPaidDateTo(e.target.value); setPage(0) }}
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+                />
+              </div>
+            </div>
+            {(paidDateFrom || paidDateTo) && (
+              <div className="mt-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => { setPaidDateFrom(''); setPaidDateTo(''); setPage(0) }}
+                  className="px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800"
+                >
+                  ລ້າງ
+                </button>
+              </div>
+            )}
+          </div>
+          </details>
         </div>
-        <div>
+        <div className="w-[130px] shrink-0">
           <label className="block text-xs font-semibold text-slate-500 mb-1">ຈຳນວນແຖວ</label>
           <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(0) }}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
             <option value={20}>20 ແຖວ</option>
             <option value={50}>50 ແຖວ</option>
             <option value={100}>100 ແຖວ</option>
@@ -702,9 +933,9 @@ export default function DebtManagement() {
             <option value={500}>500 ແຖວ</option>
           </select>
         </div>
-        {(search || aging || statusFilter || paymentTypeFilter || insuranceFilter || dateFrom || dateTo) && (
-          <button onClick={() => { setSearch(''); setAging(''); setStatusFilter(''); setPaymentTypeFilter(''); setInsuranceFilter(''); setDateFrom(''); setDateTo(''); setPage(0) }}
-            className="text-xs text-slate-500 hover:text-slate-800 underline">
+        {(search || aging || statusFilter || paymentTypeFilter || insuranceFilter || dateFrom || dateTo || paidDateFrom || paidDateTo) && (
+          <button onClick={() => { setSearch(''); setAging(''); setStatusFilter(''); setPaymentTypeFilter(''); setInsuranceFilter(''); setDateFrom(''); setDateTo(''); setPaidDateFrom(''); setPaidDateTo(''); setPage(0) }}
+            className="shrink-0 pb-3 text-xs text-slate-500 hover:text-slate-800 underline">
             ລ້າງ
           </button>
         )}
@@ -713,11 +944,12 @@ export default function DebtManagement() {
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1240px]">
+          <table className="w-full min-w-[1340px]">
             <thead>
               <tr className="border-b border-slate-100">
                 <th className="table-th">ເລກໃບບິນ</th>
                 <th className="table-th">ວັນທີ</th>
+                <th className="table-th">ວັນທີຊຳລະ</th>
                 <th className="table-th">ຊື່ຄົນເຈັບ</th>
                 <th className="table-th">ປະເພດ</th>
                 <th className="table-th">ປະກັນ</th>
@@ -735,10 +967,10 @@ export default function DebtManagement() {
             </thead>
             <tbody className="divide-y divide-slate-50">
               {loading ? (
-                <tr><td colSpan={15} className="table-td text-center py-12 text-slate-400">ກຳລັງໂຫຼດ...</td></tr>
+                <tr><td colSpan={16} className="table-td text-center py-12 text-slate-400">ກຳລັງໂຫຼດ...</td></tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={15} className="table-td text-center py-16">
+                  <td colSpan={16} className="table-td text-center py-16">
                     <div className="flex flex-col items-center gap-2 text-slate-400">
                       <svg className="w-10 h-10 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -769,6 +1001,7 @@ export default function DebtManagement() {
                   <tr key={row.id} className="group hover:bg-slate-50 transition-colors">
                     <td className="table-td font-mono text-xs font-semibold text-primary-600">{row.bill_no}</td>
                     <td className="table-td text-xs">{row.date}</td>
+                    <td className="table-td text-xs">{row.date_paid || <span className="text-slate-300">—</span>}</td>
                     <td className="table-td max-w-[230px] truncate" title={row.patient_name}>{row.patient_name}</td>
                     <td className="table-td">
                       <span className={`badge ${row.customer_type === 'INS' ? 'bg-sky-100 text-sky-700' : row.customer_type === 'B2B' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'}`}>
