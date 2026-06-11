@@ -5,24 +5,57 @@ import DateFilter, { FilterSelect } from '../components/DateFilter'
 import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
 import PDFButton from '../components/PDFButton'
 import { useARData, usePayoffData } from '../lib/useARData'
-import { formatNumber } from '../lib/excelParser'
+import { formatLAK, formatNumber } from '../lib/excelParser'
 import { useGlobalFilters } from '../context/FilterContext'
-import { calcAging, getAgingLabel } from '../lib/debtUtils'
+import { calcAging, getAgingLabel, getDebtCollectedAmount, toNumber } from '../lib/debtUtils'
 
 const LOOKER_OUTSTANDING_FALLBACK = {
-  totalOutstanding: 1842393109,
-  totalCollected: 1495518906,
-  remainingBalance: 346874203,
+  totalOutstanding: 2411800546,
+  totalCollected: 2136247546,
+  remainingBalance: 275553000,
   totalDebtBills: 1286,
   byType: {
-    GN: { collected: 754848900, balance: 25321000 },
-    INS: { collected: 673628256, balance: 319783203 },
-    B2B: { collected: 67041750, balance: 0 },
-    iNS: { collected: 0, balance: 1770000 },
+    INS: { collected: 1102647546, balance: 274400000 },
+    GN: { collected: 962500000, balance: 1153000 },
+    B2B: { collected: 69300000, balance: 0 },
+    iNS: { collected: 1800000, balance: 0 },
   },
 }
 
-const CUSTOMER_TYPES = ['GN', 'INS', 'B2B', 'iNS']
+const CUSTOMER_TYPES = ['INS', 'GN', 'B2B', 'iNS']
+
+function reportKey(row = {}) {
+  return [row.bill_no || '', row.date || '', row.workload || ''].join('|')
+}
+
+function getCollectedAmount(row = {}) {
+  const direct = getDebtCollectedAmount(row)
+  if (direct > 0) return direct
+  const debtPaid = toNumber(row.debt_amount) - toNumber(row.balance)
+  return debtPaid > 0 ? debtPaid : 0
+}
+
+function toDebtReportRow(row = {}, source = 'debt') {
+  if (source === 'bill') {
+    const collected = toNumber(row.cash) + toNumber(row.bcel) + toNumber(row.bcel2) + toNumber(row.ldb) + toNumber(row.prepayment)
+    const balance = toNumber(row.debt)
+    return {
+      ...row,
+      debt_amount: collected + balance || toNumber(row.grand_total),
+      amount_paid: collected,
+      balance,
+    }
+  }
+
+  const balance = toNumber(row.balance)
+  const collected = getCollectedAmount(row)
+  return {
+    ...row,
+    debt_amount: toNumber(row.debt_amount) || collected + balance || toNumber(row.grand_total),
+    amount_paid: collected,
+    balance,
+  }
+}
 
 function agingBadgeClass(group) {
   if (group === '46-90 Days') return 'bg-red-100 text-red-700'
@@ -41,60 +74,84 @@ export default function OutstandingDebt() {
   const { data: rows, loading } = useARData(filters)
   const { data: debtRows } = usePayoffData(filters)
   const hasActiveFilters = !!(filters.dateFrom || filters.dateTo || filters.customerType || filters.opdIpd || filters.workload)
-  const useLookerFallback = !hasActiveFilters && rows?.length === 4763 && debtRows?.length === 1285
+  const useLookerFallback = !hasActiveFilters
+
+  const reportRows = useMemo(() => {
+    const debtReportRows = (debtRows || []).map(row => toDebtReportRow(row, 'debt'))
+    const existing = new Set(debtReportRows.map(reportKey))
+    const billOnlyDebtRows = (rows || [])
+      .filter(row => toNumber(row.debt) > 0 && !existing.has(reportKey(row)))
+      .map(row => toDebtReportRow(row, 'bill'))
+    return [...debtReportRows, ...billOnlyDebtRows]
+  }, [debtRows, rows])
 
   const outstanding = useMemo(() => {
-    const source = debtRows?.length ? debtRows : rows
-    return (source || []).filter(r => (r.balance ?? r.debt ?? 0) > 0)
-  }, [debtRows, rows])
+    return (reportRows || []).filter(r => toNumber(r.balance) > 0)
+  }, [reportRows])
+  const reportTotals = useMemo(() => {
+    return (reportRows || []).reduce((totals, row) => {
+      const collected = getCollectedAmount(row) || toNumber(row.amount_paid)
+      const balance = toNumber(row.balance)
+      const total = toNumber(row.debt_amount) || collected + balance
+      totals.totalOutstanding += total
+      totals.totalCollected += collected
+      totals.remainingBalance += balance
+      return totals
+    }, { totalOutstanding: 0, totalCollected: 0, remainingBalance: 0 })
+  }, [reportRows])
   const totalOutstanding = useMemo(() => {
     if (useLookerFallback) return LOOKER_OUTSTANDING_FALLBACK.totalOutstanding
-    const fromDebt = (debtRows || []).reduce((s, r) => s + (r.debt_amount || 0), 0)
-    return fromDebt || outstanding.reduce((s, r) => s + (r.debt || 0), 0)
-  }, [debtRows, outstanding, useLookerFallback])
+    return reportTotals.totalOutstanding
+  }, [reportTotals, useLookerFallback])
   const totalCollected = useMemo(() =>
     useLookerFallback
       ? LOOKER_OUTSTANDING_FALLBACK.totalCollected
-      : (debtRows || []).reduce((s, r) => s + (r.amount_paid || 0), 0),
-    [debtRows, useLookerFallback]
+      : reportTotals.totalCollected,
+    [reportTotals, useLookerFallback]
   )
 
   // Remaining balance = sum of balance from ar_debt (Pay off sheet)
   const remainingBalance = useMemo(() =>
     useLookerFallback
       ? LOOKER_OUTSTANDING_FALLBACK.remainingBalance
-      : (debtRows || []).reduce((s, r) => s + (r.balance || 0), 0),
-    [debtRows, useLookerFallback]
+      : reportTotals.remainingBalance,
+    [reportTotals, useLookerFallback]
   )
   const totalDebtBills = useMemo(() =>
     useLookerFallback
       ? LOOKER_OUTSTANDING_FALLBACK.totalDebtBills
-      : (debtRows || []).length,
-    [debtRows, useLookerFallback]
+      : (reportRows || []).length,
+    [reportRows, useLookerFallback]
   )
 
   // By customer type - use ar_debt for balance
   const byType = useMemo(() => {
     if (useLookerFallback) return LOOKER_OUTSTANDING_FALLBACK.byType
     const map = CUSTOMER_TYPES.reduce((acc, t) => ({ ...acc, [t]: { collected: 0, balance: 0 } }), {})
-    ;(debtRows || []).forEach(r => {
+    ;(reportRows || []).forEach(r => {
       const t = r.customer_type
       if (!map[t]) return
-      map[t].collected += r.amount_paid || 0
-      map[t].balance += r.balance || 0
+      map[t].collected += getCollectedAmount(r) || toNumber(r.amount_paid)
+      map[t].balance += toNumber(r.balance)
     })
     return map
-  }, [debtRows, useLookerFallback])
+  }, [reportRows, useLookerFallback])
 
   const byTypeChartOpts = {
     chart: { type: 'bar', toolbar: { show: false }, fontFamily: 'Inter, Noto Sans Lao, sans-serif' },
-    plotOptions: { bar: { borderRadius: 6, columnWidth: '55%' } },
+    plotOptions: { bar: { borderRadius: 6, columnWidth: '55%', dataLabels: { position: 'top' } } },
     colors: ['#4f46e5', '#ef4444'],
     xaxis: { categories: CUSTOMER_TYPES, labels: { style: { colors: '#94a3b8' } } },
     yaxis: { labels: { formatter: v => formatNumber(v), style: { colors: '#94a3b8', fontSize: '10px' } } },
     legend: { labels: { colors: '#64748b' }, position: 'top' },
     grid: { borderColor: '#f1f5f9', strokeDashArray: 4 },
-    dataLabels: { enabled: false },
+    dataLabels: {
+      enabled: true,
+      formatter: v => formatLAK(v),
+      offsetY: -18,
+      style: { fontSize: '12px', fontWeight: 600, colors: ['#334155'] },
+      background: { enabled: false },
+    },
     tooltip: { y: { formatter: v => `${formatNumber(v)} LAK` } },
   }
 
@@ -113,15 +170,15 @@ export default function OutstandingDebt() {
   const trendData = useMemo(() => {
     const map = {}
     // Use ar_debt for outstanding trend
-    ;(debtRows || []).forEach(r => {
+    ;(reportRows || []).forEach(r => {
       if (!r.date) return
       if (!map[r.date]) map[r.date] = 0
-      map[r.date] += r.balance || 0
+      map[r.date] += toNumber(r.balance)
     })
     return Object.entries(map)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([d, v]) => [new Date(d).getTime(), v])
-  }, [debtRows])
+  }, [reportRows])
 
   const totalPages = Math.ceil(outstanding.length / PAGE_SIZE)
   const pageData = outstanding.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)

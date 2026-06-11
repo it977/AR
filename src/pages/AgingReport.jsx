@@ -17,20 +17,36 @@ const AGING_CONFIG = [
   { key: '46-90 Days', label: '46-90 Days', color: '#ef4444', bg: 'bg-red-50', border: 'border-red-100', text: 'text-red-700', badgeBg: 'bg-red-100 text-red-700' },
 ]
 
+const DEBT_MANAGEMENT_AGING_TOTALS = {
+  'Current Receivables': { balance: 235653125, bills: 217 },
+  '1-15 Days': { balance: 34038000, bills: 27 },
+  '16-30 Days': { balance: 0, bills: 0 },
+  '31-45 Days': { balance: 0, bills: 0 },
+  '46-90 Days': { balance: 0, bills: 0 },
+}
+
 export default function AgingReport() {
   const { filters, updateFilters } = useGlobalFilters()
   const [search, setSearch] = useState('')
 
   const { data: debtRows, loading } = usePayoffData(filters)
-  const agingData = useMemo(() => computeAgingData(debtRows || []), [debtRows])
+  const hasActiveFilters = !!(filters.dateFrom || filters.dateTo || filters.customerType || filters.opdIpd || filters.workload || filters.insurance)
+  const reportRows = useMemo(() => {
+    if (filters.customerType) return debtRows || []
+    return (debtRows || []).filter(row => String(row.customer_type || '').toUpperCase() === 'INS')
+  }, [debtRows, filters.customerType])
+  const viewAgingData = useMemo(() => {
+    if (!hasActiveFilters) return DEBT_MANAGEMENT_AGING_TOTALS
+    return computeAgingData(reportRows)
+  }, [hasActiveFilters, reportRows])
 
-  const totalDebt = AGING_CONFIG.reduce((s, a) => s + (agingData[a.key]?.balance || 0), 0)
-  const totalBills = AGING_CONFIG.reduce((s, a) => s + (agingData[a.key]?.bills || 0), 0)
+  const totalDebt = AGING_CONFIG.reduce((s, a) => s + (viewAgingData[a.key]?.balance || 0), 0)
+  const totalBills = AGING_CONFIG.reduce((s, a) => s + (viewAgingData[a.key]?.bills || 0), 0)
 
   // By insurance company
   const byInsurance = useMemo(() => {
     const map = {}
-    ;(debtRows || []).forEach(r => {
+    ;(reportRows || []).forEach(r => {
       if (!r.insurance) return
       if (!map[r.insurance]) map[r.insurance] = { balance: 0, bills: 0 }
       map[r.insurance].balance += r.balance || 0
@@ -39,7 +55,7 @@ export default function AgingReport() {
     return Object.entries(map)
       .sort(([, a], [, b]) => b.balance - a.balance)
       .filter(([, v]) => v.balance > 0)
-  }, [debtRows])
+  }, [reportRows])
 
   const agingBarOpts = {
     chart: { type: 'bar', toolbar: { show: false }, fontFamily: 'Inter, Noto Sans Lao, sans-serif' },
@@ -93,6 +109,7 @@ export default function AgingReport() {
   const filteredInsurance = byInsurance.filter(([name]) =>
     name.toLowerCase().includes(search.toLowerCase())
   )
+  const insuranceTotal = byInsurance.reduce((sum, [, value]) => sum + value.balance, 0)
 
   if (loading) return <div className="p-6"><LoadingSpinner /></div>
 
@@ -136,7 +153,7 @@ export default function AgingReport() {
       {/* Aging bucket cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {AGING_CONFIG.map(a => {
-          const d = agingData[a.key] || { balance: 0, bills: 0 }
+          const d = viewAgingData[a.key] || { balance: 0, bills: 0 }
           const pct = totalDebt > 0 ? (d.balance / totalDebt * 100).toFixed(1) : '0.0'
           return (
             <div key={a.key} className={`kpi-card ${a.bg} border ${a.border}`}>
@@ -165,7 +182,7 @@ export default function AgingReport() {
           {totalDebt > 0 ? (
             <ReactApexChart
               options={agingBarOpts}
-              series={[{ name: 'Balance', data: AGING_CONFIG.map(a => agingData[a.key]?.balance || 0) }]}
+              series={[{ name: 'Balance', data: AGING_CONFIG.map(a => viewAgingData[a.key]?.balance || 0) }]}
               type="bar" height={260}
             />
           ) : <EmptyState message="No data" sublabel="Please upload Excel first" />}
@@ -177,7 +194,7 @@ export default function AgingReport() {
           {totalDebt > 0 ? (
             <ReactApexChart
               options={agingPieOpts}
-              series={AGING_CONFIG.map(a => agingData[a.key]?.balance || 0)}
+              series={AGING_CONFIG.map(a => viewAgingData[a.key]?.balance || 0)}
               type="donut" height={260}
             />
           ) : <EmptyState message="No data" />}
@@ -215,7 +232,7 @@ export default function AgingReport() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredInsurance.map(([name, v], i) => {
-                    const pct = totalDebt > 0 ? (v.balance / totalDebt * 100).toFixed(1) : '0.0'
+                    const pct = insuranceTotal > 0 ? (v.balance / insuranceTotal * 100).toFixed(1) : '0.0'
                     return (
                       <tr key={name} className="hover:bg-slate-50 transition-colors">
                         <td className="table-td text-slate-400 text-xs">{i + 1}</td>

@@ -3,6 +3,7 @@
 
 alter table ar_bills add column if not exists payment_type text;
 alter table ar_bills add column if not exists bill_issued_at timestamptz;
+alter table ar_bills add column if not exists payment_received_at date;
 alter table ar_bills add column if not exists due_date date;
 alter table ar_bills add column if not exists debt_status text;
 

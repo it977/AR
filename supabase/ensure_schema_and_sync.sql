@@ -9,6 +9,7 @@ alter table ar_bills add column if not exists recorded_by      text;
 alter table ar_bills add column if not exists recorded_by_debt text;
 alter table ar_bills add column if not exists payment_type     text;
 alter table ar_bills add column if not exists bill_issued_at   timestamptz;
+alter table ar_bills add column if not exists payment_received_at date;
 alter table ar_bills add column if not exists due_date         date;
 alter table ar_insurance_list add column if not exists due_days integer not null default 30;
 alter table ar_debt add column if not exists insite_onsite text;
@@ -62,6 +63,7 @@ select
 from ar_bills b
 left join ar_insurance_list i on i.name = b.insurance
 where b.debt > 0
+  and b.customer_type = 'INS'
   and not exists (select 1 from ar_debt d where d.bill_no = b.bill_no);
 
 -- 4. ສຳເລັດ

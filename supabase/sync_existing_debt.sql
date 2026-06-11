@@ -21,6 +21,7 @@ select
 from ar_bills b
 left join ar_insurance_list i on i.name = b.insurance
 where b.debt > 0
+  and b.customer_type = 'INS'
   and not exists (
     select 1 from ar_debt d where d.bill_no = b.bill_no
   );

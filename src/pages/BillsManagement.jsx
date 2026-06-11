@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { logAction } from '../lib/log'
 import Modal, { ConfirmDialog, ConfirmCodeDialog } from '../components/Modal'
 import BillForm from '../components/forms/BillForm'
+import RecorderSelect from '../components/RecorderSelect'
 import LoadingSpinner from '../components/LoadingSpinner'
 import Can from '../components/Can'
 import { PERMISSIONS } from '../lib/rbac'
@@ -26,11 +27,11 @@ const DAILY_HEADERS = [
   'Supporting & Ancillary Services','Admin & Non-Clinical Services','Home care Services',
   'Total','Discounts','Grand Total','Cash Received',
   'Transfer Payment by BCEL','Transfer Payment by BCEL2','Transfer Payment by LDB',
-  'Outstanding Debt','Prepayment','Payment Type','Due date','Bill Issued At','Note','Recorder',
+  'Outstanding Debt','Prepayment','Payment Type','Due date','Bill Issued At','Payment Received Date','Note','Recorder',
 ]
 const SAMPLE_DAILY = [
   [new Date(2026, 0, 1),'Week 1','8AM-4PM','BILL-001','Insite','OPD','GN','','HN001','ສົມສາຍ','Male',
-   50000,0,0,0,0,0,20000,0,0,0,70000,0,70000,70000,0,0,0,0,0,'Cash','','2026-01-01T08:30','','ມະນີວັນ'],
+   50000,0,0,0,0,0,20000,0,0,0,70000,0,70000,70000,0,0,0,0,0,'Cash','','2026-01-01T08:30','2026-01-01','','ມະນີວັນ'],
 ]
 function downloadTemplate() {
   const wb = XLSX.utils.book_new()
@@ -78,12 +79,17 @@ const AR_BILL_COLUMNS = [
   'svc_opd', 'svc_diag_image', 'svc_ipd', 'svc_surg_ot', 'svc_emergency',
   'svc_chronic', 'svc_pharma', 'svc_support', 'svc_admin', 'svc_homecare',
   'total', 'discounts', 'grand_total', 'cash', 'bcel', 'bcel2', 'ldb',
-  'debt', 'prepayment', 'payment_type', 'bill_issued_at', 'due_date',
+  'debt', 'prepayment', 'payment_type', 'bill_issued_at', 'payment_received_at', 'due_date',
   'debt_status', 'note', 'aging_group', 'recorded_by',
 ]
 const OPTIONAL_AR_BILL_COLUMNS = [
-  'payment_type', 'due_date', 'bill_issued_at', 'recorded_by',
+  'payment_type', 'due_date', 'bill_issued_at', 'payment_received_at', 'recorded_by',
 ]
+const INSURANCE_DEBT_CUSTOMER_TYPES = new Set(['INS'])
+
+function isInsuranceDebtBill(bill = {}) {
+  return INSURANCE_DEBT_CUSTOMER_TYPES.has(bill.customer_type)
+}
 
 function buildArBillPayload(form) {
   const payload = {}
@@ -95,12 +101,62 @@ function buildArBillPayload(form) {
 
 function displayPaymentType(row) {
   if (row.payment_type) return row.payment_type
+  return deriveChannelPaymentType(row)
+}
+
+function deriveChannelPaymentType(row) {
   const cash = Number(row.cash) || 0
   const transfer = (Number(row.bcel) || 0) + (Number(row.bcel2) || 0) + (Number(row.ldb) || 0)
   if (cash > 0 && transfer > 0) return 'Cash/Transfer'
   if (cash > 0) return 'Cash'
   if (transfer > 0) return 'Transfer'
   return ''
+}
+
+function dateOnly(value) {
+  if (!value) return ''
+  return String(value).slice(0, 10)
+}
+
+function displayBillIssuedAt(row = {}) {
+  return dateOnly(row.bill_issued_at || row.date)
+}
+
+function displayPaymentReceivedAt(row = {}) {
+  if (row.payment_received_at) return dateOnly(row.payment_received_at)
+  const hasPayment = getPaidAmount(row) > 0
+  if (hasPayment && !(Number(row.debt) > 0)) return dateOnly(row.bill_issued_at || row.date)
+  return ''
+}
+
+function getPaidAmount(row = {}) {
+  return ['cash', 'bcel', 'bcel2', 'ldb', 'prepayment'].reduce((sum, key) => sum + (Number(row[key]) || 0), 0)
+}
+
+function getOutstandingBalance(row = {}) {
+  const debt = Number(row.debt) || 0
+  if (debt > 0) return debt
+  return Math.max(0, (Number(row.grand_total) || 0) - getPaidAmount(row))
+}
+
+function canUseGeneralPayment(row = {}) {
+  return row.customer_type !== 'INS'
+}
+
+function isGeneralBillPaid(row = {}) {
+  return canUseGeneralPayment(row) && getOutstandingBalance(row) <= 0 && getPaidAmount(row) > 0
+}
+
+async function saveArBillById(id, payload) {
+  let { error } = await supabase.from('ar_bills').update(payload).eq('id', id)
+  if (error && OPTIONAL_AR_BILL_COLUMNS.some(col => error.message?.includes(col))) {
+    const fallbackPayload = { ...payload }
+    OPTIONAL_AR_BILL_COLUMNS.forEach(col => {
+      delete fallbackPayload[col]
+    })
+    ;({ error } = await supabase.from('ar_bills').update(fallbackPayload).eq('id', id))
+  }
+  return error
 }
 
 function applyBillFilters(query, filters) {
@@ -264,6 +320,113 @@ function PaymentChannels({ row }) {
   )
 }
 
+function GNPaymentForm({ row, onSubmit, onCancel, loading }) {
+  const [method, setMethod] = useState('cash')
+  const [amount, setAmount] = useState(getOutstandingBalance(row))
+  const [paidDate, setPaidDate] = useState(todayIso())
+  const [note, setNote] = useState(row.note || '')
+  const [recordedBy, setRecordedBy] = useState(row.recorded_by || '')
+  const [error, setError] = useState('')
+  const outstanding = getOutstandingBalance(row)
+
+  function submit(e) {
+    e.preventDefault()
+    const numericAmount = Number(amount) || 0
+    if (numericAmount <= 0) {
+      setError('ກະລຸນາໃສ່ຈຳນວນເງິນທີ່ຊຳລະ')
+      return
+    }
+    if (numericAmount > outstanding) {
+      setError('ຈຳນວນເງິນຊຳລະຫຼາຍກວ່າໜີ້ຄ້າງ')
+      return
+    }
+    setError('')
+    onSubmit({ method, amount: numericAmount, paidDate, note, recordedBy })
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <div className="grid grid-cols-3 gap-3 rounded-xl border border-slate-100 bg-slate-50 p-4 text-sm">
+        <div>
+          <p className="text-xs text-slate-400">ເລກໃບບິນ</p>
+          <p className="font-mono font-bold text-primary-600">{row.bill_no}</p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-400">ລູກຄ້າ</p>
+          <p className="font-semibold text-slate-700">{row.patient_name}</p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-400">ໜີ້ຄ້າງ</p>
+          <p className="font-mono font-bold text-red-600">{fmt(outstanding)} LAK</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div>
+          <label className="mb-1 block text-xs font-semibold text-slate-600">ວັນທີຮັບເງິນ</label>
+          <input
+            type="date"
+            value={paidDate}
+            onChange={e => setPaidDate(e.target.value)}
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-semibold text-slate-600">ຊ່ອງທາງຊຳລະ</label>
+          <select
+            value={method}
+            onChange={e => setMethod(e.target.value)}
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100"
+          >
+            <option value="cash">Cash</option>
+            <option value="bcel">BCEL</option>
+            <option value="bcel2">BCEL 2</option>
+            <option value="ldb">LDB</option>
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-semibold text-slate-600">ຈຳນວນເງິນ</label>
+          <input
+            type="number"
+            min="0"
+            max={outstanding}
+            step="any"
+            value={amount}
+            onChange={e => setAmount(e.target.value)}
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-right font-mono text-sm outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div>
+          <label className="mb-1 block text-xs font-semibold text-slate-600">ໝາຍເຫດ</label>
+          <input
+            type="text"
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-semibold text-slate-600">ຜູ້ບັນທຶກ</label>
+          <RecorderSelect value={recordedBy} onChange={setRecordedBy} />
+        </div>
+      </div>
+
+      {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+
+      <div className="flex justify-end gap-3 border-t border-slate-100 pt-3">
+        <button type="button" onClick={onCancel} className="btn-secondary">ຍົກເລີກ</button>
+        <button type="submit" disabled={loading} className="btn-primary px-6 disabled:opacity-50">
+          {loading && <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />}
+          ບັນທຶກການຊຳລະ
+        </button>
+      </div>
+    </form>
+  )
+}
+
 export default function BillsManagement() {
   const [rows, setRows]       = useState([])
   const [total, setTotal]     = useState(0)
@@ -284,7 +447,7 @@ export default function BillsManagement() {
 
   const [insuranceDueDays, setInsuranceDueDays] = useState({})
 
-  const [modal, setModal]         = useState(null)  // null | { mode: 'add'|'edit', row?: {} }
+  const [modal, setModal]         = useState(null)  // null | { mode: 'add'|'edit'|'gn-payment', row?: {} }
   const [submitError, setSubmitError] = useState('')
   const [delTarget, setDelTarget] = useState(null)
   const [delAll, setDelAll]       = useState(false)
@@ -404,6 +567,11 @@ export default function BillsManagement() {
       ...form,
       payment_type: form.payment_type,
       bill_issued_at: form.bill_issued_at || null,
+      payment_received_at: form.payment_received_at || (
+        ((form.cash || 0) + (form.bcel || 0) + (form.bcel2 || 0) + (form.ldb || 0) + (form.prepayment || 0)) > 0
+          ? dateOnly(form.bill_issued_at || form.date)
+          : null
+      ),
       due_date: null,
     }
     const payload = buildArBillPayload({ ...normalizedForm, debt_status: resolvePaymentStatus(normalizedForm) })
@@ -426,11 +594,11 @@ export default function BillsManagement() {
     }
     setSaving(false)
     if (!error) {
-      // Auto-sync ໄປ ar_debt ທັນທີ ຖ້າມີໜີ້
-      if ((normalizedForm.debt || 0) > 0) {
+      // Only insurance-style customers go to ar_debt. GN repayments stay in ar_bills.
+      if ((normalizedForm.debt || 0) > 0 && isInsuranceDebtBill(normalizedForm)) {
         try { await upsertArDebt(normalizedForm) } catch (e) {}
       } else if (modal.mode === 'edit') {
-        // ຖ້າແກ້ໄຂໃຫ້ໜີ້ = 0 ໃຫ້ລຶບອອກຈາກ ar_debt
+        // Keep GN out of ar_debt, and remove paid insurance debts.
         try { await supabase.from('ar_debt').delete().eq('bill_no', form.bill_no) } catch (e) {}
       }
       try {
@@ -444,6 +612,50 @@ export default function BillsManagement() {
       } else {
         setSubmitError('ເກີດຂໍ້ຜິດພາດ: ' + error.message)
       }
+    }
+  }
+
+  async function handleGNPayment(payment) {
+    const row = modal?.row
+    if (!row) return
+    setSaving(true)
+
+    const newDebt = Math.max(0, getOutstandingBalance(row) - payment.amount)
+    const updated = {
+      ...row,
+      [payment.method]: (Number(row[payment.method]) || 0) + payment.amount,
+      debt: newDebt,
+      note: payment.note,
+      recorded_by: payment.recordedBy || row.recorded_by || '',
+      payment_received_at: payment.paidDate || todayIso(),
+    }
+    updated.payment_type = deriveChannelPaymentType(updated) || null
+    updated.debt_status = resolvePaymentStatus(updated)
+
+    const error = await saveArBillById(row.id, buildArBillPayload(updated))
+
+    if (!error) {
+      try { await supabase.from('ar_debt').delete().eq('bill_no', row.bill_no) } catch (e) {}
+      try {
+        await logAction({
+          action: 'ຮັບຊຳລະ GN',
+          bill_no: row.bill_no,
+          patient_name: row.patient_name,
+          amount: payment.amount,
+          details: `${CHANNEL_LABEL[payment.method]} · ${payment.paidDate || todayIso()}`,
+          recorder: payment.recordedBy,
+        })
+      } catch (e) {}
+    }
+
+    setSaving(false)
+    if (!error) {
+      setModal(null)
+      fetchRows()
+      fetchBillSummary()
+    } else {
+      setSubmitError('ເກີດຂໍ້ຜິດພາດ: ' + error.message)
+      alert('ເກີດຂໍ້ຜິດພາດ: ' + error.message)
     }
   }
 
@@ -720,11 +932,12 @@ export default function BillsManagement() {
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1180px]">
+          <table className="w-full min-w-[1440px]">
             <thead>
               <tr className="border-b border-slate-100">
                 <th className="table-th">ເລກໃບບິນ</th>
-                <th className="table-th">ວັນທີ</th>
+                <th className="table-th">ວັນທີສ້າງບິນ</th>
+                <th className="table-th">ວັນທີຮັບເງິນ</th>
                 <th className="table-th">ຊື່ຄົນເຈັບ</th>
                 <th className="table-th">ປະເພດ</th>
                 <th className="table-th">OPD/IPD</th>
@@ -733,18 +946,19 @@ export default function BillsManagement() {
                 <th className="table-th">ທະນາຄານ</th>
                 <th className="table-th">ກະ</th>
                 <th className="table-th">ຜູ້ບັນທຶກ</th>
-                <th className="table-th"></th>
+                <th className="table-th text-center">ຈັດການ</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
               {loading ? (
-                <tr><td colSpan={11} className="table-td text-center py-12 text-slate-400">ກຳລັງໂຫຼດ...</td></tr>
+                <tr><td colSpan={12} className="table-td text-center py-12 text-slate-400">ກຳລັງໂຫຼດ...</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={11} className="table-td text-center py-12 text-slate-400">ບໍ່ມີຂໍ້ມູນ</td></tr>
+                <tr><td colSpan={12} className="table-td text-center py-12 text-slate-400">ບໍ່ມີຂໍ້ມູນ</td></tr>
               ) : rows.map(row => (
                 <tr key={row.id} className="hover:bg-slate-50 transition-colors">
                   <td className="table-td font-mono text-xs font-semibold text-primary-600">{row.bill_no}</td>
-                  <td className="table-td text-xs">{row.date}</td>
+                  <td className="table-td text-xs">{displayBillIssuedAt(row) || <span className="text-slate-300">—</span>}</td>
+                  <td className="table-td text-xs">{displayPaymentReceivedAt(row) || <span className="text-slate-300">—</span>}</td>
                   <td className="table-td">{row.patient_name}</td>
                   <td className="table-td">
                     <span className={`badge ${BADGE[row.customer_type] || 'bg-slate-100 text-slate-600'}`}>
@@ -764,14 +978,33 @@ export default function BillsManagement() {
                   <td className="table-td text-xs text-slate-500">{row.workload}</td>
                   <td className="table-td text-xs text-slate-600">{row.recorded_by || <span className="text-slate-300">—</span>}</td>
                   <td className="table-td">
-                    <div className="flex items-center gap-1">
+                    <div className="flex min-w-[108px] items-center justify-end gap-2">
+                      {canUseGeneralPayment(row) && (
+                        <Can permission={PERMISSIONS.RECORDS_WRITE}>
+                        <button
+                          onClick={() => { setSubmitError(''); setModal({ mode: 'gn-payment', row }) }}
+                          disabled={isGeneralBillPaid(row)}
+                          className={`inline-flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
+                            isGeneralBillPaid(row)
+                              ? 'cursor-default bg-slate-900 text-white'
+                              : 'border border-emerald-100 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700'
+                          }`}
+                          title={isGeneralBillPaid(row) ? 'ຊຳລະແລ້ວ' : 'ຮັບເງິນ GN'}
+                        >
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7h16v10H4z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M16 12h.01M12 9v6" />
+                          </svg>
+                        </button>
+                        </Can>
+                      )}
                       <Can permission={PERMISSIONS.RECORDS_WRITE}>
                       <button
                         onClick={() => setModal({ mode: 'edit', row })}
-                        className="p-1.5 text-slate-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600"
                         title="ແກ້ໄຂ"
                       >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                         </svg>
                       </button>
@@ -779,10 +1012,10 @@ export default function BillsManagement() {
                       <Can permission={PERMISSIONS.RECORDS_DELETE}>
                       <button
                         onClick={() => setDelTarget(row)}
-                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
                         title="ລົບ"
                       >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                         </svg>
                       </button>
@@ -820,18 +1053,27 @@ export default function BillsManagement() {
       <Modal
         open={!!modal}
         onClose={() => { setModal(null); setSubmitError('') }}
-        title={modal?.mode === 'edit' ? `ແກ້ໄຂ: ${modal.row?.bill_no}` : 'ເພີ່ມໃບບິນໃໝ່'}
-        subtitle={modal?.mode === 'edit' ? `${modal.row?.patient_name} · ${modal.row?.date}` : 'ກະລຸນາໃສ່ຂໍ້ມູນໃຫ້ຄົບຖ້ວນ'}
+        title={modal?.mode === 'gn-payment' ? `ຮັບຊຳລະ GN: ${modal.row?.bill_no}` : (modal?.mode === 'edit' ? `ແກ້ໄຂ: ${modal.row?.bill_no}` : 'ເພີ່ມໃບບິນໃໝ່')}
+        subtitle={modal?.mode === 'gn-payment' ? `${modal.row?.patient_name} · ໜີ້ຄ້າງ ${fmt(modal.row?.debt)} LAK` : (modal?.mode === 'edit' ? `${modal.row?.patient_name} · ${modal.row?.date}` : 'ກະລຸນາໃສ່ຂໍ້ມູນໃຫ້ຄົບຖ້ວນ')}
         size="xl"
       >
-        <BillForm
-          initial={modal?.mode === 'edit' ? modal.row : (modal?.row || {})}
-          onSubmit={handleSubmit}
-          onCancel={() => { setModal(null); setSubmitError('') }}
-          loading={saving}
-          submitError={submitError}
-          insuranceDueDays={insuranceDueDays}
-        />
+        {modal?.mode === 'gn-payment' ? (
+          <GNPaymentForm
+            row={modal.row}
+            onSubmit={handleGNPayment}
+            onCancel={() => { setModal(null); setSubmitError('') }}
+            loading={saving}
+          />
+        ) : (
+          <BillForm
+            initial={modal?.mode === 'edit' ? modal.row : (modal?.row || {})}
+            onSubmit={handleSubmit}
+            onCancel={() => { setModal(null); setSubmitError('') }}
+            loading={saving}
+            submitError={submitError}
+            insuranceDueDays={insuranceDueDays}
+          />
+        )}
       </Modal>
 
       {/* Delete single */}

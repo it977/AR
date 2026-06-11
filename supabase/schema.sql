@@ -45,6 +45,7 @@ create table if not exists ar_bills (
   prepayment      numeric(18,2) default 0,
   payment_type    text,
   bill_issued_at  timestamptz,
+  payment_received_at date,
   due_date        date,
   debt_status     text,
   note            text,
@@ -64,6 +65,7 @@ create index if not exists idx_ar_bills_customer_type on ar_bills(customer_type)
 create index if not exists idx_ar_bills_insurance     on ar_bills(insurance);
 create index if not exists idx_ar_bills_aging         on ar_bills(aging_group);
 create index if not exists idx_ar_bills_payment_type  on ar_bills(payment_type);
+create index if not exists idx_ar_bills_payment_received_at on ar_bills(payment_received_at);
 create index if not exists idx_ar_bills_due_date      on ar_bills(due_date);
 
 -- ============================================================

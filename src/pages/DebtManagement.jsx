@@ -116,21 +116,29 @@ const COLLECTION_STATUS_OPTIONS = [
 const actionThCls = 'table-th sticky right-0 z-20 bg-slate-50 text-center shadow-[-10px_0_18px_-16px_rgba(15,23,42,0.45)]'
 const actionTdCls = 'table-td sticky right-0 z-10 bg-white group-hover:bg-slate-50 shadow-[-10px_0_18px_-16px_rgba(15,23,42,0.45)]'
 
-function dateDaysAgo(days) {
-  const date = new Date(todayIso())
-  date.setDate(date.getDate() - days)
-  return date.toISOString().split('T')[0]
+async function fetchAllDebtRows(buildQuery) {
+  const PAGE = 1000
+  let all = []
+  let from = 0
+  let expectedTotal = null
+
+  while (true) {
+    const { data, count, error } = await buildQuery(from, from + PAGE - 1)
+    if (error) throw error
+    if (expectedTotal === null) expectedTotal = count ?? 0
+    if (data?.length) all = all.concat(data)
+    if (!data?.length || all.length >= expectedTotal || data.length < PAGE) break
+    from += PAGE
+  }
+
+  return all
 }
 
-function applyAgingFilter(query, aging) {
-  if (!aging) return query
-  const today = todayIso()
-  if (aging === 'Current Receivables') return query.or(`due_date.is.null,due_date.gte.${today}`)
-  if (aging === '1-15 Days') return query.lt('due_date', today).gte('due_date', dateDaysAgo(15))
-  if (aging === '16-30 Days') return query.lt('due_date', dateDaysAgo(15)).gte('due_date', dateDaysAgo(30))
-  if (aging === '31-45 Days') return query.lt('due_date', dateDaysAgo(30)).gte('due_date', dateDaysAgo(45))
-  if (aging === '46-90 Days') return query.lt('due_date', dateDaysAgo(45))
-  return query
+function matchesAgingFilter(row, aging, insuranceDueDays = {}) {
+  if (!aging) return true
+  if (toNumber(row.balance) <= 0) return false
+  const dueDate = row.due_date || calcDueDate(row.submit_date || row.date, insuranceDueDays, row.insurance)
+  return calcAging({ ...row, due_date: dueDate, insuranceDueDays }) === aging
 }
 
 function collectionStatusBadgeClass(key) {
@@ -140,6 +148,67 @@ function collectionStatusBadgeClass(key) {
   if (key === 'past_due') return 'bg-red-100 text-red-700 border border-red-200'
   if (key === 'pending_payment') return 'bg-sky-100 text-sky-700 border border-sky-200'
   return 'bg-slate-100 text-slate-700 border border-slate-200'
+}
+
+function applyDebtQueryFilters(query, filters) {
+  const {
+    search,
+    statusFilter,
+    paymentTypeFilter,
+    insuranceFilter,
+    dateFrom,
+    dateTo,
+    paidDateFrom,
+    paidDateTo,
+  } = filters
+
+  query = query.eq('customer_type', 'INS')
+  if (search) query = query.or(`bill_no.ilike.%${search}%,patient_name.ilike.%${search}%`)
+  const today = todayIso()
+  if (statusFilter === 'pending_submission') query = query.gt('balance', 0).is('submit_date', null)
+  if (statusFilter === 'pending_payment') query = query.gt('balance', 0).not('submit_date', 'is', null)
+  if (statusFilter === 'denied') query = query.or('note.ilike.%denied%,note.ilike.%reject%,note.ilike.%rejected%,note.ilike.%ປະຕິເສດ%')
+  if (statusFilter === 'outstanding') query = query.gt('balance', 0)
+  if (statusFilter === 'current') query = query.gt('balance', 0).or(`due_date.is.null,due_date.gte.${today}`)
+  if (statusFilter === 'past_due') query = query.gt('balance', 0).lt('due_date', today)
+  if (statusFilter === 'paid') query = query.lte('balance', 0)
+  if (paymentTypeFilter) query = query.eq('payment_type', paymentTypeFilter)
+  if (insuranceFilter) query = query.eq('insurance', insuranceFilter)
+  if (dateFrom) query = query.gte('date', dateFrom)
+  if (dateTo) query = query.lte('date', dateTo)
+  if (paidDateFrom) query = query.gte('date_paid', paidDateFrom)
+  if (paidDateTo) query = query.lte('date_paid', paidDateTo)
+  return query
+}
+
+function buildDebtExportRow(row, insuranceDueDays, index) {
+  const debt = toNumber(row.balance)
+  const dueDate = row.due_date || calcDueDate(row.submit_date || row.date, insuranceDueDays, row.insurance)
+  const agingRow = { ...row, due_date: dueDate, insuranceDueDays }
+  const collectionStatus = getCollectionStatus(agingRow, insuranceDueDays)
+  const paymentStatus = resolvePaymentStatus(agingRow)
+  const currentAging = calcAging(agingRow)
+  const paymentChannels = getDebtPaymentChannels(row)
+    .map(channel => `${channel.label}: ${fmt(channel.amount)}`)
+    .join(' / ')
+
+  return {
+    '#': index + 1,
+    'Bill No': row.bill_no || '',
+    'Bill Date': row.date || '',
+    'Paid Date': row.date_paid || '',
+    'Patient Name': row.patient_name || '',
+    'Customer Type': row.customer_type || '',
+    Insurance: row.insurance || '',
+    'Grand Total': toNumber(row.grand_total),
+    'Outstanding Debt': debt,
+    'Payment Channels': paymentChannels,
+    'Submission Date': row.submit_date || '',
+    'Due Date': dueDate || '',
+    'Overdue Days': calcOverdueDays(agingRow),
+    Aging: getAgingLabel(currentAging),
+    Status: collectionStatus?.label || paymentStatus || (debt <= 0 ? 'Paid' : 'Due'),
+  }
 }
 
 const TERM_CARD_STYLE = {
@@ -248,6 +317,7 @@ export default function DebtManagement() {
   const [pageSize, setPageSize] = useState(50)  // ເພີ່ມ: ເລືອກຈຳນວນແຖວ
   const [loading, setLoading] = useState(false)
   const [saving, setSaving]   = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   const [search, setSearch]     = useState('')
   const [aging, setAging]       = useState('')
@@ -284,7 +354,7 @@ export default function DebtManagement() {
   const [insuranceDueDays, setInsuranceDueDays] = useState({})
 
   const insuranceOptions = useMemo(
-    () => [...new Set(['GN', ...Object.keys(insuranceDueDays).filter(Boolean)])]
+    () => [...new Set(Object.keys(insuranceDueDays).filter(Boolean))]
       .sort((a, b) => a.localeCompare(b)),
     [insuranceDueDays],
   )
@@ -320,12 +390,12 @@ export default function DebtManagement() {
     let debtData = []
     try {
       debtData = await fetchAll((f, t) =>
-        supabase.from('ar_debt').select(summaryColumns, { count: 'exact' }).range(f, t)
+        supabase.from('ar_debt').select(summaryColumns, { count: 'exact' }).eq('customer_type', 'INS').range(f, t)
       )
     } catch (err) {
       if (!String(err.message || '').includes('note')) throw err
       debtData = await fetchAll((f, t) =>
-        supabase.from('ar_debt').select(fallbackColumns, { count: 'exact' }).range(f, t)
+        supabase.from('ar_debt').select(fallbackColumns, { count: 'exact' }).eq('customer_type', 'INS').range(f, t)
       )
     }
 
@@ -375,40 +445,34 @@ export default function DebtManagement() {
 
   const fetchRows = useCallback(async () => {
     setLoading(true)
-    // ດຶງຂໍ້ມູນຈາກ ar_debt (Pay off)
-    let q = supabase.from('ar_debt').select('*', { count: 'exact' })
-
-    if (search)       q = q.or(`bill_no.ilike.%${search}%,patient_name.ilike.%${search}%`)
-    const today = todayIso()
-    if (statusFilter === 'pending_submission') q = q.gt('balance', 0).is('submit_date', null)
-    if (statusFilter === 'pending_payment') q = q.gt('balance', 0).not('submit_date', 'is', null)
-    if (statusFilter === 'denied') q = q.or('note.ilike.%denied%,note.ilike.%reject%,note.ilike.%rejected%,note.ilike.%ປະຕິເສດ%')
-    if (statusFilter === 'outstanding') q = q.gt('balance', 0)
-    if (statusFilter === 'current') q = q.gt('balance', 0).or(`due_date.is.null,due_date.gte.${today}`)
-    if (statusFilter === 'past_due') q = q.gt('balance', 0).lt('due_date', today)
-    if (statusFilter === 'paid') q = q.lte('balance', 0)
-    if (paymentTypeFilter) q = q.eq('payment_type', paymentTypeFilter)
-    if (insuranceFilter === 'GN') q = q.eq('customer_type', 'GN')
-    else if (insuranceFilter) q = q.eq('insurance', insuranceFilter)
-    q = applyAgingFilter(q, aging)
-    if (dateFrom) q = q.gte('date', dateFrom)
-    if (dateTo)   q = q.lte('date', dateTo)
-    if (paidDateFrom) q = q.gte('date_paid', paidDateFrom)
-    if (paidDateTo)   q = q.lte('date_paid', paidDateTo)
-
-    const { data, count, error } = await q
+    const buildQuery = (from, to) => applyDebtQueryFilters(
+      supabase.from('ar_debt').select('*', { count: 'exact' }),
+      { search, aging, statusFilter, paymentTypeFilter, insuranceFilter, dateFrom, dateTo, paidDateFrom, paidDateTo },
+    )
       .order('date', { ascending: false })
       .order('bill_no', { ascending: false })
-      .range(page * pageSize, page * pageSize + pageSize - 1)
-    if (error && statusFilter === 'denied' && String(error.message || '').includes('note')) {
-      setRows([])
-      setTotal(0)
-    } else if (!error) {
-      setRows(data || [])
-      setTotal(count || 0)
+      .range(from, to)
+
+    try {
+      if (aging) {
+        const data = await fetchAllDebtRows(buildQuery)
+        const filtered = data.filter(row => matchesAgingFilter(row, aging, insuranceDueDays))
+        setRows(filtered.slice(page * pageSize, page * pageSize + pageSize))
+        setTotal(filtered.length)
+      } else {
+        const { data, count, error } = await buildQuery(page * pageSize, page * pageSize + pageSize - 1)
+        if (error) throw error
+        setRows(data || [])
+        setTotal(count || 0)
+      }
+    } catch (error) {
+      if (statusFilter === 'denied' && String(error.message || '').includes('note')) {
+        setRows([])
+        setTotal(0)
+      }
     }
     setLoading(false)
-  }, [search, aging, statusFilter, paymentTypeFilter, insuranceFilter, dateFrom, dateTo, paidDateFrom, paidDateTo, page, pageSize])
+  }, [search, aging, statusFilter, paymentTypeFilter, insuranceFilter, dateFrom, dateTo, paidDateFrom, paidDateTo, page, pageSize, insuranceDueDays])
 
   useEffect(() => { fetchRows(); fetchKpis() }, [fetchRows, fetchKpis])
   useEffect(() => { fetchInsuranceDueDays() }, [fetchInsuranceDueDays])
@@ -451,14 +515,20 @@ export default function DebtManagement() {
         ldb: form.ldb || 0,
         debt: form.debt || 0,
         debt_status: form.debt_status,
+        payment_received_at: form.date_paid || null,
         aging_group: form.aging_group,
         note: form.note,
       }
-      // ຢ່າເພີ່ມ recorded_by_debt ຖ້າ schema ບໍ່ມີ — ໃສ່ໃນ try
-      try {
-        await supabase.from('ar_bills').update({ ...billUpdate, recorded_by_debt: form.recorded_by_debt }).eq('bill_no', form.bill_no)
-      } catch (e) {
-        await supabase.from('ar_bills').update(billUpdate).eq('bill_no', form.bill_no)
+      let billPayload = { ...billUpdate, recorded_by_debt: form.recorded_by_debt }
+      let { error: billSyncErr } = await supabase.from('ar_bills').update(billPayload).eq('bill_no', form.bill_no)
+      if (billSyncErr && String(billSyncErr.message || '').includes('recorded_by_debt')) {
+        billPayload = { ...billUpdate }
+        ;({ error: billSyncErr } = await supabase.from('ar_bills').update(billPayload).eq('bill_no', form.bill_no))
+      }
+      if (billSyncErr && String(billSyncErr.message || '').includes('payment_received_at')) {
+        const fallbackBillUpdate = { ...billPayload }
+        delete fallbackBillUpdate.payment_received_at
+        await supabase.from('ar_bills').update(fallbackBillUpdate).eq('bill_no', form.bill_no)
       }
     }
 
@@ -469,6 +539,42 @@ export default function DebtManagement() {
     } else alert('Error: ' + debtErr.message)
   }
 
+  async function openEditModal(row) {
+    let bill = null
+    try {
+      let query = supabase
+        .from('ar_bills')
+        .select('*')
+        .eq('bill_no', row.bill_no)
+      if (row.date) query = query.eq('date', row.date)
+      if (row.workload) query = query.eq('workload', row.workload)
+      let { data, error } = await query.maybeSingle()
+      if (error && String(error.message || '').includes('JSON object requested')) {
+        ;({ data, error } = await supabase
+          .from('ar_bills')
+          .select('*')
+          .eq('bill_no', row.bill_no)
+          .limit(1)
+          .maybeSingle())
+      }
+      if (!error) bill = data
+    } catch (_) {}
+
+    setModal({
+      mode: 'edit-payment',
+      row: {
+      ...row,
+      ...(bill || {}),
+      balance: row.balance,
+      debt_amount: row.debt_amount,
+      submit_date: row.submit_date || '',
+      due_date: row.due_date || bill?.due_date || '',
+      date_paid: row.date_paid || '',
+      recorded_by_debt: row.recorded_by_debt || '',
+      },
+    })
+  }
+
   async function handleEditSubmit(form) {
     setSaving(true)
     const newDebt = form.debt || 0
@@ -477,7 +583,7 @@ export default function DebtManagement() {
     const billCols = ['date','week','workload','bill_no','customer_type','insite_onsite','opd_ipd',
       'insurance','hn','patient_name','gender',
       'svc_opd','svc_diag_image','svc_ipd','svc_surg_ot','svc_emergency','svc_chronic','svc_pharma','svc_support','svc_admin','svc_homecare',
-      'total','discounts','grand_total','cash','bcel','bcel2','ldb','debt','prepayment','payment_type','due_date','note','aging_group']
+      'total','discounts','grand_total','cash','bcel','bcel2','ldb','debt','prepayment','payment_type','bill_issued_at','payment_received_at','due_date','note','aging_group','recorded_by']
     const payload = { debt_status }
     for (const k of billCols) if (form[k] !== undefined) payload[k] = form[k]
     const { error } = await supabase.from('ar_bills').update(payload).eq('bill_no', form.bill_no)
@@ -559,7 +665,7 @@ export default function DebtManagement() {
         const batch = billNos.slice(i, i + BATCH)
         const { data, error } = await supabase
           .from('ar_bills')
-          .select('bill_no, patient_name, insurance, debt')
+          .select('bill_no, patient_name, insurance, customer_type, debt')
           .in('bill_no', batch)
         if (error) throw error
         data?.forEach(r => {
@@ -576,6 +682,9 @@ export default function DebtManagement() {
         if (!bill) {
           rowIssues.push({ type: 'not_found', text: 'ບໍ່ມີໃບບິນ' })
         } else {
+          if (bill.customer_type !== 'INS') {
+            rowIssues.push({ type: 'not_insurance', text: 'Only INS bills can be uploaded to Debt Management' })
+          }
           if (norm(r.patient_name) !== norm(bill.patient_name)) {
             rowIssues.push({ type: 'name', text: `ຊື່ບໍ່ກົງ → "${bill.patient_name || '—'}"` })
           }
@@ -666,6 +775,96 @@ export default function DebtManagement() {
     } catch (err) {
       addLog(`✗ ${err.message}`, false)
       setUploadState(s => ({ ...(s || { progress: 0, done: 0, total: 0, fileName: file.name }), error: err.message, log: [...log] }))
+    }
+  }
+
+  async function fetchRowsForExport() {
+    const PAGE = 1000
+    let all = []
+    let from = 0
+    let expectedTotal = null
+
+    while (true) {
+      const q = applyDebtQueryFilters(
+        supabase.from('ar_debt').select('*', { count: 'exact' }),
+        { search, aging, statusFilter, paymentTypeFilter, insuranceFilter, dateFrom, dateTo, paidDateFrom, paidDateTo },
+      )
+      const { data, count, error } = await q
+        .order('date', { ascending: false })
+        .order('bill_no', { ascending: false })
+        .range(from, from + PAGE - 1)
+
+      if (error) {
+        if (statusFilter === 'denied' && String(error.message || '').includes('note')) return []
+        throw error
+      }
+
+      if (expectedTotal === null) expectedTotal = count ?? 0
+      if (data?.length) all = all.concat(data)
+      if (!data?.length || all.length >= expectedTotal || data.length < PAGE) break
+      from += PAGE
+    }
+
+    return aging ? all.filter(row => matchesAgingFilter(row, aging, insuranceDueDays)) : all
+  }
+
+  async function handleExportExcel() {
+    setExporting(true)
+    try {
+      const exportRows = (await fetchRowsForExport()).map((row, index) =>
+        buildDebtExportRow(row, insuranceDueDays, index)
+      )
+
+      if (!exportRows.length) {
+        alert('ບໍ່ມີຂໍ້ມູນສຳລັບ Export')
+        return
+      }
+
+      const wb = XLSX.utils.book_new()
+      const ws = XLSX.utils.json_to_sheet(exportRows)
+      ws['!cols'] = [
+        { wch: 6 },
+        { wch: 14 },
+        { wch: 12 },
+        { wch: 12 },
+        { wch: 28 },
+        { wch: 14 },
+        { wch: 16 },
+        { wch: 16 },
+        { wch: 18 },
+        { wch: 34 },
+        { wch: 15 },
+        { wch: 12 },
+        { wch: 12 },
+        { wch: 18 },
+        { wch: 18 },
+      ]
+      if (ws['!ref']) {
+        ws['!autofilter'] = { ref: ws['!ref'] }
+        const range = XLSX.utils.decode_range(ws['!ref'])
+        for (let row = 1; row <= range.e.r; row += 1) {
+          ;[7, 8, 12].forEach(col => {
+            const cell = ws[XLSX.utils.encode_cell({ r: row, c: col })]
+            if (cell) cell.z = '#,##0'
+          })
+        }
+      }
+      XLSX.utils.book_append_sheet(wb, ws, 'Debt Management')
+      XLSX.writeFile(wb, `AR_Debt_Management_${todayIso()}.xlsx`)
+
+      try {
+        await logAction({
+          action: 'Export Debt Management Excel',
+          action_type: 'report.export',
+          entity_type: 'ar_debt',
+          details: `Exported ${exportRows.length} Debt Management rows to Excel`,
+          metadata: { rows: exportRows.length },
+        })
+      } catch (_) {}
+    } catch (err) {
+      alert('Export Excel ບໍ່ສຳເລັດ: ' + err.message)
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -804,7 +1003,7 @@ export default function DebtManagement() {
       </div>
 
       {/* Filters */}
-      <div className="relative bg-white rounded-xl border border-slate-100 p-2 grid grid-cols-[minmax(120px,1.6fr)_minmax(82px,1fr)_minmax(82px,1fr)_minmax(70px,.9fr)_minmax(70px,.85fr)_minmax(95px,1.05fr)_minmax(105px,1.15fr)_minmax(64px,.75fr)] gap-1.5 items-end" data-pdf-hidden="true">
+      <div className="relative bg-white rounded-xl border border-slate-100 p-2 grid grid-cols-[minmax(120px,1.6fr)_minmax(82px,1fr)_minmax(82px,1fr)_minmax(70px,.9fr)_minmax(70px,.85fr)_minmax(95px,1.05fr)_minmax(105px,1.15fr)_minmax(64px,.75fr)_minmax(86px,.85fr)] gap-1.5 items-end" data-pdf-hidden="true">
         <div className="min-w-0">
           <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">ຄົ້ນຫາ</label>
           <input
@@ -890,6 +1089,23 @@ export default function DebtManagement() {
             <option value={500}>500 ແຖວ</option>
           </select>
         </div>
+        <Can permission={PERMISSIONS.REPORTS_EXPORT}>
+        <div className="min-w-0">
+          <label className="block text-[10px] font-semibold text-transparent mb-0.5">Export</label>
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            disabled={exporting || loading || total === 0}
+            className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-[11px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+            title="Export Excel"
+          >
+            <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
+            </svg>
+            <span className="truncate">{exporting ? 'Exporting...' : 'Export Excel'}</span>
+          </button>
+        </div>
+        </Can>
         {(search || aging || statusFilter || paymentTypeFilter || insuranceFilter || dateFrom || dateTo || paidDateFrom || paidDateTo) && (
           <button onClick={() => { setSearch(''); setAging(''); setStatusFilter(''); setPaymentTypeFilter(''); setInsuranceFilter(''); setDateFrom(''); setDateTo(''); setPaidDateFrom(''); setPaidDateTo(''); setPage(0) }}
             className="absolute -bottom-5 right-2 text-[10px] font-semibold text-slate-500 hover:text-slate-800 underline">
@@ -1040,7 +1256,7 @@ export default function DebtManagement() {
                           </svg>
                         </button>
                         <button
-                          onClick={() => setEditModal(row)}
+                          onClick={() => openEditModal(row)}
                           className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:text-primary-600 hover:bg-slate-50 transition-colors shadow-sm"
                           title="ແກ້ໄຂ"
                         >
@@ -1142,7 +1358,7 @@ export default function DebtManagement() {
       <Modal
         open={!!modal}
         onClose={() => setModal(null)}
-        title={`ຊຳລະໜີ້: ${modal?.row?.bill_no}`}
+        title={`${modal?.mode === 'edit-payment' ? 'ແກ້ໄຂການຊຳລະ' : 'ຊຳລະໜີ້'}: ${modal?.row?.bill_no}`}
         subtitle={(modal?.row?.balance || 0) <= 0 ? `${modal?.row?.patient_name} · ຊຳລະຄົບແລ້ວ` : `${modal?.row?.patient_name} · ໜີ້ຄ້າງ: ${fmt(modal?.row?.balance)} LAK`}
         size="xl"
       >

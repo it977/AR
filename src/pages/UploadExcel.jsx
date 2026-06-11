@@ -15,7 +15,7 @@ const DAILY_HEADERS = [
   'Supporting & Ancillary Services','Admin & Non-Clinical Services','Home care Services',
   'Total','Discounts','Grand Total','Cash Received',
   'Transfer Payment by BCEL','Transfer Payment by BCEL2','Transfer Payment by LDB',
-  'Outstanding Debt','Prepayment','Payment Type','Due date','Bill Issued At','Note','Aging Group',
+  'Outstanding Debt','Prepayment','Payment Type','Due date','Bill Issued At','Payment Received Date','Note','Aging Group',
 ]
 const PAYOFF_HEADERS = [
   'Date','Week','Workload','Bill No','Insite-Onsite','OPD-IPD',
@@ -31,7 +31,7 @@ const PAYOFF_HEADERS = [
 ]
 const SAMPLE_DAILY = [
   ['2026-01-01','Week 1','8AM-4PM','BILL-001','Insite','OPD','GN','','HN001','ສົມສາຍ','Male',
-   50000,0,0,0,0,0,20000,0,0,0,70000,0,70000,70000,0,0,0,0,0,'Cash','','2026-01-01T08:30','',''],
+   50000,0,0,0,0,0,20000,0,0,0,70000,0,70000,70000,0,0,0,0,0,'Cash','','2026-01-01T08:30','2026-01-01','',''],
 ]
 const SAMPLE_PAYOFF = [
   ['2026-01-01','Week 1','8AM-4PM','BILL-INS001','Insite','OPD','INS','APA','HN002','ນາງສີ','Female',
@@ -208,10 +208,15 @@ export default function UploadExcel() {
     setStep(2); setProgress(0); setUploadLog([])
     try {
       addLog(`ເລີ່ມອັບໂຫຼດ "${file.name}"`)
+      const debtRows = (parsed.debt || []).filter(row => row.customer_type === 'INS')
+      const skippedNonInsDebt = (parsed.debt || []).length - debtRows.length
       const billsTotal = parsed.bills.length
-      const debtTotal  = parsed.debt.length
+      const debtTotal  = debtRows.length
       const cashflowTotal = parsed.cashflow?.length || 0
       const grandTotal = billsTotal + debtTotal + cashflowTotal
+      if (skippedNonInsDebt > 0) {
+        addLog(`Skipped ${formatNumber(skippedNonInsDebt)} non-INS Pay off rows; only INS goes to Debt Management.`, true)
+      }
 
       if (billsTotal > 0) {
         addLog(`ກຳລັງອັບໂຫຼດ ar_bills (${formatNumber(billsTotal)} ແຖວ)...`)
@@ -228,7 +233,7 @@ export default function UploadExcel() {
         addLog(`ກຳລັງອັບໂຫຼດ ar_debt (${formatNumber(debtTotal)} ແຖວ)...`)
         let done = billsTotal
         for (let i = 0; i < debtTotal; i += BATCH_SIZE) {
-          await upsertBatch('ar_debt', parsed.debt.slice(i, i + BATCH_SIZE))
+          await upsertBatch('ar_debt', debtRows.slice(i, i + BATCH_SIZE))
           done += Math.min(BATCH_SIZE, debtTotal - i)
           setProgress(Math.round((done / grandTotal) * 88))
         }

@@ -1,4 +1,4 @@
-import { Navigate, useLocation } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import LoadingSpinner from './LoadingSpinner'
 import { useAuth } from '../context/AuthContext'
 
@@ -30,6 +30,14 @@ export default function ProtectedRoute({ children, permission }) {
 }
 
 export function AccessDenied({ message = 'Your role does not have permission to open this page.' }) {
+  const navigate = useNavigate()
+  const { signOut } = useAuth()
+
+  async function handleSignOut() {
+    await signOut()
+    navigate('/login', { replace: true })
+  }
+
   return (
     <div className="flex min-h-full items-center justify-center p-6">
       <div className="max-w-md rounded-2xl border border-red-100 bg-white p-6 text-center shadow-sm">
@@ -40,6 +48,13 @@ export function AccessDenied({ message = 'Your role does not have permission to 
         </div>
         <h2 className="mt-4 text-lg font-bold text-slate-900">Access denied</h2>
         <p className="mt-2 text-sm text-slate-500">{message}</p>
+        <button
+          type="button"
+          onClick={handleSignOut}
+          className="mt-5 inline-flex items-center justify-center rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-primary-700"
+        >
+          ອອກຈາກລະບົບ
+        </button>
       </div>
     </div>
   )

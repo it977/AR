@@ -45,6 +45,9 @@ const MAP_BILLS = {
   'Bill Issued At': 'bill_issued_at',
   'Bill Issued DateTime': 'bill_issued_at',
   'Bill Issued Date Time': 'bill_issued_at',
+  'Payment Received Date': 'payment_received_at',
+  'Payment Received At': 'payment_received_at',
+  'Received Date': 'payment_received_at',
   'Note': 'note',
   'Aging Group': 'aging_group',
   'Recorder': 'recorded_by',
@@ -102,7 +105,7 @@ const MAP_CASHFLOW = {
   'Outstanding Debt': 'outstanding_debt',
 }
 
-const DATE_COLS = new Set(['date', 'date_paid', 'submit_date', 'due_date', 'payment_1_date', 'payment_2_date', 'payment_3_date'])
+const DATE_COLS = new Set(['date', 'date_paid', 'submit_date', 'due_date', 'payment_received_at', 'payment_1_date', 'payment_2_date', 'payment_3_date'])
 const DATETIME_COLS = new Set(['bill_issued_at'])
 
 const NUMERIC_COLS = new Set([

@@ -140,6 +140,16 @@ function TopCard({ label, sublabel, value, isLAK = true, color = 'indigo' }) {
   )
 }
 
+function formatReportDate(filters = {}) {
+  const from = filters.dateFrom || ''
+  const to = filters.dateTo || ''
+  if (from && to && from === to) return from
+  if (from && to) return `${from} - ${to}`
+  if (from) return `ຈາກ ${from}`
+  if (to) return `ຮອດ ${to}`
+  return 'ທຸກວັນທີ'
+}
+
 export default function DailySales() {
   const { filters, updateFilters } = useGlobalFilters()
   const [selectedCollectionTerm, setSelectedCollectionTerm] = useState('')
@@ -202,7 +212,6 @@ export default function DailySales() {
       ? { ...collectionStats, amount: LOOKER_DAILY_FALLBACK.collectionAmount }
       : collectionStats
   ), [collectionStats, useLookerFallback])
-
   const collectionTermSummary = useMemo(
     () => computeCollectionTermSummary(termDebtRows || []),
     [termDebtRows],
@@ -322,6 +331,9 @@ export default function DailySales() {
         <div>
           <h2 className="text-xl font-bold text-slate-800">Daily Report</h2>
           <p className="text-sm text-slate-500 mt-0.5">Daily sales report - Unit: LAK</p>
+          <p className="mt-1 inline-flex items-center rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">
+            ວັນທີ: {formatReportDate(filters)}
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2" data-pdf-hidden="true">
           <PDFButton elementId="full-report-export" filename="AR_Finance_LXH_Report" label="Download PDF" />
@@ -413,7 +425,7 @@ export default function DailySales() {
             />
             <BreakdownCard
               label="Cash In / Day" sublabel="Daily collected sales"
-              value={dailyIncome} color="green"
+              value={viewKpis.cash} color="green"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>}
             />
             <BreakdownCard
