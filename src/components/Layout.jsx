@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useLanguage } from '../context/LanguageContext'
 import { PERMISSIONS } from '../lib/rbac'
 
 // AR finance navigation items.
@@ -209,11 +210,17 @@ function NavGroup({ label, items, collapsed, defaultOpen = false, isSubgroup = f
 
 export default function Layout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const location = useLocation()
   const { profile, roleLabel, signOut, can } = useAuth()
+  const { language } = useLanguage()
   const visibleArItems = arItems.filter(item => !item.permission || can(item.permission))
   const visibleOtherItems = otherItems.filter(item => !item.permission || can(item.permission))
   const visibleAdminItems = adminItems.filter(item => !item.permission || can(item.permission))
   const collapsed = !sidebarOpen
+  const nextLanguage = language === 'lo' ? 'en' : 'lo'
+  const languageParams = new URLSearchParams(location.search)
+  languageParams.set('lang', nextLanguage)
+  const languageHref = `${location.pathname}?${languageParams.toString()}${location.hash || ''}`
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
@@ -286,6 +293,24 @@ export default function Layout({ children }) {
               </div>
             </div>
           )}
+          <a
+            href={languageHref}
+            data-no-translate
+            className={`nav-item nav-item-inactive mb-1 w-full ${collapsed ? 'justify-center' : 'justify-between'}`}
+            title={language === 'lo' ? 'Switch to English' : 'ປ່ຽນເປັນພາສາລາວ'}
+            aria-label={language === 'lo' ? 'Switch to English' : 'Switch to Lao'}
+            role="button"
+          >
+            <span className="flex items-center gap-2">
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 5.5A18.024 18.024 0 019.588 9m5.912 11l4-9 4 9m-1.5-3h-5" />
+              </svg>
+              {!collapsed && <span className="text-xs font-semibold">Language</span>}
+            </span>
+            <span className="rounded-full bg-primary-600/20 px-2 py-0.5 text-[10px] font-black text-primary-200">
+              {language === 'lo' ? 'LA' : 'EN'}
+            </span>
+          </a>
           <div className="nav-item nav-item-inactive w-full justify-center cursor-default">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 12h16m0 0l-4-4m4 4l-4 4" />

@@ -385,19 +385,9 @@ export default function DebtManagement() {
       return all
     }
 
-    const summaryColumns = 'id,bill_no,date,insurance,note,submit_date,due_date,balance,debt_amount,grand_total,date_paid,amount_paid,cash_paid,bcel_paid,bcel2_paid,ldb_paid'
-    const fallbackColumns = 'id,bill_no,date,insurance,submit_date,due_date,balance,debt_amount,grand_total,date_paid,amount_paid,cash_paid,bcel_paid,bcel2_paid,ldb_paid'
-    let debtData = []
-    try {
-      debtData = await fetchAll((f, t) =>
-        supabase.from('ar_debt').select(summaryColumns, { count: 'exact' }).eq('customer_type', 'INS').range(f, t)
-      )
-    } catch (err) {
-      if (!String(err.message || '').includes('note')) throw err
-      debtData = await fetchAll((f, t) =>
-        supabase.from('ar_debt').select(fallbackColumns, { count: 'exact' }).eq('customer_type', 'INS').range(f, t)
-      )
-    }
+    const debtData = await fetchAll((f, t) =>
+      supabase.from('ar_debt').select('*', { count: 'exact' }).eq('customer_type', 'INS').range(f, t)
+    )
 
     const paidRows = debtData.filter(row => {
       const paidDate = dateOnly(row.date_paid)
@@ -474,7 +464,15 @@ export default function DebtManagement() {
     setLoading(false)
   }, [search, aging, statusFilter, paymentTypeFilter, insuranceFilter, dateFrom, dateTo, paidDateFrom, paidDateTo, page, pageSize, insuranceDueDays])
 
-  useEffect(() => { fetchRows(); fetchKpis() }, [fetchRows, fetchKpis])
+  useEffect(() => {
+    let cancelled = false
+    async function loadDebtPage() {
+      await fetchRows()
+      if (!cancelled) await fetchKpis()
+    }
+    loadDebtPage()
+    return () => { cancelled = true }
+  }, [fetchRows, fetchKpis])
   useEffect(() => { fetchInsuranceDueDays() }, [fetchInsuranceDueDays])
 
   async function handleSubmit(form) {

@@ -1,0 +1,30 @@
+[2m9:06:00 PM[22m [33m[1m[vite][22m[39m [33mwarning: [33mDuplicate key "Upload Excel" in object literal[33m
+48 |    'Download PDF': 'ດາວໂຫຼດ PDF',
+49 |    Template: 'ແບບຟອມ',
+50 |    'Upload Excel': 'ອັບໂຫຼດ Excel',
+   |    ^
+51 |    'Export Excel': 'ສົ່ງອອກ Excel',
+52 |    Exporting: 'ກຳລັງສົ່ງອອກ',
+[39m
+  Plugin: [35mvite:esbuild[39m
+  File: [36mC:/Users/asus/Documents/GitHub/AR-main/src/context/LanguageContext.jsx[39m
+[2m9:06:00 PM[22m [33m[1m[vite][22m[39m [33mwarning: [33mDuplicate key "Payment Channels" in object literal[33m
+98 |    Advance: 'ເງິນລ່ວງໜ້າ',
+99 |    'Payment Type': 'ປະເພດຊຳລະ',
+100|    'Payment Channels': 'ຊ່ອງທາງຊຳລະ',
+   |    ^
+101|    'Payment channel analysis - Unit: LAK': 'ວິເຄາະຊ່ອງທາງຊຳລະ - ຫົວໜ່ວຍ: LAK',
+102|    'Payment channel proportion': 'ສັດສ່ວນຊ່ອງທາງຊຳລະ',
+[39m
+  Plugin: [35mvite:esbuild[39m
+  File: [36mC:/Users/asus/Documents/GitHub/AR-main/src/context/LanguageContext.jsx[39m
+[2m9:25:26 PM[22m [33m[1m[vite][22m[39m [33mwarning: [33mDuplicate key "Bills" in object literal[33m
+168|    'Bill No.': 'ເລກບິນ',
+169|    'Bill No': 'ເລກບິນ',
+170|    Bills: 'ບິນ',
+   |    ^
+171|    BILLS: 'ບິນ',
+172|    HN: 'HN',
+[39m
+  Plugin: [35mvite:esbuild[39m
+  File: [36mC:/Users/asus/Documents/GitHub/AR-main/src/context/LanguageContext.jsx[39m
