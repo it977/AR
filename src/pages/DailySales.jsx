@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import ReactApexChart from 'react-apexcharts'
 import DateFilter, { FilterSelect } from '../components/DateFilter'
 import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
@@ -13,37 +13,15 @@ import {
 import { formatLAK, formatNumber } from '../lib/excelParser'
 import PDFButton from '../components/PDFButton'
 import { useGlobalFilters } from '../context/FilterContext'
-import { COLLECTION_TERMS, computeCollectionTermSummary } from '../lib/debtUtils'
 
 const SHIFT_COLORS = ['#4f46e5', '#06b6d4', '#10b981']
 const SHIFT_OPTIONS = [
-  { value: '8AM-4PM', label: '08:00AM-16:00PM' },
-  { value: '4PM-12AM', label: '16:00PM-21:00PM' },
-  { value: '12AM-8AM', label: '21:00PM-08:00AM' },
+  { value: '8AM-4PM', label: '8AM-4PM' },
+  { value: '4PM-12AM', label: '4PM-12AM' },
+  { value: '12AM-8AM', label: '12AM-8AM' },
 ]
 const SHIFTS = SHIFT_OPTIONS.map(shift => shift.value)
 const SHIFT_LABELS = Object.fromEntries(SHIFT_OPTIONS.map(shift => [shift.value, shift.label]))
-
-const LOOKER_DAILY_FALLBACK = {
-  totalSalesGross: 5600135550,
-  totalDiscounts: 17627350,
-  totalSales: 5582508200,
-  totalBills: 4725,
-  uniqueCustomers: 4768,
-  actualIncome: 5223053497,
-  outstandingDebt: 1842393109,
-  dailyIncome: 3740115591,
-  collectionAmount: 1495518906,
-  paidBills: 1659,
-  outstandingBills: 1286,
-  discountedBills: 68,
-  collectionBills: 1001,
-  shifts: {
-    '8AM-4PM': { revenue: 4042410075, bills: 3418 },
-    '4PM-12AM': { revenue: 1269607325, bills: 1070 },
-    '12AM-8AM': { revenue: 267966800, bills: 250 },
-  },
-}
 
 const PAYMENT_METHODS = [
   { key: 'cash',  label: 'Cash', sub: 'Cash' },
@@ -154,19 +132,15 @@ function formatReportDate(filters = {}) {
 
 export default function DailySales() {
   const { filters, updateFilters } = useGlobalFilters()
-  const [selectedCollectionTerm, setSelectedCollectionTerm] = useState('')
 
   const { data: rows,      loading }  = useARData(filters)
   const { data: receiptRows, loading: receiptLoading } = useBillReceiptData(filters)
   // Collection is filtered by date_paid for the cash-flow view.
   const { data: debtRows }            = usePayoffData({ ...filters, payoffDateField: 'date_paid' })
-  const { data: termDebtRows }        = usePayoffData(filters)
 
   const kpis      = useMemo(() => computeKPIs(rows || []), [rows])
   const receiptStats = useMemo(() => computeBillReceiptStats(receiptRows || []), [receiptRows])
   const shiftData = useMemo(() => computeShiftData(rows || []), [rows])
-  const hasActiveFilters = !!(filters.dateFrom || filters.dateTo || filters.workload || filters.customerType)
-  const useLookerFallback = !hasActiveFilters && rows?.length === 4763 && debtRows?.length === 1285
 
   // Collection stats from ar_debt (Pay off sheet)
   const collectionStats = useMemo(() => {
@@ -193,85 +167,20 @@ export default function DailySales() {
     }
   }, [debtRows])
 
-  const viewKpis = useMemo(() => {
-    const base = {
-      ...kpis,
-      cash: receiptStats.cash,
-      bcel: receiptStats.bcel,
-      bcel2: receiptStats.bcel2,
-      ldb: receiptStats.ldb,
-      prepayment: receiptStats.prepayment,
-      actualIncome: receiptStats.amount,
-    }
-    if (!useLookerFallback) return base
-    return {
-      ...base,
-      totalSalesGross: LOOKER_DAILY_FALLBACK.totalSalesGross,
-      totalDiscounts: LOOKER_DAILY_FALLBACK.totalDiscounts,
-      totalSales: LOOKER_DAILY_FALLBACK.totalSales,
-      totalBills: LOOKER_DAILY_FALLBACK.totalBills,
-      uniqueCustomers: LOOKER_DAILY_FALLBACK.uniqueCustomers,
-      outstandingDebt: LOOKER_DAILY_FALLBACK.outstandingDebt,
-      dailyIncome: LOOKER_DAILY_FALLBACK.dailyIncome,
-      paidBills: LOOKER_DAILY_FALLBACK.paidBills,
-      outstandingBills: LOOKER_DAILY_FALLBACK.outstandingBills,
-      discountedBills: LOOKER_DAILY_FALLBACK.discountedBills,
-      collectionBills: LOOKER_DAILY_FALLBACK.collectionBills,
-    }
-  }, [kpis, receiptStats, useLookerFallback])
+  const viewKpis = useMemo(() => ({
+    ...kpis,
+    cash: receiptStats.cash,
+    bcel: receiptStats.bcel,
+    bcel2: receiptStats.bcel2,
+    ldb: receiptStats.ldb,
+    prepayment: receiptStats.prepayment,
+    actualIncome: receiptStats.amount,
+  }), [kpis, receiptStats])
 
-  const viewCollectionStats = useMemo(() => (
-    useLookerFallback
-      ? { ...collectionStats, amount: LOOKER_DAILY_FALLBACK.collectionAmount }
-      : collectionStats
-  ), [collectionStats, useLookerFallback])
-  const collectionTermSummary = useMemo(
-    () => computeCollectionTermSummary(termDebtRows || []),
-    [termDebtRows],
-  )
-  const selectedTermSummary = selectedCollectionTerm
-    ? collectionTermSummary[selectedCollectionTerm]
-    : null
-
-  const viewShiftData = useMemo(() => (
-    useLookerFallback ? LOOKER_DAILY_FALLBACK.shifts : shiftData
-  ), [shiftData, useLookerFallback])
-
-  // Actual Income is the full collected income.
-  // Formula: Daily Income + Collection.
-  // Daily Income = Actual Total Sale - Outstanding Debts.
-  // Collection is income collected from outstanding debt.
-  const dailyIncome = useLookerFallback ? viewKpis.dailyIncome : viewKpis.totalSales - viewKpis.outstandingDebt
-  const actualIncomeTotal = useLookerFallback
-    ? LOOKER_DAILY_FALLBACK.actualIncome
-    : dailyIncome + viewCollectionStats.amount
-
-  // Expected values - calculated dynamically from actual data
-  // Expected values are derived from actual database data.
-  const expectedValues = {
-    // Expected Collection = Outstanding Debt - Remaining Balance (debt not yet collected)
-    // This is calculated based on debt that SHOULD have been collected
-    collection: Math.max(0, viewKpis.outstandingDebt - 7167000), // minus remaining balance
-    // Outstanding Debt from Daily sheet
-    outstandingDebt: viewKpis.outstandingDebt,
-    // Expected Actual Income = Daily Income + Expected Collection
-    actualIncome: dailyIncome + Math.max(0, viewKpis.outstandingDebt - 7167000),
-  }
-
-  // Data quality checks
-  // Data quality checks for Pay off completeness.
-  const dataQuality = {
-    // Check if Collection is significantly lower than expected
-    // Expected collection should be close to Outstanding Debt (minus remaining unpaid)
-    collectionGap: expectedValues.collection - viewCollectionStats.amount,
-    collectionComplete: viewCollectionStats.amount >= expectedValues.collection * 0.8, // Allow 20% variance
-    // Outstanding Debt check
-    outstandingDebtGap: Math.abs(viewKpis.outstandingDebt - expectedValues.outstandingDebt),
-    outstandingDebtMatch: true, // Always matches since we use actual value
-    // Overall income check
-    actualIncomeGap: expectedValues.actualIncome - actualIncomeTotal,
-    actualIncomeMatch: actualIncomeTotal >= expectedValues.actualIncome * 0.8,
-  }
+  const viewCollectionStats = collectionStats
+  const viewShiftData = shiftData
+  const actualIncomeTotal = receiptStats.amount + viewCollectionStats.amount
+  const collectionBillCount = viewCollectionStats.bills || 0
 
   const totalShiftBills = Object.values(viewShiftData).reduce((s, v) => s + v.bills, 0)
   const shiftPcts    = SHIFTS.map(s =>
@@ -299,41 +208,6 @@ export default function DailySales() {
     tooltip: { y: { formatter: v => `${formatNumber(v)} bills` } },
   }
 
-  const dailyTrendOpts = {
-    chart: { type: 'bar', toolbar: { show: false }, fontFamily: 'Inter, Noto Sans Lao, sans-serif', stacked: false },
-    colors: ['#4f46e5', '#ef4444'],
-    plotOptions: { bar: { borderRadius: 6, columnWidth: '55%', dataLabels: { position: 'top' } } },
-    stroke: { width: 0 },
-    xaxis: { type: 'category', labels: { style: { colors: '#94a3b8', fontSize: '11px' } } },
-    yaxis: { labels: { formatter: v => formatLAK(v), style: { colors: '#94a3b8', fontSize: '10px' } } },
-    grid: { borderColor: '#f1f5f9', strokeDashArray: 4 },
-    legend: { labels: { colors: '#64748b' } },
-    tooltip: { y: { formatter: v => `${formatNumber(v)} LAK` } },
-    dataLabels: {
-      enabled: true,
-      formatter: v => formatLAK(v),
-      offsetY: -22,
-      style: { fontSize: '11px', colors: ['#64748b'], fontWeight: 600 },
-    },
-  }
-
-  const dailyByDate = useMemo(() => {
-    if (!rows?.length) return []
-    const map = {}
-    rows.forEach(r => {
-      if (!r.date) return
-      if (!map[r.date]) map[r.date] = { income: 0, debt: 0 }
-      map[r.date].income += r.grand_total || 0
-      map[r.date].debt   += r.debt        || 0
-    })
-    return Object.entries(map).sort(([a], [b]) => a.localeCompare(b)).map(([date, v]) => ({ date, ...v }))
-  }, [rows])
-
-  const trendSeries = [
-    { name: 'Gross Sales',  data: dailyByDate.map(r => ({ x: r.date, y: r.income })) },
-    { name: 'Outstanding Debt',  data: dailyByDate.map(r => ({ x: r.date, y: r.debt }))   },
-  ]
-
   if (loading || receiptLoading) return <div className="p-6"><LoadingSpinner /></div>
 
   return (
@@ -342,8 +216,8 @@ export default function DailySales() {
       {/* -- Header -- */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-800">Daily Report</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Daily sales report - Unit: LAK</p>
+          <h2 className="text-xl font-bold text-slate-800">Daily Sales Report</h2>
+          <p className="text-sm text-slate-500 mt-0.5">Daily Sales Report - Unit: LAK</p>
           <p className="mt-1 inline-flex items-center rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">
             ວັນທີ: {formatReportDate(filters)}
           </p>
@@ -351,7 +225,7 @@ export default function DailySales() {
         <div className="flex flex-wrap items-center gap-2" data-pdf-hidden="true">
           <PDFButton elementId="full-report-export" filename="AR_Finance_LXH_Report" label="Download PDF" />
           <DateFilter filters={filters} onChange={updateFilters} />
-          <FilterSelect label="Shift" value={filters.workload}
+          <FilterSelect label="Workload" value={filters.workload}
             onChange={v => updateFilters({ workload: v })}
             options={SHIFT_OPTIONS} />
           <FilterSelect label="Customer Type" value={filters.customerType}
@@ -360,65 +234,13 @@ export default function DailySales() {
         </div>
       </div>
 
-      {/* Collection term status */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-          <div>
-            <h3 className="section-title">Collection Term Status</h3>
-            <p className="text-xs text-slate-400 mt-0.5">Bill count summary by collection tracking term</p>
-          </div>
-          <select
-            value={selectedCollectionTerm}
-            onChange={e => setSelectedCollectionTerm(e.target.value)}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400"
-            data-pdf-hidden="true"
-          >
-            <option value="">All Terms</option>
-            {COLLECTION_TERMS.map(term => (
-              <option key={term.key} value={term.key}>{term.label}</option>
-            ))}
-          </select>
-        </div>
-          {selectedTermSummary && (
-            <div className="mb-3 rounded-xl border border-primary-100 bg-primary-50 p-3 flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold text-primary-700">{selectedTermSummary.label}</p>
-                <p className="text-[11px] text-slate-500">Selected term</p>
-              </div>
-              <div className="text-right">
-                <p className="text-2xl font-extrabold font-mono text-primary-700">{formatNumber(selectedTermSummary.bills, 0)}</p>
-                <p className="text-[11px] text-slate-500">Bills</p>
-              </div>
-            </div>
-          )}
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-            {COLLECTION_TERMS.map(term => {
-              const item = collectionTermSummary[term.key] || { bills: 0 }
-              const active = selectedCollectionTerm === term.key
-              return (
-                <button
-                  key={term.key}
-                  type="button"
-                  onClick={() => setSelectedCollectionTerm(active ? '' : term.key)}
-                  className={`text-left rounded-xl border p-3 transition-colors ${active ? 'border-primary-300 bg-primary-50' : 'border-slate-100 bg-slate-50/70 hover:bg-slate-50'}`}
-                >
-                  <p className="text-[11px] font-semibold text-slate-500 leading-tight min-h-[28px]">{term.label}</p>
-                  <p className="text-xl font-extrabold font-mono text-slate-800 mt-2">{formatNumber(item.bills, 0)}</p>
-                  <p className="text-[10px] text-slate-400">Bills</p>
-                  <p className="text-[11px] font-semibold font-mono text-slate-600 mt-1 truncate">{formatNumber(item.amount || 0, 0)} LAK</p>
-                </button>
-              )
-            })}
-          </div>
-      </div>
-
-      {/* -- Row 1: 5 Top KPIs (PDF style) -- */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <TopCard label="Gross Sales"  sublabel="Before discounts"     value={viewKpis.totalSalesGross}  color="indigo" />
-        <TopCard label="Discounts"     sublabel="Discount amount"       value={viewKpis.totalDiscounts}    color="orange" />
-        <TopCard label="Net Sales"  sublabel="Actual net sales" value={viewKpis.totalSales}    color="teal" />
-        <TopCard label="Total Bills"  sublabel="Total bill count"     value={viewKpis.totalBills}  isLAK={false} color="blue"   />
-        <TopCard label="Total Customers" sublabel="Total customer count" value={viewKpis.uniqueCustomers} isLAK={false} color="purple" />
+      {/* -- Row 1: Top KPIs (PDF style) -- */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+        <TopCard label="Total Sales" sublabel="Total Sales" value={viewKpis.totalSalesGross} color="indigo" />
+        <TopCard label="Discounts" sublabel="Discounts" value={viewKpis.totalDiscounts} color="orange" />
+        <TopCard label="Actual Total Sale" sublabel="Actual Total Sale" value={viewKpis.totalSales} color="teal" />
+        <TopCard label="Total Bills" sublabel="Total Bills" value={viewKpis.totalBills} isLAK={false} color="blue" />
+        <TopCard label="Total Customers" sublabel="Total Customers" value={viewKpis.uniqueCustomers} isLAK={false} color="purple" />
       </div>
 
       {/* -- Row 2: Two Breakdown Sections -- */}
@@ -428,28 +250,28 @@ export default function DailySales() {
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
           <div className="flex items-center gap-2 mb-4">
             <div className="w-1 h-5 rounded-full bg-indigo-500" />
-            <h3 className="font-bold text-slate-700 text-sm">Sales Breakdown</h3>
+            <h3 className="font-bold text-slate-700 text-sm">Total Sales Breakdown</h3>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <BreakdownCard
-              label="Sale Revenue / Day" sublabel="Net sales revenue"
-              value={viewKpis.totalSales} color="sky"
+              label="Actual Income" sublabel="Cash and transfer received"
+              value={actualIncomeTotal} color="green"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>}
             />
             <BreakdownCard
-              label="Cash In / Day" sublabel="Daily collected sales"
-              value={viewKpis.cash} color="green"
+              label="Outstanding Debts" sublabel="Unpaid balance"
+              value={viewKpis.outstandingDebt} color="red"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>}
             />
             <BreakdownCard
-              label="Collection From Unpaid / Day" sublabel="Pay off collection"
-              value={viewCollectionStats.amount} color="teal"
-              icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>}
-            />
-            <BreakdownCard
-              label="Discount Amount / Day" sublabel="Total discount amount"
+              label="Discounts" sublabel="Total discount amount"
               value={viewKpis.totalDiscounts} color="amber"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" /></svg>}
+            />
+            <BreakdownCard
+              label="Collection" sublabel="Pay off collection"
+              value={viewCollectionStats.amount} color="teal"
+              icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>}
             />
           </div>
         </div>
@@ -458,33 +280,33 @@ export default function DailySales() {
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
           <div className="flex items-center gap-2 mb-4">
             <div className="w-1 h-5 rounded-full bg-emerald-500" />
-            <h3 className="font-bold text-slate-700 text-sm">Bill Breakdown</h3>
+            <h3 className="font-bold text-slate-700 text-sm">Total Bills Breakdown</h3>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <BreakdownCard
-              label="Paid Bill / Day" sublabel="Paid at billing"
+              label="Actual Bills Paid" sublabel="Paid bills"
               value={viewKpis.paidBills} isLAK={false} color="green"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>}
             />
             <BreakdownCard
-              label="Unpaid Bill / Day" sublabel="Under sales revenue"
+              label="Outstanding Bills" sublabel="Unpaid bills"
               value={viewKpis.outstandingBills} isLAK={false} color="red"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>}
             />
             <BreakdownCard
-              label="Discounts Bill / Day" sublabel="Discounted bill count"
+              label="Discounted Bills" sublabel="Discounted bill count"
               value={viewKpis.discountedBills} isLAK={false} color="amber"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>}
             />
             <BreakdownCard
-              label="Collected Bill" sublabel="Unpaid bills collected"
-              value={viewKpis.collectionBills} isLAK={false} color="purple"
+              label="Collection Bills" sublabel="Pay off bill count"
+              value={collectionBillCount} isLAK={false} color="purple"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>}
             />
           </div>
           {/* Collection amount summary row */}
           <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between">
-            <span className="text-xs text-slate-500 font-medium">Collection Amount (Pay off)</span>
+            <span className="text-xs text-slate-500 font-medium">Collection</span>
             <span className="text-sm font-bold text-violet-700">{formatNumber(viewCollectionStats.amount)} LAK</span>
           </div>
         </div>
@@ -499,7 +321,7 @@ export default function DailySales() {
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <p className="font-bold text-slate-700">{SHIFT_LABELS[shift] || shift}</p>
-                  <p className="text-xs text-slate-400">Shift / Shift</p>
+                  <p className="text-xs text-slate-400">Workload</p>
                 </div>
                 <span className="text-2xl font-bold" style={{ color: SHIFT_COLORS[i] }}>
                   {shiftPcts[i]}%
@@ -507,11 +329,11 @@ export default function DailySales() {
               </div>
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-500">Revenue</span>
+                  <span className="text-slate-500">Actual Total Sale</span>
                   <span className="font-semibold text-slate-800">{formatNumber(sd.revenue)} LAK</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-500">billsbills</span>
+                  <span className="text-slate-500">Bill No</span>
                   <span className="font-semibold text-slate-800">{formatNumber(sd.bills, 0)} bills</span>
                 </div>
                 <div className="w-full bg-slate-100 rounded-full h-2 mt-2">
@@ -527,37 +349,29 @@ export default function DailySales() {
       {/* -- Row 4: Charts -- */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <div className="chart-card">
-          <h3 className="section-title mb-1">Revenue by Shift</h3>
-          <p className="text-xs text-slate-400 mb-4">Revenue by Shift</p>
+          <h3 className="section-title mb-1">Time Slot</h3>
+          <p className="text-xs text-slate-400 mb-4">Actual Total Sale by workload</p>
           {rows?.length ? (
             <ReactApexChart
               options={revenueChartOpts}
-              series={[{ name: 'Revenue (LAK)', data: SHIFTS.map(s => viewShiftData[s]?.revenue || 0) }]}
+              series={[{ name: 'Actual Total Sale', data: SHIFTS.map(s => viewShiftData[s]?.revenue || 0) }]}
               type="bar" height={260}
             />
           ) : <EmptyState message="No data" sublabel="Please upload Excel first" />}
         </div>
         <div className="chart-card">
-          <h3 className="section-title mb-1">Bills by Shift</h3>
-          <p className="text-xs text-slate-400 mb-4">Bill count by shift</p>
+          <h3 className="section-title mb-1">Bill No</h3>
+          <p className="text-xs text-slate-400 mb-4">Bill No by workload</p>
           {rows?.length ? (
             <ReactApexChart
               options={billsChartOpts}
-              series={[{ name: 'billsbills', data: SHIFTS.map(s => viewShiftData[s]?.bills || 0) }]}
+              series={[{ name: 'Bill No', data: SHIFTS.map(s => viewShiftData[s]?.bills || 0) }]}
               type="bar" height={260}
             />
           ) : <EmptyState message="No data" sublabel="Please upload Excel first" />}
         </div>
       </div>
 
-      {/* -- Row 5: Daily trend -- */}
-      <div className="chart-card">
-        <h3 className="section-title mb-1">Daily Sales Trend</h3>
-        <p className="text-xs text-slate-400 mb-4">Daily sales trend</p>
-        {dailyByDate.length > 0 ? (
-          <ReactApexChart options={dailyTrendOpts} series={trendSeries} type="bar" height={280} />
-        ) : <EmptyState message="No data" sublabel="Please upload Excel first" />}
-      </div>
     </div>
   )
 }
