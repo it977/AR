@@ -45,6 +45,13 @@ function downloadTemplate() {
 
 const DEFAULT_PAGE_SIZE = 50
 const WORKLOADS = ['8AM-4PM', '4PM-12AM', '12AM-8AM']
+const RETRO_DATE_OPTIONS = [
+  { value: 'all', label: 'ທັງໝົດ' },
+  { value: 'today', label: 'ມື້ນີ້' },
+  { value: 'yesterday', label: 'ມື້ວານ' },
+  { value: 'last7', label: '7 ມື້ຫຼ້າສຸດ' },
+  { value: 'thisMonth', label: 'ເດືອນນີ້' },
+]
 
 function fmt(v) { return new Intl.NumberFormat().format(v || 0) }
 
@@ -67,6 +74,16 @@ const EMPTY_BILL_SUMMARY = {
   transfer: { amount: 0, bills: 0 },
   mixed: { amount: 0, bills: 0 },
   debt: { amount: 0, bills: 0 },
+  banks: {
+    bcel: { amount: 0, bills: 0 },
+    bcel2: { amount: 0, bills: 0 },
+    ldb: { amount: 0, bills: 0 },
+  },
+}
+const EMPTY_RETRO_COLLECTION_SUMMARY = {
+  total: { amount: 0, bills: 0 },
+  cash: { amount: 0, bills: 0 },
+  transfer: { amount: 0, bills: 0 },
   banks: {
     bcel: { amount: 0, bills: 0 },
     bcel2: { amount: 0, bills: 0 },
@@ -116,6 +133,28 @@ function deriveChannelPaymentType(row) {
 function dateOnly(value) {
   if (!value) return ''
   return String(value).slice(0, 10)
+}
+
+function endOfDay(value) {
+  return value ? `${value}T23:59:59.999` : ''
+}
+
+function addDaysIso(value, days) {
+  const date = new Date(`${value}T00:00:00`)
+  date.setDate(date.getDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
+function getRetroDateRange(preset) {
+  const today = todayIso()
+  if (preset === 'today') return { receivedFrom: today, receivedTo: today }
+  if (preset === 'yesterday') {
+    const yesterday = addDaysIso(today, -1)
+    return { receivedFrom: yesterday, receivedTo: yesterday }
+  }
+  if (preset === 'last7') return { receivedFrom: addDaysIso(today, -6), receivedTo: today }
+  if (preset === 'thisMonth') return { receivedFrom: `${today.slice(0, 7)}-01`, receivedTo: today }
+  return {}
 }
 
 function displayBillIssuedAt(row = {}) {
@@ -175,10 +214,42 @@ function applyBillFilters(query, filters) {
   return query
 }
 
+function applyRetroCollectionFilters(query, filters) {
+  const { search, workload, customerTypeFilter, paymentTypeFilter, bankFilter, retroDatePreset } = filters
+  const { receivedFrom, receivedTo } = getRetroDateRange(retroDatePreset)
+  query = query.not('payment_received_at', 'is', null)
+  if (search) query = query.or(`bill_no.ilike.%${search}%,patient_name.ilike.%${search}%`)
+  if (receivedFrom) query = query.gte('payment_received_at', receivedFrom)
+  if (receivedTo) query = query.lte('payment_received_at', endOfDay(receivedTo))
+  if (workload) query = query.eq('workload', workload)
+  if (customerTypeFilter) query = query.eq('customer_type', customerTypeFilter)
+  else query = query.neq('customer_type', 'INS')
+  if (paymentTypeFilter) query = query.eq('payment_type', paymentTypeFilter)
+  if (bankFilter === 'cash') query = query.gt('cash', 0)
+  if (bankFilter === 'bcel') query = query.gt('bcel', 0)
+  if (bankFilter === 'bcel2') query = query.gt('bcel2', 0)
+  if (bankFilter === 'ldb') query = query.gt('ldb', 0)
+  if (bankFilter === 'debt') query = query.gt('debt', 0)
+  return query
+}
+
 function addMetric(metric, amount) {
   if (amount <= 0) return
   metric.amount += amount
   metric.bills += 1
+}
+
+function cloneRetroCollectionSummary() {
+  return {
+    total: { ...EMPTY_RETRO_COLLECTION_SUMMARY.total },
+    cash: { ...EMPTY_RETRO_COLLECTION_SUMMARY.cash },
+    transfer: { ...EMPTY_RETRO_COLLECTION_SUMMARY.transfer },
+    banks: {
+      bcel: { ...EMPTY_RETRO_COLLECTION_SUMMARY.banks.bcel },
+      bcel2: { ...EMPTY_RETRO_COLLECTION_SUMMARY.banks.bcel2 },
+      ldb: { ...EMPTY_RETRO_COLLECTION_SUMMARY.banks.ldb },
+    },
+  }
 }
 
 function computeBillSummary(rows) {
@@ -213,6 +284,40 @@ function computeBillSummary(rows) {
     addMetric(summary.banks.bcel2, bcel2)
     addMetric(summary.banks.ldb, ldb)
     addMetric(summary.debt, debt)
+  }
+
+  return summary
+}
+
+function isRetroCollection(row = {}) {
+  if (isInsuranceDebtBill(row)) return false
+  const receivedDate = dateOnly(row.payment_received_at)
+  if (!receivedDate) return false
+  const issuedDate = dateOnly(row.bill_issued_at || row.date)
+  return !issuedDate || receivedDate > issuedDate
+}
+
+function computeRetroCollectionSummary(rows) {
+  const summary = cloneRetroCollectionSummary()
+
+  for (const row of rows || []) {
+    if (!isRetroCollection(row)) continue
+
+    const cash = Number(row.cash) || 0
+    const bcel = Number(row.bcel) || 0
+    const bcel2 = Number(row.bcel2) || 0
+    const ldb = Number(row.ldb) || 0
+    const transfer = bcel + bcel2 + ldb
+    const collected = cash + transfer
+    if (collected <= 0) continue
+
+    summary.total.amount += collected
+    summary.total.bills += 1
+    addMetric(summary.cash, cash)
+    addMetric(summary.transfer, transfer)
+    addMetric(summary.banks.bcel, bcel)
+    addMetric(summary.banks.bcel2, bcel2)
+    addMetric(summary.banks.ldb, ldb)
   }
 
   return summary
@@ -293,6 +398,64 @@ function BankStrip({ label, metric, color, loading }) {
           {loading ? '...' : fmt(metric.amount)}
         </span>
         <span className="text-[7px] text-slate-400 leading-tight shrink-0">{loading ? '...' : fmt(metric.bills)} ບິນ</span>
+      </div>
+    </div>
+  )
+}
+
+function RetroCollectionSummary({ summary, loading }) {
+  return (
+    <div className="rounded-xl border border-amber-100 bg-white p-3 shadow-sm">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wide text-amber-700">ຮັບບິນລູກຄ້າຍ້ອນຫຼັງ</p>
+          <p className="text-[11px] text-slate-500">ສະຫຼຸບຕາມວັນທີຮັບເງິນ ແຍກ Cash ແລະ Transfer</p>
+        </div>
+        <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-bold text-amber-700">
+          {loading ? '...' : fmt(summary.total.bills)} ບິນ
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+        <SummaryCard
+          label="ລວມຮັບຍ້ອນຫຼັງ"
+          metric={summary.total}
+          accent="border-amber-400"
+          icon="total"
+          iconTone="bg-amber-50 text-amber-500"
+          loading={loading}
+        />
+        <SummaryCard
+          label="Cash"
+          metric={summary.cash}
+          accent="border-emerald-400"
+          icon="cash"
+          iconTone="bg-emerald-50 text-emerald-500"
+          loading={loading}
+        />
+        <div className="min-w-0 rounded-md bg-slate-50/70 px-2 py-2 border-l-4 border-sky-400">
+          <div className="grid h-full min-w-0 grid-cols-1 gap-1 xl:grid-cols-[minmax(0,1fr)_minmax(112px,40%)] xl:gap-2">
+            <div className="min-w-0">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <SummaryIcon
+                  type="transfer"
+                  tone="bg-sky-50 text-sky-500"
+                  className="h-6 w-6 rounded-md"
+                  iconClassName="h-4 w-4"
+                />
+                <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wide leading-tight truncate">Transfers</p>
+              </div>
+              <p className="mt-1 text-sm font-bold text-slate-800 font-mono leading-tight truncate">
+                {loading ? '...' : fmt(summary.transfer.amount)}
+              </p>
+              <p className="mt-0.5 text-[8px] text-slate-500 leading-tight truncate">{loading ? '...' : fmt(summary.transfer.bills)} ບິນ</p>
+            </div>
+            <div className="mt-1 grid w-full min-w-0 max-w-full shrink-0 self-start grid-rows-3 gap-0.5 xl:mt-0">
+              <BankStrip label="BCEL1" metric={summary.banks.bcel} color="bg-red-500" loading={loading} />
+              <BankStrip label="BCEL2" metric={summary.banks.bcel2} color="bg-rose-500" loading={loading} />
+              <BankStrip label="LDB" metric={summary.banks.ldb} color="bg-sky-500" loading={loading} />
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -436,6 +599,9 @@ export default function BillsManagement() {
   const [saving, setSaving]   = useState(false)
   const [summary, setSummary] = useState(EMPTY_BILL_SUMMARY)
   const [summaryLoading, setSummaryLoading] = useState(false)
+  const [retroCollectionSummary, setRetroCollectionSummary] = useState(EMPTY_RETRO_COLLECTION_SUMMARY)
+  const [retroCollectionLoading, setRetroCollectionLoading] = useState(false)
+  const [retroDatePreset, setRetroDatePreset] = useState('all')
 
   const [search, setSearch]   = useState('')
   const [dateFrom, setDateFrom] = useState('')
@@ -512,6 +678,38 @@ export default function BillsManagement() {
     }
   }, [search, dateFrom, dateTo, workload, customerTypeFilter, paymentTypeFilter, bankFilter])
 
+  const fetchRetroCollectionSummary = useCallback(async () => {
+    setRetroCollectionLoading(true)
+    const PAGE = 1000
+    let all = []
+    let from = 0
+    let expectedTotal = null
+
+    try {
+      while (true) {
+        let q = applyRetroCollectionFilters(
+          supabase
+            .from('ar_bills')
+            .select('id,date,bill_issued_at,payment_received_at,customer_type,cash,bcel,bcel2,ldb', { count: 'exact' }),
+          { search, workload, customerTypeFilter, paymentTypeFilter, bankFilter, retroDatePreset },
+        )
+        const { data, count, error } = await q
+          .order('payment_received_at', { ascending: false })
+          .range(from, from + PAGE - 1)
+        if (error) throw error
+        if (expectedTotal === null) expectedTotal = count ?? 0
+        if (data?.length) all = all.concat(data)
+        if (!data?.length || all.length >= expectedTotal || data.length < PAGE) break
+        from += PAGE
+      }
+      setRetroCollectionSummary(computeRetroCollectionSummary(all))
+    } catch (err) {
+      setRetroCollectionSummary(EMPTY_RETRO_COLLECTION_SUMMARY)
+    } finally {
+      setRetroCollectionLoading(false)
+    }
+  }, [search, workload, customerTypeFilter, paymentTypeFilter, bankFilter, retroDatePreset])
+
   const openAddModal = useCallback(() => {
     setSubmitError('')
     setModal({ mode: 'add', row: { bill_no: 'INV' } })
@@ -519,6 +717,7 @@ export default function BillsManagement() {
 
   useEffect(() => { fetchRows() }, [fetchRows])
   useEffect(() => { fetchBillSummary() }, [fetchBillSummary])
+  useEffect(() => { fetchRetroCollectionSummary() }, [fetchRetroCollectionSummary])
   useEffect(() => { fetchInsuranceDueDays() }, [fetchInsuranceDueDays])
 
   async function upsertArDebt(bill) {
@@ -605,7 +804,7 @@ export default function BillsManagement() {
         await logAction({ action: modal.mode === 'add' ? 'ເພີ່ມໃບບິນ' : 'ແກ້ໄຂໃບບິນ', bill_no: form.bill_no, patient_name: form.patient_name, amount: form.grand_total, recorder: form.recorded_by })
       } catch (logErr) {
       }
-      setModal(null); fetchRows(); fetchBillSummary()
+      setModal(null); fetchRows(); fetchBillSummary(); fetchRetroCollectionSummary()
     } else {
       if (error.message?.includes('duplicate key') || error.code === '23505') {
         setSubmitError('ໃບບິນເລກ "' + form.bill_no + '" ວັນທີ "' + form.date + '" ກະວຽກ "' + form.workload + '" ມີຢູ່ໃນລະບົບແລ້ວ — ກວດສອບຂໍ້ມູນຄືນ')
@@ -653,6 +852,7 @@ export default function BillsManagement() {
       setModal(null)
       fetchRows()
       fetchBillSummary()
+      fetchRetroCollectionSummary()
     } else {
       setSubmitError('ເກີດຂໍ້ຜິດພາດ: ' + error.message)
       alert('ເກີດຂໍ້ຜິດພາດ: ' + error.message)
@@ -672,7 +872,7 @@ export default function BillsManagement() {
         await logAction({ action: 'ລົບໃບບິນ', bill_no: delTarget.bill_no, patient_name: delTarget.patient_name, amount: delTarget.grand_total })
       } catch (logErr) {
       }
-      setDelTarget(null); fetchRows(); fetchBillSummary()
+      setDelTarget(null); fetchRows(); fetchBillSummary(); fetchRetroCollectionSummary()
     } else {
       alert('Error: ' + error.message)
     }
@@ -689,7 +889,7 @@ export default function BillsManagement() {
         await logAction({ action: 'ລຶບຂໍ້ມູນທັງໝົດ', details: 'ລຶບທັງ ar_bills ແລະ ar_debt' })
       } catch (logErr) {
       }
-      setDelAll(false); fetchRows(); fetchBillSummary()
+      setDelAll(false); fetchRows(); fetchBillSummary(); fetchRetroCollectionSummary()
     } else {
       alert('Error: ' + (errorBills?.message || errorDebt?.message || 'Unknown error'))
     }
@@ -731,6 +931,7 @@ export default function BillsManagement() {
       setUploadState(s => ({ ...s, log: [...log], progress: 100 }))
       fetchRows()
       fetchBillSummary()
+      fetchRetroCollectionSummary()
     } catch (err) {
       addLog(`✗ ${err.message}`, false)
       setUploadState(s => ({ ...(s || { progress: 0, done: 0, total: 0, fileName: file.name }), error: err.message, log: [...log] }))
@@ -855,44 +1056,49 @@ export default function BillsManagement() {
         </div>
       </div>
 
+      <RetroCollectionSummary
+        summary={retroCollectionSummary}
+        loading={retroCollectionLoading}
+      />
+
       {/* Filters */}
-      <div className="bg-white rounded-xl border border-slate-100 p-3 flex flex-wrap gap-2 items-end" data-pdf-hidden="true">
-        <div className="flex-1 min-w-[200px]">
+      <div className="bg-white rounded-xl border border-slate-100 p-3 flex flex-wrap gap-2.5 items-end" data-pdf-hidden="true">
+        <div className="w-full shrink-0 sm:w-56">
           <label className="block text-xs font-semibold text-slate-500 mb-1">ຄົ້ນຫາ</label>
           <input
             type="text" value={search} onChange={e => { setSearch(e.target.value); setPage(0) }}
             placeholder="ເລກໃບບິນ, ຊື່ຄົນເຈັບ..."
-            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100"
+            className="h-9 w-full text-sm border border-slate-200 rounded-lg px-3 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100"
           />
         </div>
-        <div>
+        <div className="w-[112px]">
           <label className="block text-xs font-semibold text-slate-500 mb-1">ກະ</label>
           <select value={workload} onChange={e => { setWorkload(e.target.value); setPage(0) }}
-            className="text-xs border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            className="h-9 w-full text-xs border border-slate-200 rounded-lg px-3 outline-none focus:border-primary-400">
             <option value="">ທັງໝົດ</option>
             {WORKLOADS.map(w => <option key={w} value={w}>{w}</option>)}
           </select>
         </div>
-        <div>
+        <div className="w-[118px]">
           <label className="block text-xs font-semibold text-slate-500 mb-1">ປະເພດລູກຄ້າ</label>
           <select value={customerTypeFilter} onChange={e => { setCustomerTypeFilter(e.target.value); setPage(0) }}
-            className="text-xs border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            className="h-9 w-full text-xs border border-slate-200 rounded-lg px-3 outline-none focus:border-primary-400">
             <option value="">ທັງໝົດ</option>
             {['GN', 'INS', 'B2B'].map(type => <option key={type} value={type}>{type}</option>)}
           </select>
         </div>
-        <div>
+        <div className="w-[132px]">
           <label className="block text-xs font-semibold text-slate-500 mb-1">Payment Type</label>
           <select value={paymentTypeFilter} onChange={e => { setPaymentTypeFilter(e.target.value); setPage(0) }}
-            className="text-xs border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            className="h-9 w-full text-xs border border-slate-200 rounded-lg px-3 outline-none focus:border-primary-400">
             <option value="">ທັງໝົດ</option>
             {PAYMENT_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
           </select>
         </div>
-        <div>
+        <div className="w-[116px]">
           <label className="block text-xs font-semibold text-slate-500 mb-1">ທະນາຄານ</label>
           <select value={bankFilter} onChange={e => { setBankFilter(e.target.value); setPage(0) }}
-            className="text-xs border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            className="h-9 w-full text-xs border border-slate-200 rounded-lg px-3 outline-none focus:border-primary-400">
             <option value="">ທັງໝົດ</option>
             <option value="cash">Cash</option>
             <option value="bcel">BCEL</option>
@@ -901,29 +1107,38 @@ export default function BillsManagement() {
             <option value="debt">ມີໜີ້</option>
           </select>
         </div>
-        <div>
+        <div className="w-[136px]">
           <label className="block text-xs font-semibold text-slate-500 mb-1">ຈາກວັນທີ</label>
           <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setPage(0) }}
-            className="text-xs border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400" />
+            className="h-9 w-full text-xs border border-slate-200 rounded-lg px-3 outline-none focus:border-primary-400" />
         </div>
-        <div>
+        <div className="w-[136px]">
           <label className="block text-xs font-semibold text-slate-500 mb-1">ຫາວັນທີ</label>
           <input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setPage(0) }}
-            className="text-xs border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400" />
+            className="h-9 w-full text-xs border border-slate-200 rounded-lg px-3 outline-none focus:border-primary-400" />
         </div>
-        <div>
+        <div className="w-[142px]">
+          <label className="block text-xs font-semibold text-slate-500 mb-1">ວັນທີຮັບຍ້ອນຫຼັງ</label>
+          <select value={retroDatePreset} onChange={e => setRetroDatePreset(e.target.value)}
+            className="h-9 w-full text-xs border border-amber-100 bg-amber-50 rounded-lg px-2 font-semibold text-amber-800 outline-none focus:border-amber-300 focus:ring-2 focus:ring-amber-100">
+            {RETRO_DATE_OPTIONS.map(option => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="w-[116px]">
           <label className="block text-xs font-semibold text-slate-500 mb-1">ຈຳນວນແຖວ</label>
           <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(0) }}
-            className="text-xs border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-primary-400">
+            className="h-9 w-full text-xs border border-slate-200 rounded-lg px-3 outline-none focus:border-primary-400">
             <option value={20}>20 ແຖວ</option>
             <option value={50}>50 ແຖວ</option>
             <option value={100}>100 ແຖວ</option>
             <option value={200}>200 ແຖວ</option>
           </select>
         </div>
-        {(search || dateFrom || dateTo || workload || customerTypeFilter || paymentTypeFilter || bankFilter) && (
-          <button onClick={() => { setSearch(''); setDateFrom(''); setDateTo(''); setWorkload(''); setCustomerTypeFilter(''); setPaymentTypeFilter(''); setBankFilter(''); setPage(0) }}
-            className="text-xs text-slate-500 hover:text-slate-800 underline">
+        {(search || dateFrom || dateTo || workload || customerTypeFilter || paymentTypeFilter || bankFilter || retroDatePreset !== 'all') && (
+          <button onClick={() => { setSearch(''); setDateFrom(''); setDateTo(''); setWorkload(''); setCustomerTypeFilter(''); setPaymentTypeFilter(''); setBankFilter(''); setRetroDatePreset('all'); setPage(0) }}
+            className="h-9 px-1 text-xs text-slate-500 hover:text-slate-800 underline">
             ລ້າງ
           </button>
         )}
