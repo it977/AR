@@ -37,6 +37,23 @@ async function fetchAllRows(buildQuery) {
   return { rows: allRows, total: total ?? allRows.length }
 }
 
+function toDateOnly(value) {
+  return value ? String(value).slice(0, 10) : ''
+}
+
+function inDateRange(date, from, to) {
+  if (!date) return false
+  if (from && date < from) return false
+  if (to && date > to) return false
+  return true
+}
+
+export function getBillReceiptDate(row = {}) {
+  const explicitDate = toDateOnly(row.payment_received_at)
+  if (explicitDate) return explicitDate
+  return getBillingCollectedAmount(row) > 0 ? toDateOnly(row.date) : ''
+}
+
 export function useARData(filters = {}) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -58,6 +75,41 @@ export function useARData(filters = {}) {
         return q.range(from, to)
       })
       setData(rows)
+    } catch (err) {
+      setError(err.message)
+      setData([])
+    } finally {
+      setLoading(false)
+    }
+  }, [filters.dateFrom, filters.dateTo, filters.workload, filters.customerType, filters.gender, filters.insiteOnsite, filters.opdIpd])
+
+  useEffect(() => { fetchData() }, [fetchData])
+  return { data, loading, error, refetch: fetchData }
+}
+
+export function useBillReceiptData(filters = {}) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  const fetchData = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const { rows } = await fetchAllRows((from, to) => {
+        let q = supabase.from('ar_bills').select('*', { count: 'exact' }).order('date', { ascending: false })
+        if (filters.workload) q = q.eq('workload', filters.workload)
+        if (filters.customerType) q = q.eq('customer_type', filters.customerType)
+        if (filters.gender) q = q.eq('gender', filters.gender)
+        if (filters.insiteOnsite) q = q.eq('insite_onsite', filters.insiteOnsite)
+        if (filters.opdIpd) q = q.eq('opd_ipd', filters.opdIpd)
+        return q.range(from, to)
+      })
+      const filteredRows = rows.filter(row =>
+        getBillingCollectedAmount(row) > 0 &&
+        inDateRange(getBillReceiptDate(row), filters.dateFrom, filters.dateTo)
+      )
+      setData(filteredRows)
     } catch (err) {
       setError(err.message)
       setData([])
@@ -190,6 +242,23 @@ export function computeKPIs(rows = []) {
     actualIncome, outstandingDebt, dailyIncome,
     cash, bcel, bcel2, ldb, prepayment,
     paidBills, outstandingBills, collectionBills, discountedBills,
+  }
+}
+
+export function computeBillReceiptStats(rows = []) {
+  const cash = rows.reduce((s, r) => s + toNumber(r.cash), 0)
+  const bcel = rows.reduce((s, r) => s + toNumber(r.bcel), 0)
+  const bcel2 = rows.reduce((s, r) => s + toNumber(r.bcel2), 0)
+  const ldb = rows.reduce((s, r) => s + toNumber(r.ldb), 0)
+  const prepayment = rows.reduce((s, r) => s + toNumber(r.prepayment), 0)
+  return {
+    amount: cash + bcel + bcel2 + ldb + prepayment,
+    bills: new Set(rows.map(r => r.bill_no).filter(Boolean)).size,
+    cash,
+    bcel,
+    bcel2,
+    ldb,
+    prepayment,
   }
 }
 

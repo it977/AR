@@ -162,7 +162,11 @@ function applyDebtQueryFilters(query, filters) {
     paidDateTo,
   } = filters
 
-  query = query.eq('customer_type', 'INS')
+  if (insuranceFilter === 'GN') {
+    query = query.eq('customer_type', 'GN')
+  } else {
+    query = query.eq('customer_type', 'INS')
+  }
   if (search) query = query.or(`bill_no.ilike.%${search}%,patient_name.ilike.%${search}%`)
   const today = todayIso()
   if (statusFilter === 'pending_submission') query = query.gt('balance', 0).is('submit_date', null)
@@ -173,7 +177,7 @@ function applyDebtQueryFilters(query, filters) {
   if (statusFilter === 'past_due') query = query.gt('balance', 0).lt('due_date', today)
   if (statusFilter === 'paid') query = query.lte('balance', 0)
   if (paymentTypeFilter) query = query.eq('payment_type', paymentTypeFilter)
-  if (insuranceFilter) query = query.eq('insurance', insuranceFilter)
+  if (insuranceFilter && insuranceFilter !== 'GN') query = query.eq('insurance', insuranceFilter)
   if (dateFrom) query = query.gte('date', dateFrom)
   if (dateTo) query = query.lte('date', dateTo)
   if (paidDateFrom) query = query.gte('date_paid', paidDateFrom)
@@ -354,8 +358,12 @@ export default function DebtManagement() {
   const [insuranceDueDays, setInsuranceDueDays] = useState({})
 
   const insuranceOptions = useMemo(
-    () => [...new Set(Object.keys(insuranceDueDays).filter(Boolean))]
-      .sort((a, b) => a.localeCompare(b)),
+    () => [
+      'GN',
+      ...[...new Set(Object.keys(insuranceDueDays).filter(Boolean))]
+        .filter(name => name !== 'GN')
+        .sort((a, b) => a.localeCompare(b)),
+    ],
     [insuranceDueDays],
   )
 
@@ -386,7 +394,10 @@ export default function DebtManagement() {
     }
 
     const debtData = await fetchAll((f, t) =>
-      supabase.from('ar_debt').select('*', { count: 'exact' }).eq('customer_type', 'INS').range(f, t)
+      applyDebtQueryFilters(
+        supabase.from('ar_debt').select('*', { count: 'exact' }),
+        { search, statusFilter, paymentTypeFilter, insuranceFilter, dateFrom, dateTo, paidDateFrom, paidDateTo },
+      ).range(f, t)
     )
 
     const paidRows = debtData.filter(row => {
@@ -431,7 +442,7 @@ export default function DebtManagement() {
       bills: outstandingRows.length,
       amount: outstandingRows.reduce((sum, row) => sum + toNumber(row.balance), 0),
     })
-  }, [insuranceDueDays, paidDateFrom, paidDateTo])
+  }, [insuranceDueDays, search, statusFilter, paymentTypeFilter, insuranceFilter, dateFrom, dateTo, paidDateFrom, paidDateTo])
 
   const fetchRows = useCallback(async () => {
     setLoading(true)

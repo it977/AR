@@ -186,9 +186,11 @@ function isGeneralBillPaid(row = {}) {
   return canUseGeneralPayment(row) && getOutstandingBalance(row) <= 0 && getPaidAmount(row) > 0
 }
 
-async function saveArBillById(id, payload) {
+async function saveArBillById(id, payload, options = {}) {
+  const requiredColumns = options.requiredColumns || []
   let { error } = await supabase.from('ar_bills').update(payload).eq('id', id)
   if (error && OPTIONAL_AR_BILL_COLUMNS.some(col => error.message?.includes(col))) {
+    if (requiredColumns.some(col => error.message?.includes(col))) return error
     const fallbackPayload = { ...payload }
     OPTIONAL_AR_BILL_COLUMNS.forEach(col => {
       delete fallbackPayload[col]
@@ -523,6 +525,9 @@ function GNPaymentForm({ row, onSubmit, onCancel, loading }) {
           <p className="font-mono font-bold text-red-600">{fmt(outstanding)} LAK</p>
         </div>
       </div>
+      <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-700">
+        GN ສາມາດຮັບເງິນໄດ້ທັງການຢາ ແລະ ການເງິນ
+      </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <div>
@@ -831,7 +836,9 @@ export default function BillsManagement() {
     updated.payment_type = deriveChannelPaymentType(updated) || null
     updated.debt_status = resolvePaymentStatus(updated)
 
-    const error = await saveArBillById(row.id, buildArBillPayload(updated))
+    const error = await saveArBillById(row.id, buildArBillPayload(updated), {
+      requiredColumns: ['payment_received_at'],
+    })
 
     if (!error) {
       try { await supabase.from('ar_debt').delete().eq('bill_no', row.bill_no) } catch (e) {}
@@ -1193,30 +1200,31 @@ export default function BillsManagement() {
                   <td className="table-td text-xs text-slate-500">{row.workload}</td>
                   <td className="table-td text-xs text-slate-600">{row.recorded_by || <span className="text-slate-300">—</span>}</td>
                   <td className="table-td">
-                    <div className="flex min-w-[108px] items-center justify-end gap-2">
-                      {canUseGeneralPayment(row) && (
-                        <Can permission={PERMISSIONS.RECORDS_WRITE}>
-                        <button
-                          onClick={() => { setSubmitError(''); setModal({ mode: 'gn-payment', row }) }}
-                          disabled={isGeneralBillPaid(row)}
-                          className={`inline-flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
-                            isGeneralBillPaid(row)
-                              ? 'cursor-default bg-slate-900 text-white'
-                              : 'border border-emerald-100 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700'
-                          }`}
-                          title={isGeneralBillPaid(row) ? 'ຊຳລະແລ້ວ' : 'ຮັບເງິນ GN'}
-                        >
-                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7h16v10H4z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M16 12h.01M12 9v6" />
-                          </svg>
-                        </button>
-                        </Can>
-                      )}
+                    <div className="flex min-w-[96px] items-center justify-center gap-1">
                       <Can permission={PERMISSIONS.RECORDS_WRITE}>
                       <button
+                        onClick={() => { setSubmitError(''); setModal({ mode: 'gn-payment', row }) }}
+                        disabled={!canUseGeneralPayment(row) || isGeneralBillPaid(row)}
+                        className={`inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white shadow-sm transition-colors disabled:cursor-default ${
+                          !canUseGeneralPayment(row) || isGeneralBillPaid(row)
+                            ? 'text-slate-400'
+                            : 'text-primary-600 hover:bg-slate-50'
+                        }`}
+                        title={
+                          !canUseGeneralPayment(row)
+                            ? 'ບິນປະກັນຊຳລະຜ່ານໜ້າຈັດການໜີ້'
+                            : isGeneralBillPaid(row)
+                            ? 'ຊຳລະແລ້ວ'
+                            : 'ຮັບເງິນ GN: ການຢາ / ການເງິນ'
+                        }
+                      >
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                        </svg>
+                      </button>
+                      <button
                         onClick={() => setModal({ mode: 'edit', row })}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors hover:bg-slate-50 hover:text-primary-600"
                         title="ແກ້ໄຂ"
                       >
                         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1227,7 +1235,7 @@ export default function BillsManagement() {
                       <Can permission={PERMISSIONS.RECORDS_DELETE}>
                       <button
                         onClick={() => setDelTarget(row)}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-400 shadow-sm transition-colors hover:bg-slate-50 hover:text-red-600"
                         title="ລົບ"
                       >
                         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

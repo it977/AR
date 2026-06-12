@@ -6,10 +6,13 @@ import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
 import PDFButton from '../components/PDFButton'
 import {
   useARData,
+  useBillReceiptData,
   usePayoffData,
   useCashflowData,
+  computeBillReceiptStats,
   computeKPIs,
   computePaymentTypeSummary,
+  getBillReceiptDate,
 } from '../lib/useARData'
 import { formatNumber } from '../lib/excelParser'
 import { useGlobalFilters } from '../context/FilterContext'
@@ -103,6 +106,7 @@ export default function PaymentChannel() {
   const { filters, updateFilters } = useGlobalFilters()
 
   const { data: rows, loading } = useARData(filters)
+  const { data: receiptRows, loading: receiptLoading } = useBillReceiptData(filters)
   // Two ar_debt views:
   //  - debtRows (date_paid) for cash-flow collection channels.
   //  - outstandingRows (date) for debt from bills issued in the filter date range.
@@ -110,10 +114,12 @@ export default function PaymentChannel() {
   const { data: outstandingRows } = usePayoffData(filters)
   const { data: cashflowRows } = useCashflowData(filters)
   const kpis = useMemo(() => computeKPIs(rows || []), [rows])
-  const paymentTypeSummary = useMemo(() => computePaymentTypeSummary(rows || []), [rows])
+  const receiptStats = useMemo(() => computeBillReceiptStats(receiptRows || []), [receiptRows])
+  const paymentTypeSummary = useMemo(() => computePaymentTypeSummary(receiptRows || []), [receiptRows])
   const depositCollection = paymentTypeSummary.Deposit?.amount || 0
   const advanceCollection = paymentTypeSummary.Advance?.amount || 0
   const hasCashflow = !!cashflowRows?.length
+  const hasLiveReceipts = !!receiptRows?.length
   const hasActiveFilters = !!(filters.dateFrom || filters.dateTo || filters.customerType || filters.workload)
   const useLookerFallback = !hasCashflow && !hasActiveFilters && rows?.length === 4763 && debtRows?.length === 1285
 
@@ -126,8 +132,9 @@ export default function PaymentChannel() {
     const ldb   = dr.reduce((s, r) => s + (r.ldb_paid   || 0), 0)
     return { amount: cash + bcel + bcel2 + ldb, cash, bcel, bcel2, ldb }
   }, [debtRows])
+  const useCashflowOnly = hasCashflow && !hasLiveReceipts && collectionStats.amount <= 0
 
-  // Combine billing (ar_bills) and Pay off (ar_debt) for every channel.
+  // Combine bill receipts (by received date) and Pay off (ar_debt) for every channel.
   const totals = useMemo(() => {
     const t = { cash: 0, bcel: 0, bcel2: 0, ldb: 0 }
     if (useLookerFallback) {
@@ -138,7 +145,7 @@ export default function PaymentChannel() {
         ldb: LOOKER_CASHFLOW_FALLBACK.ldb,
       }
     }
-    if (cashflowRows?.length) {
+    if (useCashflowOnly) {
       cashflowRows.forEach(r => {
         t.cash  += r.cash  || 0
         t.bcel  += r.bcel  || 0
@@ -147,33 +154,30 @@ export default function PaymentChannel() {
       })
       return t
     }
-    ;(rows || []).forEach(r => {
-      t.cash  += r.cash  || 0
-      t.bcel  += r.bcel  || 0
-      t.bcel2 += r.bcel2 || 0
-      t.ldb   += r.ldb   || 0
-    })
-    // Add Pay off payment channels.
+    t.cash += receiptStats.cash
+    t.bcel += receiptStats.bcel
+    t.bcel2 += receiptStats.bcel2
+    t.ldb += receiptStats.ldb
     t.cash  += collectionStats.cash
     t.bcel  += collectionStats.bcel
     t.bcel2 += collectionStats.bcel2
     t.ldb   += collectionStats.ldb
     return t
-  }, [rows, collectionStats, cashflowRows, useLookerFallback])
+  }, [receiptStats, collectionStats, cashflowRows, useLookerFallback, useCashflowOnly])
 
   const methodCollected = totals.cash + totals.bcel + totals.bcel2 + totals.ldb
   const totalCollected = methodCollected + depositCollection
   const remainingBalance = useMemo(() => {
     if (useLookerFallback) return LOOKER_CASHFLOW_FALLBACK.balance
-    if (hasCashflow) return (cashflowRows || []).reduce((s, r) => s + (r.balance || 0), 0)
+    if (useCashflowOnly) return (cashflowRows || []).reduce((s, r) => s + (r.balance || 0), 0)
     // Use outstandingRows filtered by bill date, not debtRows filtered by date_paid.
     return (outstandingRows || []).reduce((s, r) => s + (r.balance || 0), 0)
-  }, [cashflowRows, outstandingRows, hasCashflow, useLookerFallback])
+  }, [cashflowRows, outstandingRows, useCashflowOnly, useLookerFallback])
 
   // Monthly breakdown
   const monthly = useMemo(() => {
     const map = {}
-    if (cashflowRows?.length) {
+    if (useCashflowOnly) {
       cashflowRows.forEach(r => {
         if (!r.date) return
         const mo = r.date.slice(0, 7)
@@ -185,17 +189,27 @@ export default function PaymentChannel() {
       })
       return map
     }
-    ;(rows || []).forEach(r => {
-      if (!r.date) return
-      const mo = r.date.slice(0, 7)
+    ;(receiptRows || []).forEach(r => {
+      const date = getBillReceiptDate(r)
+      if (!date) return
+      const mo = date.slice(0, 7)
       if (!map[mo]) map[mo] = { cash: 0, bcel: 0, bcel2: 0, ldb: 0 }
       map[mo].cash  += r.cash  || 0
       map[mo].bcel  += r.bcel  || 0
       map[mo].bcel2 += r.bcel2 || 0
       map[mo].ldb   += r.ldb   || 0
     })
+    ;(debtRows || []).forEach(r => {
+      if (!r.date_paid) return
+      const mo = String(r.date_paid).slice(0, 7)
+      if (!map[mo]) map[mo] = { cash: 0, bcel: 0, bcel2: 0, ldb: 0 }
+      map[mo].cash += r.cash_paid || 0
+      map[mo].bcel += r.bcel_paid || 0
+      map[mo].bcel2 += r.bcel2_paid || 0
+      map[mo].ldb += r.ldb_paid || 0
+    })
     return map
-  }, [rows, cashflowRows])
+  }, [receiptRows, debtRows, cashflowRows, useCashflowOnly])
 
   const months = Object.keys(monthly).sort()
 
@@ -228,13 +242,13 @@ export default function PaymentChannel() {
   // For PDF-style: Actual Income = Daily Income + Collection from payoff
   // Daily Income = Actual Total Sale - Outstanding Debts
   const dailyIncome = kpis.totalSales - kpis.outstandingDebt
-  const actualIncomeTotal = hasCashflow
+  const actualIncomeTotal = useCashflowOnly
     ? (cashflowRows || []).reduce((s, r) => s + (r.total_actual_income || 0), 0)
     : useLookerFallback
       ? LOOKER_CASHFLOW_FALLBACK.totalActualIncome
       : dailyIncome + collectionStats.amount + depositCollection
 
-  if (loading) return <div className="p-6"><LoadingSpinner /></div>
+  if (loading || receiptLoading) return <div className="p-6"><LoadingSpinner /></div>
 
   return (
     <div id="payment-channel-content" className="p-6 space-y-6">

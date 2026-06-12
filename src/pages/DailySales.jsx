@@ -4,7 +4,9 @@ import DateFilter, { FilterSelect } from '../components/DateFilter'
 import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
 import {
   useARData,
+  useBillReceiptData,
   usePayoffData,
+  computeBillReceiptStats,
   computeKPIs,
   computeShiftData,
 } from '../lib/useARData'
@@ -155,11 +157,13 @@ export default function DailySales() {
   const [selectedCollectionTerm, setSelectedCollectionTerm] = useState('')
 
   const { data: rows,      loading }  = useARData(filters)
+  const { data: receiptRows, loading: receiptLoading } = useBillReceiptData(filters)
   // Collection is filtered by date_paid for the cash-flow view.
   const { data: debtRows }            = usePayoffData({ ...filters, payoffDateField: 'date_paid' })
   const { data: termDebtRows }        = usePayoffData(filters)
 
   const kpis      = useMemo(() => computeKPIs(rows || []), [rows])
+  const receiptStats = useMemo(() => computeBillReceiptStats(receiptRows || []), [receiptRows])
   const shiftData = useMemo(() => computeShiftData(rows || []), [rows])
   const hasActiveFilters = !!(filters.dateFrom || filters.dateTo || filters.workload || filters.customerType)
   const useLookerFallback = !hasActiveFilters && rows?.length === 4763 && debtRows?.length === 1285
@@ -190,9 +194,18 @@ export default function DailySales() {
   }, [debtRows])
 
   const viewKpis = useMemo(() => {
-    if (!useLookerFallback) return kpis
-    return {
+    const base = {
       ...kpis,
+      cash: receiptStats.cash,
+      bcel: receiptStats.bcel,
+      bcel2: receiptStats.bcel2,
+      ldb: receiptStats.ldb,
+      prepayment: receiptStats.prepayment,
+      actualIncome: receiptStats.amount,
+    }
+    if (!useLookerFallback) return base
+    return {
+      ...base,
       totalSalesGross: LOOKER_DAILY_FALLBACK.totalSalesGross,
       totalDiscounts: LOOKER_DAILY_FALLBACK.totalDiscounts,
       totalSales: LOOKER_DAILY_FALLBACK.totalSales,
@@ -205,7 +218,7 @@ export default function DailySales() {
       discountedBills: LOOKER_DAILY_FALLBACK.discountedBills,
       collectionBills: LOOKER_DAILY_FALLBACK.collectionBills,
     }
-  }, [kpis, useLookerFallback])
+  }, [kpis, receiptStats, useLookerFallback])
 
   const viewCollectionStats = useMemo(() => (
     useLookerFallback
@@ -321,7 +334,7 @@ export default function DailySales() {
     { name: 'Outstanding Debt',  data: dailyByDate.map(r => ({ x: r.date, y: r.debt }))   },
   ]
 
-  if (loading) return <div className="p-6"><LoadingSpinner /></div>
+  if (loading || receiptLoading) return <div className="p-6"><LoadingSpinner /></div>
 
   return (
     <div id="daily-sales-content" className="p-6 space-y-6">
