@@ -7,6 +7,7 @@ import BillForm from '../components/forms/BillForm'
 import RecorderSelect from '../components/RecorderSelect'
 import LoadingSpinner from '../components/LoadingSpinner'
 import Can from '../components/Can'
+import { useAuth } from '../context/AuthContext'
 import { PERMISSIONS } from '../lib/rbac'
 import {
   DEFAULT_DUE_DAYS,
@@ -198,6 +199,50 @@ async function saveArBillById(id, payload, options = {}) {
     ;({ error } = await supabase.from('ar_bills').update(fallbackPayload).eq('id', id))
   }
   return error
+}
+
+function preferLatestRecorder(map, log) {
+  if (!log?.bill_no || !log?.recorder) return
+  const current = map.get(log.bill_no)
+  if (!current || String(log.created_at || '') > String(current.created_at || '')) {
+    map.set(log.bill_no, log)
+  }
+}
+
+async function hydrateBillRowsWithRecorders(rows) {
+  if (!rows?.length) return rows || []
+
+  const missingRecorderBillNos = [
+    ...new Set(rows
+      .filter(row => !row.recorded_by && !row.recorded_by_debt && row.bill_no)
+      .map(row => row.bill_no)),
+  ]
+  if (!missingRecorderBillNos.length) return rows
+
+  const logs = []
+  const BATCH = 500
+  for (let i = 0; i < missingRecorderBillNos.length; i += BATCH) {
+    const batch = missingRecorderBillNos.slice(i, i + BATCH)
+    const { data, error } = await supabase
+      .from('activity_logs')
+      .select('bill_no,recorder,created_at')
+      .in('bill_no', batch)
+      .not('recorder', 'is', null)
+
+    if (error) return rows
+    if (data?.length) logs.push(...data)
+  }
+
+  const recorderByBillNo = new Map()
+  logs.forEach(log => preferLatestRecorder(recorderByBillNo, log))
+
+  return rows.map(row => {
+    const log = recorderByBillNo.get(row.bill_no)
+    return {
+      ...row,
+      recorded_by: row.recorded_by || row.recorded_by_debt || log?.recorder || '',
+    }
+  })
 }
 
 function applyBillFilters(query, filters) {
@@ -596,6 +641,7 @@ function GNPaymentForm({ row, onSubmit, onCancel, loading }) {
 }
 
 export default function BillsManagement() {
+  const { profile, user } = useAuth()
   const [rows, setRows]       = useState([])
   const [total, setTotal]     = useState(0)
   const [page, setPage]       = useState(0)
@@ -626,6 +672,7 @@ export default function BillsManagement() {
   // Excel upload state
   const fileRef = useRef(null)
   const [uploadState, setUploadState] = useState(null) // null | { progress, total, done, log:[], error?, fileName }
+  const defaultRecorder = profile?.full_name || profile?.email || user?.email || ''
 
   const fetchInsuranceDueDays = useCallback(async () => {
     const { data, error } = await supabase.from('ar_insurance_list').select('name,due_days')
@@ -649,7 +696,10 @@ export default function BillsManagement() {
       .order('bill_no', { ascending: false })
       .range(page * pageSize, page * pageSize + pageSize - 1)
 
-    if (!error) { setRows(data || []); setTotal(count || 0) }
+    if (!error) {
+      setRows(await hydrateBillRowsWithRecorders(data || []))
+      setTotal(count || 0)
+    }
     setLoading(false)
   }, [search, dateFrom, dateTo, workload, customerTypeFilter, paymentTypeFilter, bankFilter, page, pageSize])
 
@@ -717,8 +767,8 @@ export default function BillsManagement() {
 
   const openAddModal = useCallback(() => {
     setSubmitError('')
-    setModal({ mode: 'add', row: { bill_no: 'INV' } })
-  }, [])
+    setModal({ mode: 'add', row: { bill_no: 'INV', recorded_by: defaultRecorder } })
+  }, [defaultRecorder])
 
   useEffect(() => { fetchRows() }, [fetchRows])
   useEffect(() => { fetchBillSummary() }, [fetchBillSummary])
@@ -769,6 +819,7 @@ export default function BillsManagement() {
     setSaving(true)
     const normalizedForm = {
       ...form,
+      recorded_by: form.recorded_by || defaultRecorder,
       payment_type: form.payment_type,
       bill_issued_at: form.bill_issued_at || null,
       payment_received_at: form.payment_received_at || (
@@ -830,7 +881,7 @@ export default function BillsManagement() {
       [payment.method]: (Number(row[payment.method]) || 0) + payment.amount,
       debt: newDebt,
       note: payment.note,
-      recorded_by: payment.recordedBy || row.recorded_by || '',
+      recorded_by: payment.recordedBy || row.recorded_by || defaultRecorder,
       payment_received_at: payment.paidDate || todayIso(),
     }
     updated.payment_type = deriveChannelPaymentType(updated) || null
@@ -915,7 +966,10 @@ export default function BillsManagement() {
       addLog(`ກຳລັງອ່ານໄຟລ "${file.name}"...`)
       setUploadState(s => ({ ...s, log: [...log] }))
       const result = await parseExcelFile(file)
-      const bills = result.bills || []
+      const bills = (result.bills || []).map(row => ({
+        ...row,
+        recorded_by: row.recorded_by || defaultRecorder,
+      }))
       if (!bills.length) {
         throw new Error('ບໍ່ພົບຂໍ້ມູນໃນ sheet "Daily" — ກວດສອບໂຄງສ້າງໄຟລ')
       }
@@ -1203,7 +1257,7 @@ export default function BillsManagement() {
                     <div className="flex min-w-[96px] items-center justify-center gap-1">
                       <Can permission={PERMISSIONS.RECORDS_WRITE}>
                       <button
-                        onClick={() => { setSubmitError(''); setModal({ mode: 'gn-payment', row }) }}
+                        onClick={() => { setSubmitError(''); setModal({ mode: 'gn-payment', row: { ...row, recorded_by: row.recorded_by || defaultRecorder } }) }}
                         disabled={!canUseGeneralPayment(row) || isGeneralBillPaid(row)}
                         className={`inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white shadow-sm transition-colors disabled:cursor-default ${
                           !canUseGeneralPayment(row) || isGeneralBillPaid(row)

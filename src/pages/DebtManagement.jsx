@@ -134,6 +134,70 @@ async function fetchAllDebtRows(buildQuery) {
   return all
 }
 
+function debtBillKey(row = {}, includeWorkload = true) {
+  if (!row.bill_no) return ''
+  const date = row.date || ''
+  const workload = includeWorkload ? row.workload || '' : ''
+  return includeWorkload
+    ? `${row.bill_no}__${date}__${workload}`
+    : `${row.bill_no}__${date}`
+}
+
+function preferBillWithRecorder(map, key, bill) {
+  if (!key) return
+  const current = map.get(key)
+  if (!current || (!current.recorded_by_debt && bill.recorded_by_debt)) {
+    map.set(key, bill)
+  }
+}
+
+async function hydrateDebtRowsWithBillRecorders(rows) {
+  if (!rows?.length) return rows || []
+
+  const billNos = [...new Set(rows.map(row => row.bill_no).filter(Boolean))]
+  if (!billNos.length) return rows
+
+  const bills = []
+  const BATCH = 500
+  for (let i = 0; i < billNos.length; i += BATCH) {
+    const batch = billNos.slice(i, i + BATCH)
+    let { data, error } = await supabase
+      .from('ar_bills')
+      .select('bill_no,date,workload,recorded_by_debt,recorded_by')
+      .in('bill_no', batch)
+
+    if (error && String(error.message || '').includes('recorded_by_debt')) {
+      ;({ data, error } = await supabase
+        .from('ar_bills')
+        .select('bill_no,date,workload,recorded_by')
+        .in('bill_no', batch))
+    }
+    if (error) return rows
+    if (data?.length) bills.push(...data)
+  }
+
+  const exact = new Map()
+  const byDate = new Map()
+  const byBill = new Map()
+  bills.forEach(bill => {
+    preferBillWithRecorder(exact, debtBillKey(bill, true), bill)
+    preferBillWithRecorder(byDate, debtBillKey(bill, false), bill)
+    preferBillWithRecorder(byBill, bill.bill_no, bill)
+  })
+
+  return rows.map(row => {
+    const bill = exact.get(debtBillKey(row, true))
+      || byDate.get(debtBillKey(row, false))
+      || byBill.get(row.bill_no)
+
+    return {
+      ...row,
+      recorded_by: row.recorded_by || bill?.recorded_by || '',
+      recorded_by_debt: row.recorded_by_debt || bill?.recorded_by_debt || '',
+    }
+  })
+}
+
 function matchesAgingFilter(row, aging, insuranceDueDays = {}) {
   if (!aging) return true
   if (toNumber(row.balance) <= 0) return false
@@ -211,6 +275,7 @@ function buildDebtExportRow(row, insuranceDueDays, index) {
     'Due Date': dueDate || '',
     'Overdue Days': calcOverdueDays(agingRow),
     Aging: getAgingLabel(currentAging),
+    'Recorded By': row.recorded_by_debt || row.recorded_by || '',
     Status: collectionStatus?.label || paymentStatus || (debt <= 0 ? 'Paid' : 'Due'),
   }
 }
@@ -458,12 +523,13 @@ export default function DebtManagement() {
       if (aging) {
         const data = await fetchAllDebtRows(buildQuery)
         const filtered = data.filter(row => matchesAgingFilter(row, aging, insuranceDueDays))
-        setRows(filtered.slice(page * pageSize, page * pageSize + pageSize))
+        const pagedRows = filtered.slice(page * pageSize, page * pageSize + pageSize)
+        setRows(await hydrateDebtRowsWithBillRecorders(pagedRows))
         setTotal(filtered.length)
       } else {
         const { data, count, error } = await buildQuery(page * pageSize, page * pageSize + pageSize - 1)
         if (error) throw error
-        setRows(data || [])
+        setRows(await hydrateDebtRowsWithBillRecorders(data || []))
         setTotal(count || 0)
       }
     } catch (error) {
@@ -579,7 +645,7 @@ export default function DebtManagement() {
       submit_date: row.submit_date || '',
       due_date: row.due_date || bill?.due_date || '',
       date_paid: row.date_paid || '',
-      recorded_by_debt: row.recorded_by_debt || '',
+      recorded_by_debt: row.recorded_by_debt || bill?.recorded_by_debt || '',
       },
     })
   }
@@ -814,7 +880,8 @@ export default function DebtManagement() {
       from += PAGE
     }
 
-    return aging ? all.filter(row => matchesAgingFilter(row, aging, insuranceDueDays)) : all
+    const filtered = aging ? all.filter(row => matchesAgingFilter(row, aging, insuranceDueDays)) : all
+    return hydrateDebtRowsWithBillRecorders(filtered)
   }
 
   async function handleExportExcel() {
@@ -845,6 +912,7 @@ export default function DebtManagement() {
         { wch: 15 },
         { wch: 12 },
         { wch: 12 },
+        { wch: 18 },
         { wch: 18 },
         { wch: 18 },
       ]
@@ -1129,29 +1197,30 @@ export default function DebtManagement() {
           <table className="w-full table-fixed text-[11px]">
             <thead>
               <tr className="border-b border-slate-100 [&_th]:px-1.5 [&_th]:py-2 [&_th]:text-[10px] [&_th]:font-semibold [&_th]:text-slate-500 [&_th]:uppercase [&_th]:bg-slate-50 [&_th]:whitespace-nowrap">
-                <th className="text-left w-[7%]">ບິນ</th>
+                <th className="text-left w-[6%]">ບິນ</th>
                 <th className="text-left w-[6%]">ວັນທີ</th>
                 <th className="text-left w-[6%]">ຊຳລະ</th>
-                <th className="text-left w-[13%]">ຊື່ຄົນເຈັບ</th>
+                <th className="text-left w-[12%]">ຊື່ຄົນເຈັບ</th>
                 <th className="text-left w-[4%]">ປະເພດ</th>
                 <th className="text-left w-[5%]">ປະກັນ</th>
                 <th className="text-right w-[7%]">ຍອດລວມ</th>
                 <th className="text-right w-[7%]">ໜີ້ຄ້າງ</th>
-                <th className="text-left w-[9%]">ປະເພດຊຳລະ</th>
+                <th className="text-left w-[8%]">ປະເພດຊຳລະ</th>
                 <th className="text-left w-[7%]">ສົ່ງເອກະສານ</th>
-                <th className="text-left w-[7%]">Due</th>
+                <th className="text-left w-[6%]">Due</th>
                 <th className="text-center w-[4%]">ຄ້າງ</th>
                 <th className="text-left w-[6%]">Aging</th>
+                <th className="text-left w-[7%]">ຜູ້ບັນທຶກ</th>
                 <th className="text-center w-[5%]">ສະຖານະ</th>
-                <th className="text-center w-[10%]">ຈັດການ</th>
+                <th className="text-center w-[7%]">ຈັດການ</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50 [&_td]:px-1.5 [&_td]:py-1.5 [&_td]:text-[11px] [&_td]:text-slate-700 [&_td]:align-middle [&_td]:truncate">
               {loading ? (
-                <tr><td colSpan={15} className="table-td text-center py-12 text-slate-400">ກຳລັງໂຫຼດ...</td></tr>
+                <tr><td colSpan={16} className="table-td text-center py-12 text-slate-400">ກຳລັງໂຫຼດ...</td></tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={15} className="table-td text-center py-16">
+                  <td colSpan={16} className="table-td text-center py-16">
                     <div className="flex flex-col items-center gap-2 text-slate-400">
                       <svg className="w-10 h-10 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -1225,6 +1294,9 @@ export default function DebtManagement() {
                     </td>
                     <td>
                       <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${AGING_COLOR[currentAging] || 'bg-slate-100 text-slate-600'}`} title={getAgingLabel(currentAging)}>{AGING_SHORT[currentAging] || getAgingLabel(currentAging)}</span>
+                    </td>
+                    <td className="text-xs text-slate-600" title={row.recorded_by_debt || row.recorded_by || ''}>
+                      {row.recorded_by_debt || row.recorded_by || <span className="text-slate-300">—</span>}
                     </td>
                     <td className="text-center">
                       {collectionStatus ? (
