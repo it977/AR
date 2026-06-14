@@ -9,6 +9,7 @@ import Can from '../components/Can'
 import { PERMISSIONS } from '../lib/rbac'
 import { parseExcelFile } from '../lib/excelParser'
 import { upsertRows, syncDebtStatus } from '../lib/excelUpload'
+import { showError, showInfo, showSuccess } from '../lib/sweetAlert'
 
 const PAYOFF_HEADERS = [
   'Date','Week','Workload','Bill No','Insite-Onsite','OPD-IPD',
@@ -610,8 +611,9 @@ export default function DebtManagement() {
     setSaving(false)
     if (!debtErr) {
       logAction({ action: 'ຊຳລະໜີ້', bill_no: form.bill_no, patient_name: form.patient_name, amount: collected, details: (form.debt||0)===0 ? 'ຊຳລະຄົບ' : 'ຊຳລະບາງສ່ວນ', recorder: form.recorded_by_debt })
+      showSuccess('ບັນທຶກການຊຳລະສຳເລັດ')
       setModal(null); fetchRows(); fetchKpis()
-    } else alert('Error: ' + debtErr.message)
+    } else showError('ບັນທຶກບໍ່ສຳເລັດ', debtErr.message)
   }
 
   async function openEditModal(row) {
@@ -683,8 +685,11 @@ export default function DebtManagement() {
     }
 
     setSaving(false)
-    if (!error) { setEditModal(null); fetchRows(); fetchKpis() }
-    else alert('Error: ' + error.message)
+    if (!error) {
+      showSuccess('ແກ້ໄຂສຳເລັດ')
+      setEditModal(null); fetchRows(); fetchKpis()
+    }
+    else showError('ແກ້ໄຂບໍ່ສຳເລັດ', error.message)
   }
 
   async function handleDelete() {
@@ -693,8 +698,9 @@ export default function DebtManagement() {
     setSaving(false)
     if (!error) {
       logAction({ action: 'ລົບໜີ້', bill_no: delTarget.bill_no, patient_name: delTarget.patient_name, amount: delTarget.debt })
+      showSuccess('ລົບລາຍການໜີ້ສຳເລັດ')
       setDelTarget(null); fetchRows(); fetchKpis()
-    } else alert('Error: ' + error.message)
+    } else showError('ລົບບໍ່ສຳເລັດ', error.message)
   }
 
   async function handleDeleteAll() {
@@ -703,15 +709,16 @@ export default function DebtManagement() {
     setSaving(false)
     if (!error) { 
       logAction({ action: 'ລົບໜີ້ທັງໝົດ', details: 'ລຶບທັງໝົດຈາກ ar_debt' })
+      showSuccess('ລົບໜີ້ທັງໝົດສຳເລັດ')
       setDelAll(false); fetchRows(); fetchKpis() 
     }
-    else alert('Error: ' + error.message)
+    else showError('ລົບບໍ່ສຳເລັດ', error.message)
   }
 
   async function handleExcelUpload(file) {
     if (!file) return
     if (!file.name.match(/\.(xlsx|xls)$/i)) {
-      alert('ກະລຸນາເລືອກໄຟລ .xlsx ຫຼື .xls ເທົ່ານັ້ນ')
+      showInfo('ໄຟລບໍ່ຖືກຕ້ອງ', 'ກະລຸນາເລືອກໄຟລ .xlsx ຫຼື .xls ເທົ່ານັ້ນ')
       return
     }
 
@@ -720,12 +727,12 @@ export default function DebtManagement() {
     try {
       parsed = await parseExcelFile(file)
     } catch (err) {
-      alert('ອ່ານໄຟລບໍ່ສຳເລັດ: ' + err.message)
+      showError('ອ່ານໄຟລບໍ່ສຳເລັດ', err.message)
       return
     }
     const debt = parsed.debt || []
     if (!debt.length) {
-      alert('ບໍ່ພົບຂໍ້ມູນໃນ sheet "Pay off" — ກວດສອບໂຄງສ້າງໄຟລ')
+      showInfo('ບໍ່ພົບຂໍ້ມູນ', 'ບໍ່ພົບຂໍ້ມູນໃນ sheet "Pay off" — ກວດສອບໂຄງສ້າງໄຟລ')
       return
     }
 
@@ -778,7 +785,7 @@ export default function DebtManagement() {
         }
       }
     } catch (err) {
-      alert('ກວດສອບໄຟລຜິດພາດ: ' + err.message)
+      showError('ກວດສອບໄຟລຜິດພາດ', err.message)
       return
     }
 
@@ -845,11 +852,13 @@ export default function DebtManagement() {
         })
       } catch (_) {}
       setUploadState(s => ({ ...s, log: [...log], progress: 100 }))
+      showSuccess('ອັບໂຫຼດ Excel ສຳເລັດ', `${uploaded} ແຖວ`)
       fetchRows()
       fetchKpis()
     } catch (err) {
       addLog(`✗ ${err.message}`, false)
       setUploadState(s => ({ ...(s || { progress: 0, done: 0, total: 0, fileName: file.name }), error: err.message, log: [...log] }))
+      showError('ອັບໂຫຼດ Excel ບໍ່ສຳເລັດ', err.message)
     }
   }
 
@@ -892,7 +901,7 @@ export default function DebtManagement() {
       )
 
       if (!exportRows.length) {
-        alert('ບໍ່ມີຂໍ້ມູນສຳລັບ Export')
+        showInfo('ບໍ່ມີຂໍ້ມູນສຳລັບ Export')
         return
       }
 
@@ -938,8 +947,9 @@ export default function DebtManagement() {
           metadata: { rows: exportRows.length },
         })
       } catch (_) {}
+      showSuccess('Export Excel ສຳເລັດ')
     } catch (err) {
-      alert('Export Excel ບໍ່ສຳເລັດ: ' + err.message)
+      showError('Export Excel ບໍ່ສຳເລັດ', err.message)
     } finally {
       setExporting(false)
     }

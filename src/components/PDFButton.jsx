@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useCan } from '../context/AuthContext'
 import { PERMISSIONS } from '../lib/rbac'
 import { logAction } from '../lib/log'
+import { showError, showSuccess } from '../lib/sweetAlert'
 
 function buildPdfSource(element, orientation) {
   const exportWidth = orientation === 'portrait' ? 900 : 2200
@@ -166,7 +167,7 @@ export default function PDFButton({
     const element = document.getElementById(elementId)
 
     if (!element) {
-      alert('PDF content was not found.')
+      showError('PDF content was not found.')
       return
     }
 
@@ -190,11 +191,12 @@ export default function PDFButton({
           orientation,
         },
       })
+      showSuccess('PDF exported successfully')
     } catch (error) {
       if (previewWindow && !previewWindow.closed) {
         previewWindow.document.body.innerHTML = '<p style="font:16px Arial;padding:24px;color:#b91c1c">PDF download failed. Please try again.</p>'
       }
-      alert('PDF download failed. Please try again.')
+      showError('PDF download failed. Please try again.')
     } finally {
       exportElement?.remove()
       setIsDownloading(false)

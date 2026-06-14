@@ -19,6 +19,7 @@ import {
 } from '../lib/debtUtils'
 import { parseExcelFile } from '../lib/excelParser'
 import { upsertRows } from '../lib/excelUpload'
+import { showError, showInfo, showSuccess } from '../lib/sweetAlert'
 
 const DAILY_HEADERS = [
   'Date','Week','Workload','Bill No','Insite-Onsite','OPD-IPD',
@@ -104,6 +105,7 @@ const OPTIONAL_AR_BILL_COLUMNS = [
   'payment_type', 'due_date', 'bill_issued_at', 'payment_received_at', 'recorded_by',
 ]
 const INSURANCE_DEBT_CUSTOMER_TYPES = new Set(['INS'])
+const RECORDER_SOURCE_ACTIONS = new Set(['ເພີ່ມໃບບິນ', 'ອັບໂຫຼດໃບບິນ (Excel)'])
 
 function isInsuranceDebtBill(bill = {}) {
   return INSURANCE_DEBT_CUSTOMER_TYPES.has(bill.customer_type)
@@ -115,6 +117,19 @@ function buildArBillPayload(form) {
     if (form[key] !== undefined) payload[key] = form[key]
   }
   return payload
+}
+
+function missingOptionalColumns(error, optionalColumns = OPTIONAL_AR_BILL_COLUMNS) {
+  const message = String(error?.message || '')
+  return optionalColumns.filter(col => message.includes(col))
+}
+
+function stripColumns(payload, columns) {
+  const nextPayload = { ...payload }
+  columns.forEach(col => {
+    delete nextPayload[col]
+  })
+  return nextPayload
 }
 
 function displayPaymentType(row) {
@@ -190,12 +205,10 @@ function isGeneralBillPaid(row = {}) {
 async function saveArBillById(id, payload, options = {}) {
   const requiredColumns = options.requiredColumns || []
   let { error } = await supabase.from('ar_bills').update(payload).eq('id', id)
-  if (error && OPTIONAL_AR_BILL_COLUMNS.some(col => error.message?.includes(col))) {
-    if (requiredColumns.some(col => error.message?.includes(col))) return error
-    const fallbackPayload = { ...payload }
-    OPTIONAL_AR_BILL_COLUMNS.forEach(col => {
-      delete fallbackPayload[col]
-    })
+  const missingColumns = missingOptionalColumns(error)
+  if (error && missingColumns.length) {
+    if (requiredColumns.some(col => missingColumns.includes(col))) return error
+    const fallbackPayload = stripColumns(payload, missingColumns)
     ;({ error } = await supabase.from('ar_bills').update(fallbackPayload).eq('id', id))
   }
   return error
@@ -203,6 +216,7 @@ async function saveArBillById(id, payload, options = {}) {
 
 function preferLatestRecorder(map, log) {
   if (!log?.bill_no || !log?.recorder) return
+  if (log.action && !RECORDER_SOURCE_ACTIONS.has(log.action)) return
   const current = map.get(log.bill_no)
   if (!current || String(log.created_at || '') > String(current.created_at || '')) {
     map.set(log.bill_no, log)
@@ -225,7 +239,7 @@ async function hydrateBillRowsWithRecorders(rows) {
     const batch = missingRecorderBillNos.slice(i, i + BATCH)
     const { data, error } = await supabase
       .from('activity_logs')
-      .select('bill_no,recorder,created_at')
+      .select('bill_no,recorder,created_at,action')
       .in('bill_no', batch)
       .not('recorder', 'is', null)
 
@@ -739,18 +753,36 @@ export default function BillsManagement() {
     let all = []
     let from = 0
     let expectedTotal = null
+    let usePaymentReceivedAt = true
 
     try {
       while (true) {
-        let q = applyRetroCollectionFilters(
-          supabase
-            .from('ar_bills')
-            .select('id,date,bill_issued_at,payment_received_at,customer_type,cash,bcel,bcel2,ldb', { count: 'exact' }),
-          { search, workload, customerTypeFilter, paymentTypeFilter, bankFilter, retroDatePreset },
-        )
-        const { data, count, error } = await q
-          .order('payment_received_at', { ascending: false })
-          .range(from, from + PAGE - 1)
+        let q = usePaymentReceivedAt
+          ? applyRetroCollectionFilters(
+              supabase
+                .from('ar_bills')
+                .select('id,date,bill_issued_at,payment_received_at,customer_type,cash,bcel,bcel2,ldb', { count: 'exact' }),
+              { search, workload, customerTypeFilter, paymentTypeFilter, bankFilter, retroDatePreset },
+            )
+          : applyBillFilters(
+              supabase
+                .from('ar_bills')
+                .select('id,date,bill_issued_at,customer_type,cash,bcel,bcel2,ldb,debt', { count: 'exact' }),
+              { search, workload, customerTypeFilter, paymentTypeFilter, bankFilter },
+            )
+
+        let query = usePaymentReceivedAt
+          ? q.order('payment_received_at', { ascending: false })
+          : q.order('date', { ascending: false })
+
+        const { data, count, error } = await query.range(from, from + PAGE - 1)
+        if (error && usePaymentReceivedAt && String(error.message || '').includes('payment_received_at')) {
+          usePaymentReceivedAt = false
+          all = []
+          from = 0
+          expectedTotal = null
+          continue
+        }
         if (error) throw error
         if (expectedTotal === null) expectedTotal = count ?? 0
         if (data?.length) all = all.concat(data)
@@ -817,13 +849,14 @@ export default function BillsManagement() {
   async function handleSubmit(form) {
     setSubmitError('')
     setSaving(true)
+    const paidTotal = (form.cash || 0) + (form.bcel || 0) + (form.bcel2 || 0) + (form.ldb || 0) + (form.prepayment || 0)
     const normalizedForm = {
       ...form,
-      recorded_by: form.recorded_by || defaultRecorder,
+      recorded_by: form.recorded_by || (modal.mode === 'add' ? defaultRecorder : ''),
       payment_type: form.payment_type,
       bill_issued_at: form.bill_issued_at || null,
       payment_received_at: form.payment_received_at || (
-        ((form.cash || 0) + (form.bcel || 0) + (form.bcel2 || 0) + (form.ldb || 0) + (form.prepayment || 0)) > 0
+        modal.mode === 'add' && paidTotal > 0
           ? dateOnly(form.bill_issued_at || form.date)
           : null
       ),
@@ -836,11 +869,9 @@ export default function BillsManagement() {
     } else {
       ;({ error } = await supabase.from('ar_bills').update(payload).eq('id', form.id))
     }
-    if (error && OPTIONAL_AR_BILL_COLUMNS.some(col => error.message?.includes(col))) {
-      const fallbackPayload = { ...payload }
-      OPTIONAL_AR_BILL_COLUMNS.forEach(col => {
-        delete fallbackPayload[col]
-      })
+    const submitMissingColumns = missingOptionalColumns(error)
+    if (error && submitMissingColumns.length) {
+      const fallbackPayload = stripColumns(payload, submitMissingColumns)
       if (modal.mode === 'add') {
         ;({ error } = await supabase.from('ar_bills').insert(fallbackPayload))
       } else {
@@ -860,6 +891,7 @@ export default function BillsManagement() {
         await logAction({ action: modal.mode === 'add' ? 'ເພີ່ມໃບບິນ' : 'ແກ້ໄຂໃບບິນ', bill_no: form.bill_no, patient_name: form.patient_name, amount: form.grand_total, recorder: form.recorded_by })
       } catch (logErr) {
       }
+      showSuccess(modal.mode === 'add' ? 'ເພີ່ມໃບບິນສຳເລັດ' : 'ແກ້ໄຂໃບບິນສຳເລັດ')
       setModal(null); fetchRows(); fetchBillSummary(); fetchRetroCollectionSummary()
     } else {
       if (error.message?.includes('duplicate key') || error.code === '23505') {
@@ -887,9 +919,7 @@ export default function BillsManagement() {
     updated.payment_type = deriveChannelPaymentType(updated) || null
     updated.debt_status = resolvePaymentStatus(updated)
 
-    const error = await saveArBillById(row.id, buildArBillPayload(updated), {
-      requiredColumns: ['payment_received_at'],
-    })
+    const error = await saveArBillById(row.id, buildArBillPayload(updated))
 
     if (!error) {
       try { await supabase.from('ar_debt').delete().eq('bill_no', row.bill_no) } catch (e) {}
@@ -903,6 +933,7 @@ export default function BillsManagement() {
           recorder: payment.recordedBy,
         })
       } catch (e) {}
+      showSuccess('ບັນທຶກການຊຳລະສຳເລັດ')
     }
 
     setSaving(false)
@@ -913,7 +944,7 @@ export default function BillsManagement() {
       fetchRetroCollectionSummary()
     } else {
       setSubmitError('ເກີດຂໍ້ຜິດພາດ: ' + error.message)
-      alert('ເກີດຂໍ້ຜິດພາດ: ' + error.message)
+      showError('ບັນທຶກບໍ່ສຳເລັດ', error.message)
     }
   }
 
@@ -930,9 +961,10 @@ export default function BillsManagement() {
         await logAction({ action: 'ລົບໃບບິນ', bill_no: delTarget.bill_no, patient_name: delTarget.patient_name, amount: delTarget.grand_total })
       } catch (logErr) {
       }
+      showSuccess('ລົບໃບບິນສຳເລັດ')
       setDelTarget(null); fetchRows(); fetchBillSummary(); fetchRetroCollectionSummary()
     } else {
-      alert('Error: ' + error.message)
+      showError('ລົບບໍ່ສຳເລັດ', error.message)
     }
   }
 
@@ -947,16 +979,17 @@ export default function BillsManagement() {
         await logAction({ action: 'ລຶບຂໍ້ມູນທັງໝົດ', details: 'ລຶບທັງ ar_bills ແລະ ar_debt' })
       } catch (logErr) {
       }
+      showSuccess('ລຶບຂໍ້ມູນທັງໝົດສຳເລັດ')
       setDelAll(false); fetchRows(); fetchBillSummary(); fetchRetroCollectionSummary()
     } else {
-      alert('Error: ' + (errorBills?.message || errorDebt?.message || 'Unknown error'))
+      showError('ລຶບບໍ່ສຳເລັດ', errorBills?.message || errorDebt?.message || 'Unknown error')
     }
   }
 
   async function handleExcelUpload(file) {
     if (!file) return
     if (!file.name.match(/\.(xlsx|xls)$/i)) {
-      alert('ກະລຸນາເລືອກໄຟລ .xlsx ຫຼື .xls ເທົ່ານັ້ນ')
+      showInfo('ໄຟລບໍ່ຖືກຕ້ອງ', 'ກະລຸນາເລືອກໄຟລ .xlsx ຫຼື .xls ເທົ່ານັ້ນ')
       return
     }
     const log = []
@@ -990,12 +1023,14 @@ export default function BillsManagement() {
         })
       } catch (_) {}
       setUploadState(s => ({ ...s, log: [...log], progress: 100 }))
+      showSuccess('ອັບໂຫຼດ Excel ສຳເລັດ', `${uploaded} ແຖວ`)
       fetchRows()
       fetchBillSummary()
       fetchRetroCollectionSummary()
     } catch (err) {
       addLog(`✗ ${err.message}`, false)
       setUploadState(s => ({ ...(s || { progress: 0, done: 0, total: 0, fileName: file.name }), error: err.message, log: [...log] }))
+      showError('ອັບໂຫຼດ Excel ບໍ່ສຳເລັດ', err.message)
     }
   }
 

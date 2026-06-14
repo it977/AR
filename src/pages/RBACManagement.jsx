@@ -9,6 +9,7 @@ import {
 } from '../lib/rbac'
 import { logAction } from '../lib/log'
 import { useAuth } from '../context/AuthContext'
+import { confirmAction, showSuccess } from '../lib/sweetAlert'
 
 const emptyForm = {
   email: '',
@@ -352,7 +353,12 @@ export default function RBACManagement() {
       setError('Your own account was skipped. You cannot delete your own access.')
     }
     if (targetIds.length === 0) return
-    if (!window.confirm(`Delete ${targetIds.length} user profile(s) from app access?`)) return
+    const confirmed = await confirmAction({
+      title: 'Delete user access?',
+      text: `Delete ${targetIds.length} user profile(s) from app access?`,
+      confirmButtonText: 'Delete',
+    })
+    if (!confirmed) return
 
     setSaving(true)
     const { error: permissionDeleteError } = await supabase
@@ -376,6 +382,7 @@ export default function RBACManagement() {
         metadata: { user_ids: targetIds },
       })
       setMessage(`Deleted ${targetIds.length} user profile(s).`)
+      showSuccess('Deleted user access')
       await loadData()
     }
     setSaving(false)

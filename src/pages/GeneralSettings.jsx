@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { createDataBackup, listRecentBackups } from '../lib/autoBackup'
+import { confirmAction, showError, showSuccess } from '../lib/sweetAlert'
 
 // ============================================================
 // Tab definitions
@@ -84,23 +85,42 @@ function ConfigTable({ category, hint }) {
       .from('ar_config_options')
       .insert({ category, value: val, label: newLabel.trim() || val, sort_order: maxOrder + 1, is_active: true })
       .select().single()
-    if (err) setError(err.message)
-    else { setItems(prev => [...prev, data]); setNewValue(''); setNewLabel('') }
+    if (err) {
+      setError(err.message)
+      showError('ເພີ່ມບໍ່ສຳເລັດ', err.message)
+    }
+    else { setItems(prev => [...prev, data]); setNewValue(''); setNewLabel(''); showSuccess('ເພີ່ມຂໍ້ມູນສຳເລັດ') }
     setSaving(false)
   }
 
   async function saveEdit(id) {
     setSaving(true)
-    await supabase.from('ar_config_options').update(editData).eq('id', id)
+    const { error } = await supabase.from('ar_config_options').update(editData).eq('id', id)
+    if (error) {
+      setSaving(false)
+      showError('ບັນທຶກບໍ່ສຳເລັດ', error.message)
+      return
+    }
     setItems(prev => prev.map(i => i.id === id ? { ...i, ...editData } : i))
     setEditId(null)
+    showSuccess('ບັນທຶກການແກ້ໄຂສຳເລັດ')
     setSaving(false)
   }
 
   async function remove(id, value) {
-    if (!window.confirm(`ລົບ "${value}" ອອກ?`)) return
-    await supabase.from('ar_config_options').delete().eq('id', id)
+    const confirmed = await confirmAction({
+      title: 'ຢືນຢັນການລົບ',
+      text: `ລົບ "${value}" ອອກ?`,
+      confirmButtonText: 'ລົບ',
+    })
+    if (!confirmed) return
+    const { error } = await supabase.from('ar_config_options').delete().eq('id', id)
+    if (error) {
+      showError('ລົບບໍ່ສຳເລັດ', error.message)
+      return
+    }
     setItems(prev => prev.filter(i => i.id !== id))
+    showSuccess('ລົບຂໍ້ມູນສຳເລັດ')
   }
 
   async function toggleActive(id, current) {
@@ -289,6 +309,9 @@ function SimpleTable({ tableName, hint }) {
       setItems(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
       setNewName('')
       setNewDueDays(30)
+      showSuccess('ເພີ່ມຂໍ້ມູນສຳເລັດ')
+    } else if (error) {
+      showError('ເພີ່ມບໍ່ສຳເລັດ', error.message)
     }
     setSaving(false)
   }
@@ -301,16 +324,31 @@ function SimpleTable({ tableName, hint }) {
     const { error } = await supabase.from(tableName).update(payload).eq('id', id)
     if (error && isInsurance && error.message?.includes('due_days')) {
       await supabase.from(tableName).update({ name }).eq('id', id)
+    } else if (error) {
+      setSaving(false)
+      showError('ບັນທຶກບໍ່ສຳເລັດ', error.message)
+      return
     }
     setItems(prev => prev.map(i => i.id === id ? { ...i, ...payload } : i).sort((a, b) => a.name.localeCompare(b.name)))
     setEditId(null)
+    showSuccess('ບັນທຶກການແກ້ໄຂສຳເລັດ')
     setSaving(false)
   }
 
   async function remove(id, name) {
-    if (!window.confirm(`ລົບ "${name}" ອອກ?`)) return
-    await supabase.from(tableName).delete().eq('id', id)
+    const confirmed = await confirmAction({
+      title: 'ຢືນຢັນການລົບ',
+      text: `ລົບ "${name}" ອອກ?`,
+      confirmButtonText: 'ລົບ',
+    })
+    if (!confirmed) return
+    const { error } = await supabase.from(tableName).delete().eq('id', id)
+    if (error) {
+      showError('ລົບບໍ່ສຳເລັດ', error.message)
+      return
+    }
     setItems(prev => prev.filter(i => i.id !== id))
+    showSuccess('ລົບຂໍ້ມູນສຳເລັດ')
   }
 
   return (

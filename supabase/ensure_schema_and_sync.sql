@@ -24,6 +24,30 @@ alter table ar_debt add column if not exists payment_2_amount numeric(18,2) defa
 alter table ar_debt add column if not exists payment_3_date date;
 alter table ar_debt add column if not exists payment_3_method text;
 alter table ar_debt add column if not exists payment_3_amount numeric(18,2) default 0;
+alter table ar_config_options add column if not exists category text;
+alter table ar_config_options add column if not exists label text;
+alter table ar_config_options add column if not exists sort_order integer default 0;
+alter table ar_config_options add column if not exists is_active boolean default true;
+
+update ar_config_options
+set
+  category = coalesce(category, 'legacy'),
+  value = coalesce(value, key),
+  label = coalesce(label, value, key),
+  sort_order = coalesce(sort_order, 0),
+  is_active = coalesce(is_active, true)
+where category is null
+   or value is null
+   or label is null
+   or sort_order is null
+   or is_active is null;
+
+alter table ar_config_options alter column key drop not null;
+alter table ar_config_options alter column category set not null;
+alter table ar_config_options alter column sort_order set default 0;
+alter table ar_config_options alter column is_active set default true;
+create index if not exists idx_ar_config_options_category_sort
+  on ar_config_options(category, sort_order);
 
 -- 2. ອັບເດດ debt_status ຕາມ debt
 update ar_bills set debt_status = 'pending' where (debt_status is null or debt_status = '') and debt > 0;

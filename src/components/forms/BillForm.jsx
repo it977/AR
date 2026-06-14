@@ -26,7 +26,7 @@ const EMPTY = {
   svc_chronic: 0, svc_pharma: 0, svc_support: 0, svc_admin: 0, svc_homecare: 0,
   total: 0, discounts: 0, grand_total: 0,
   cash: 0, bcel: 0, bcel2: 0, ldb: 0,
-  debt: 0, prepayment: 0, payment_type: '', bill_issued_at: '', submit_date: '', due_date: '', note: '', aging_group: 'Current Receivables', recorded_by: '',
+  debt: 0, prepayment: 0, payment_type: '', bill_issued_at: '', payment_received_at: '', submit_date: '', due_date: '', note: '', aging_group: 'Current Receivables', recorded_by: '',
 }
 
 function Field({ label, required, children, hint }) {
@@ -61,6 +61,11 @@ function toDateTimeInputValue(value) {
   return String(value).slice(0, 16)
 }
 
+function toDateInputValue(value) {
+  if (!value) return ''
+  return String(value).slice(0, 10)
+}
+
 function getWeekFromDate(dateStr) {
   if (!dateStr) return ''
   const date = new Date(`${dateStr}T00:00:00`)
@@ -87,7 +92,11 @@ function getDefaultForm(initial = {}) {
     workload: initial.workload || (isEdit ? '' : getWorkloadFromTime()),
     hn: initial.hn || (isEdit ? '' : 'LXH'),
     bill_issued_at: initial.bill_issued_at || (isEdit ? '' : localNowDateTime()),
+    payment_received_at: toDateInputValue(initial.payment_received_at),
   }
+  Object.keys(form).forEach(key => {
+    if (form[key] === null) form[key] = ''
+  })
   if (!form.week && form.date) form.week = getWeekFromDate(form.date)
   form.bill_issued_at = form.bill_issued_at ? toDateTimeInputValue(form.bill_issued_at) : ''
   return form
@@ -410,6 +419,18 @@ export default function BillForm({ initial, onSubmit, onCancel, loading, submitE
         <div className="space-y-3">
           <Field label="ວັນທີ/ເວລາອອກບິນ">
             <input type="datetime-local" value={form.bill_issued_at || ''} onChange={txt('bill_issued_at')} className={inputCls} />
+          </Field>
+          <Field label="ວັນທີຮັບເງິນ">
+            <div className="flex gap-2">
+              <input type="date" value={form.payment_received_at || ''} onChange={txt('payment_received_at')} className={inputCls} />
+              <button
+                type="button"
+                onClick={() => set('payment_received_at', '')}
+                className="rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-500 hover:bg-slate-50"
+              >
+                ລ້າງ
+              </button>
+            </div>
           </Field>
           <Field label="ຊື່ຜູ້ບັນທຶກ">
             <RecorderSelect value={form.recorded_by} onChange={v => set('recorded_by', v)} />
