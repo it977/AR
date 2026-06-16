@@ -139,14 +139,29 @@ export default function DailySales() {
   const { data: debtRows }            = usePayoffData({ ...filters, payoffDateField: 'date_paid' })
 
   const kpis      = useMemo(() => computeKPIs(rows || []), [rows])
-  const receiptStats = useMemo(() => computeBillReceiptStats(receiptRows || []), [receiptRows])
   const shiftData = useMemo(() => computeShiftData(rows || []), [rows])
 
-  // Collection stats from ar_debt (Pay off sheet)
+  // Split bill receipts into same-day vs retro-collected (payment received after bill issued).
+  const { sameDayReceipts, retroReceipts } = useMemo(() => {
+    const sameDay = []
+    const retro = []
+    for (const r of receiptRows || []) {
+      const received = (r.payment_received_at || '').slice(0, 10)
+      const issued = (r.bill_issued_at || r.date || '').slice(0, 10)
+      if (received && issued && received > issued) retro.push(r)
+      else sameDay.push(r)
+    }
+    return { sameDayReceipts: sameDay, retroReceipts: retro }
+  }, [receiptRows])
+
+  const receiptStats = useMemo(() => computeBillReceiptStats(sameDayReceipts), [sameDayReceipts])
+  const retroReceiptStats = useMemo(() => computeBillReceiptStats(retroReceipts), [retroReceipts])
+
+  // Collection stats from ar_debt (Pay off sheet) + retro-collected ar_bills receipts.
   const collectionStats = useMemo(() => {
     const dr = debtRows || []
     // Calculate debt collection from channel payments, amount_paid, or debt_amount - balance.
-    const amount = dr.reduce((s, r) => {
+    const debtAmount = dr.reduce((s, r) => {
       // Prefer channel payments first.
       const channelPaid = (r.cash_paid || 0) + (r.bcel_paid || 0) + (r.bcel2_paid || 0) + (r.ldb_paid || 0)
       if (channelPaid > 0) return s + channelPaid
@@ -156,16 +171,18 @@ export default function DailySales() {
       const debtPaid = (r.debt_amount || 0) - (r.balance || 0)
       return s + (debtPaid > 0 ? debtPaid : 0)
     }, 0)
-    const bills  = new Set(dr.map(r => r.bill_no).filter(Boolean)).size
-    return { 
-      amount, 
-      bills, 
-      cash: dr.reduce((s, r) => s + (r.cash_paid || 0), 0), 
-      bcel: dr.reduce((s, r) => s + (r.bcel_paid || 0), 0), 
-      bcel2: dr.reduce((s, r) => s + (r.bcel2_paid || 0), 0), 
-      ldb: dr.reduce((s, r) => s + (r.ldb_paid || 0), 0) 
+    const debtBillNos = new Set(dr.map(r => r.bill_no).filter(Boolean))
+    const retroBillNos = new Set(retroReceipts.map(r => r.bill_no).filter(Boolean))
+    const billUnion = new Set([...debtBillNos, ...retroBillNos])
+    return {
+      amount: debtAmount + retroReceiptStats.amount,
+      bills: billUnion.size,
+      cash:  dr.reduce((s, r) => s + (r.cash_paid  || 0), 0) + retroReceiptStats.cash,
+      bcel:  dr.reduce((s, r) => s + (r.bcel_paid  || 0), 0) + retroReceiptStats.bcel,
+      bcel2: dr.reduce((s, r) => s + (r.bcel2_paid || 0), 0) + retroReceiptStats.bcel2,
+      ldb:   dr.reduce((s, r) => s + (r.ldb_paid   || 0), 0) + retroReceiptStats.ldb,
     }
-  }, [debtRows])
+  }, [debtRows, retroReceipts, retroReceiptStats])
 
   const viewKpis = useMemo(() => ({
     ...kpis,
@@ -264,8 +281,8 @@ export default function DailySales() {
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>}
             />
             <BreakdownCard
-              label="Discounts" sublabel="Total discount amount"
-              value={viewKpis.totalDiscounts} color="amber"
+              label="Daily Income" sublabel="Actual Total Sale - Outstanding Debts"
+              value={viewKpis.dailyIncome} color="amber"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" /></svg>}
             />
             <BreakdownCard
