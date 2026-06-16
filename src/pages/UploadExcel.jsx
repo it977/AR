@@ -208,15 +208,11 @@ export default function UploadExcel() {
     setStep(2); setProgress(0); setUploadLog([])
     try {
       addLog(`ເລີ່ມອັບໂຫຼດ "${file.name}"`)
-      const debtRows = (parsed.debt || []).filter(row => row.customer_type === 'INS')
-      const skippedNonInsDebt = (parsed.debt || []).length - debtRows.length
+      const debtRows = parsed.debt || []
       const billsTotal = parsed.bills.length
       const debtTotal  = debtRows.length
       const cashflowTotal = parsed.cashflow?.length || 0
       const grandTotal = billsTotal + debtTotal + cashflowTotal
-      if (skippedNonInsDebt > 0) {
-        addLog(`Skipped ${formatNumber(skippedNonInsDebt)} non-INS Pay off rows; only INS goes to Debt Management.`, true)
-      }
 
       if (billsTotal > 0) {
         addLog(`ກຳລັງອັບໂຫຼດ ar_bills (${formatNumber(billsTotal)} ແຖວ)...`)

@@ -167,6 +167,8 @@ export default function PaymentChannel() {
 
   const methodCollected = totals.cash + totals.bcel + totals.bcel2 + totals.ldb
   const totalCollected = methodCollected + depositCollection
+  // Daily Income = at-billing collections only (ar_bills channels, excluding payoff)
+  const dailyIncomeCollected = receiptStats.cash + receiptStats.bcel + receiptStats.bcel2 + receiptStats.ldb
   const remainingBalance = useMemo(() => {
     if (useLookerFallback) return LOOKER_CASHFLOW_FALLBACK.balance
     if (useCashflowOnly) return (cashflowRows || []).reduce((s, r) => s + (r.balance || 0), 0)
@@ -280,12 +282,12 @@ export default function PaymentChannel() {
           <p className="text-2xl font-extrabold leading-tight">{formatNumber(actualIncomeTotal)}</p>
           <p className="text-xs text-indigo-200 mt-1">= Collected + Pay off</p>
         </div>
-        {/* Collected at billing */}
+        {/* Daily Income */}
         <div className="rounded-2xl p-5 text-white bg-gradient-to-br from-cyan-500 to-cyan-700 shadow-lg shadow-cyan-200">
-          <p className="text-xs font-semibold text-cyan-200 uppercase tracking-wider">Collected at Billing</p>
-          <p className="text-xs text-cyan-200 mb-3">Collected at Billing</p>
-          <p className="text-2xl font-extrabold leading-tight">{formatNumber(totalCollected)}</p>
-          <p className="text-xs text-cyan-200 mt-1">{collectedPct}% of total</p>
+          <p className="text-xs font-semibold text-cyan-200 uppercase tracking-wider">Daily Income</p>
+          <p className="text-xs text-cyan-200 mb-3">Collected at billing (excl. pay off)</p>
+          <p className="text-2xl font-extrabold leading-tight">{formatNumber(dailyIncomeCollected)}</p>
+          <p className="text-xs text-cyan-200 mt-1">{totalCollected > 0 ? (dailyIncomeCollected / totalCollected * 100).toFixed(1) : '0.0'}% of collected</p>
         </div>
         {/* Pay off collection */}
         <div className="rounded-2xl p-5 text-white bg-gradient-to-br from-violet-500 to-violet-700 shadow-lg shadow-violet-200">
