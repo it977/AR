@@ -7,6 +7,7 @@ export function FilterProvider({ children }) {
     dateFrom: '',
     dateTo: '',
     workload: '',
+    workloadDebt: '',
     customerType: '',
     gender: '',
     insiteOnsite: '',

@@ -141,6 +141,7 @@ export function usePayoffData(filters = {}) {
           if (filters.agingGroup)   q = q.eq('aging_group', filters.agingGroup)
           if (filters.customerType) q = q.eq('customer_type', filters.customerType)
           if (filters.insurance)    q = q.ilike('insurance', `%${filters.insurance}%`)
+          if (filters.workloadDebt) q = q.eq('workload', filters.workloadDebt)
           return q.range(from, to)
         })
         setData(rows)
@@ -148,7 +149,7 @@ export function usePayoffData(filters = {}) {
       setLoading(false)
     }
     load()
-  }, [filters.dateFrom, filters.dateTo, filters.agingGroup, filters.customerType, filters.insurance, dateField])
+  }, [filters.dateFrom, filters.dateTo, filters.agingGroup, filters.customerType, filters.insurance, filters.workloadDebt, dateField])
 
   return { data, loading }
 }

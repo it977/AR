@@ -245,6 +245,9 @@ export default function DailySales() {
           <FilterSelect label="Workload" value={filters.workload}
             onChange={v => updateFilters({ workload: v })}
             options={SHIFT_OPTIONS} />
+          <FilterSelect label="Workload Debt" value={filters.workloadDebt}
+            onChange={v => updateFilters({ workloadDebt: v })}
+            options={SHIFT_OPTIONS} />
           <FilterSelect label="Customer Type" value={filters.customerType}
             onChange={v => updateFilters({ customerType: v })}
             options={['GN','INS','B2B']} />
