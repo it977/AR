@@ -3,11 +3,26 @@ import { useCan } from '../context/AuthContext'
 import { PERMISSIONS } from '../lib/rbac'
 import { logAction } from '../lib/log'
 import { showError, showSuccess } from '../lib/sweetAlert'
+import Modal from './Modal'
 
-function buildPdfSource(element, orientation) {
+const PDF_PAGE_SELECTOR = '.pdf-dashboard-page, .pdf-a4-page'
+
+function getPdfPageOptions(element) {
+  return [...element.querySelectorAll(PDF_PAGE_SELECTOR)].map((page, index) => ({
+    index,
+    label:
+      page.dataset.pdfPageLabel ||
+      page.querySelector('[data-pdf-title]')?.textContent?.trim() ||
+      page.querySelector('h1, h2, h3')?.textContent?.trim() ||
+      `Page ${index + 1}`,
+  }))
+}
+
+function buildPdfSource(element, orientation, selectedPageIndexes) {
   const exportWidth = orientation === 'portrait' ? 900 : 2200
   const exportHeight = orientation === 'portrait' ? 1122 : 794
   const wrapper = document.createElement('div')
+  const selectedPages = new Set(selectedPageIndexes)
 
   wrapper.className = 'pdf-export'
   wrapper.style.position = 'fixed'
@@ -54,6 +69,11 @@ function buildPdfSource(element, orientation) {
     page.style.breakAfter = 'auto'
   })
 
+  clone.querySelectorAll(`${PDF_PAGE_SELECTOR}:last-child`).forEach(page => {
+    page.style.pageBreakAfter = 'auto'
+    page.style.breakAfter = 'auto'
+  })
+
   clone.querySelectorAll('[data-pdf-hidden="true"]').forEach(node => node.remove())
   clone.querySelectorAll('button, input, select, textarea, [role="button"]').forEach(node => node.remove())
 
@@ -87,6 +107,12 @@ function buildPdfSource(element, orientation) {
     clonedCanvas.replaceWith(image)
   })
 
+  ;[...clone.querySelectorAll(PDF_PAGE_SELECTOR)].forEach((page, index) => {
+    if (!selectedPages.has(index)) {
+      page.remove()
+    }
+  })
+
   wrapper.appendChild(clone)
   document.body.appendChild(wrapper)
 
@@ -98,7 +124,7 @@ async function savePagesAsPdf(exportElement, filename, orientation, previewWindo
   const { default: html2canvas } = await import('html2canvas')
   await document.fonts?.ready
 
-  const pages = [...exportElement.querySelectorAll('.pdf-dashboard-page, .pdf-a4-page')]
+  const pages = [...exportElement.querySelectorAll(PDF_PAGE_SELECTOR)]
   if (!pages.length) {
     throw new Error('No PDF dashboard pages found')
   }
@@ -157,12 +183,57 @@ export default function PDFButton({
   orientation = 'landscape',
 }) {
   const [isDownloading, setIsDownloading] = useState(false)
+  const [isPickerOpen, setIsPickerOpen] = useState(false)
+  const [pageOptions, setPageOptions] = useState([])
+  const [selectedPageIndexes, setSelectedPageIndexes] = useState([])
   const canExport = useCan(PERMISSIONS.REPORTS_EXPORT)
 
   if (!canExport) return null
 
+  const allPageIndexes = pageOptions.map(page => page.index)
+  const allPagesSelected = pageOptions.length > 0 && selectedPageIndexes.length === pageOptions.length
+
+  const openPagePicker = () => {
+    if (isDownloading) return
+
+    const element = document.getElementById(elementId)
+
+    if (!element) {
+      showError('PDF content was not found.')
+      return
+    }
+
+    const options = getPdfPageOptions(element)
+
+    if (!options.length) {
+      showError('No PDF pages were found.')
+      return
+    }
+
+    setPageOptions(options)
+    setSelectedPageIndexes(options.map(page => page.index))
+    setIsPickerOpen(true)
+  }
+
+  const toggleAllPages = () => {
+    setSelectedPageIndexes(allPagesSelected ? [] : allPageIndexes)
+  }
+
+  const togglePage = pageIndex => {
+    setSelectedPageIndexes(current => {
+      if (current.includes(pageIndex)) {
+        return current.filter(index => index !== pageIndex)
+      }
+      return [...current, pageIndex].sort((a, b) => a - b)
+    })
+  }
+
   const downloadPDF = async () => {
     if (isDownloading) return
+    if (!selectedPageIndexes.length) {
+      showError('Please select at least one PDF page.')
+      return
+    }
 
     const element = document.getElementById(elementId)
 
@@ -178,8 +249,11 @@ export default function PDFButton({
 
     try {
       setIsDownloading(true)
-      exportElement = buildPdfSource(element, orientation)
+      exportElement = buildPdfSource(element, orientation, selectedPageIndexes)
       await savePagesAsPdf(exportElement, outputName, orientation, previewWindow)
+      const selectedLabels = pageOptions
+        .filter(page => selectedPageIndexes.includes(page.index))
+        .map(page => page.label)
       await logAction({
         action: 'Exported PDF',
         action_type: 'report.export',
@@ -189,9 +263,11 @@ export default function PDFButton({
         metadata: {
           element_id: elementId,
           orientation,
+          pages: selectedLabels,
         },
       })
       showSuccess('PDF exported successfully')
+      setIsPickerOpen(false)
     } catch (error) {
       if (previewWindow && !previewWindow.closed) {
         previewWindow.document.body.innerHTML = '<p style="font:16px Arial;padding:24px;color:#b91c1c">PDF download failed. Please try again.</p>'
@@ -204,23 +280,94 @@ export default function PDFButton({
   }
 
   return (
-    <button
-      id={`pdf-btn-${elementId}`}
-      onClick={downloadPDF}
-      disabled={isDownloading}
-      className="inline-flex items-center gap-2 px-4 py-2 bg-red-50 hover:bg-red-100 disabled:bg-red-100 disabled:text-red-400 disabled:cursor-not-allowed text-red-700 text-sm font-semibold rounded-xl border border-red-200 transition-colors"
-      title="Download PDF"
-    >
-      {isDownloading ? (
-        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-        </svg>
-      ) : (
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-        </svg>
-      )}
-      {isDownloading ? 'Generating PDF...' : label}
-    </button>
+    <>
+      <button
+        id={`pdf-btn-${elementId}`}
+        onClick={openPagePicker}
+        disabled={isDownloading}
+        className="inline-flex items-center gap-2 px-4 py-2 bg-red-50 hover:bg-red-100 disabled:bg-red-100 disabled:text-red-400 disabled:cursor-not-allowed text-red-700 text-sm font-semibold rounded-xl border border-red-200 transition-colors"
+        title="Download PDF"
+      >
+        {isDownloading ? (
+          <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+        ) : (
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        )}
+        {isDownloading ? 'Generating PDF...' : label}
+      </button>
+
+      <Modal
+        open={isPickerOpen}
+        onClose={isDownloading ? undefined : () => setIsPickerOpen(false)}
+        title="Download PDF"
+        subtitle="Select one or more pages to export."
+        size="sm"
+      >
+        <div className="space-y-4">
+          <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
+            <input
+              type="checkbox"
+              checked={allPagesSelected}
+              onChange={toggleAllPages}
+              disabled={isDownloading}
+              className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+            />
+            All pages
+          </label>
+
+          <div className="space-y-2">
+            {pageOptions.map((page, pageIndex) => (
+              <label
+                key={page.index}
+                className="flex items-center gap-3 rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedPageIndexes.includes(page.index)}
+                  onChange={() => togglePage(page.index)}
+                  disabled={isDownloading}
+                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <span className="flex-1 font-medium">{page.label}</span>
+                <span className="text-xs text-slate-400">Page {pageIndex + 1}</span>
+              </label>
+            ))}
+          </div>
+
+          <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
+            <span className="text-xs font-medium text-slate-500">
+              {selectedPageIndexes.length} of {pageOptions.length} selected
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsPickerOpen(false)}
+                disabled={isDownloading}
+                className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-800 disabled:text-slate-300"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={downloadPDF}
+                disabled={isDownloading || !selectedPageIndexes.length}
+                className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300"
+              >
+                {isDownloading && (
+                  <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                )}
+                {isDownloading ? 'Generating...' : 'Download'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Modal>
+    </>
   )
 }

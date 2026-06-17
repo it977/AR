@@ -58,7 +58,6 @@ export function ConfirmCodeDialog({ open, onClose, onConfirm, title, message, co
     }
     ask()
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   return null
@@ -80,7 +79,6 @@ export function ConfirmDialog({ open, onClose, onConfirm, title, message, confir
     }
     ask()
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   return null
