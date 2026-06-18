@@ -137,6 +137,11 @@ function displayPaymentType(row) {
   return deriveChannelPaymentType(row)
 }
 
+function displayInsurance(row = {}) {
+  if (row.customer_type === 'GN') return '-'
+  return row.insurance || ''
+}
+
 function deriveChannelPaymentType(row) {
   const cash = Number(row.cash) || 0
   const transfer = (Number(row.bcel) || 0) + (Number(row.bcel2) || 0) + (Number(row.ldb) || 0)
@@ -260,12 +265,13 @@ async function hydrateBillRowsWithRecorders(rows) {
 }
 
 function applyBillFilters(query, filters) {
-  const { search, dateFrom, dateTo, workload, customerTypeFilter, paymentTypeFilter, bankFilter } = filters
+  const { search, dateFrom, dateTo, workload, customerTypeFilter, insuranceFilter, paymentTypeFilter, bankFilter } = filters
   if (search) query = query.or(`bill_no.ilike.%${search}%,patient_name.ilike.%${search}%`)
   if (dateFrom) query = query.gte('date', dateFrom)
   if (dateTo) query = query.lte('date', dateTo)
   if (workload) query = query.eq('workload', workload)
   if (customerTypeFilter) query = query.eq('customer_type', customerTypeFilter)
+  if (insuranceFilter) query = query.eq('insurance', insuranceFilter)
   if (paymentTypeFilter) query = query.eq('payment_type', paymentTypeFilter)
   if (bankFilter === 'cash') query = query.gt('cash', 0)
   if (bankFilter === 'bcel') query = query.gt('bcel', 0)
@@ -276,7 +282,7 @@ function applyBillFilters(query, filters) {
 }
 
 function applyRetroCollectionFilters(query, filters) {
-  const { search, workload, customerTypeFilter, paymentTypeFilter, bankFilter, retroDatePreset } = filters
+  const { search, workload, customerTypeFilter, insuranceFilter, paymentTypeFilter, bankFilter, retroDatePreset } = filters
   const { receivedFrom, receivedTo } = getRetroDateRange(retroDatePreset)
   query = query.not('payment_received_at', 'is', null)
   if (search) query = query.or(`bill_no.ilike.%${search}%,patient_name.ilike.%${search}%`)
@@ -284,7 +290,8 @@ function applyRetroCollectionFilters(query, filters) {
   if (receivedTo) query = query.lte('payment_received_at', endOfDay(receivedTo))
   if (workload) query = query.eq('workload', workload)
   if (customerTypeFilter) query = query.eq('customer_type', customerTypeFilter)
-  else query = query.neq('customer_type', 'INS')
+  else if (!insuranceFilter) query = query.neq('customer_type', 'INS')
+  if (insuranceFilter) query = query.eq('insurance', insuranceFilter)
   if (paymentTypeFilter) query = query.eq('payment_type', paymentTypeFilter)
   if (bankFilter === 'cash') query = query.gt('cash', 0)
   if (bankFilter === 'bcel') query = query.gt('bcel', 0)
@@ -673,10 +680,12 @@ export default function BillsManagement() {
   const [dateTo, setDateTo]   = useState('')
   const [workload, setWorkload] = useState('')
   const [customerTypeFilter, setCustomerTypeFilter] = useState('')
+  const [insuranceFilter, setInsuranceFilter] = useState('')
   const [bankFilter, setBankFilter] = useState('')
   const [paymentTypeFilter, setPaymentTypeFilter] = useState('')
 
   const [insuranceDueDays, setInsuranceDueDays] = useState({})
+  const [insuranceOptions, setInsuranceOptions] = useState([])
 
   const [modal, setModal]         = useState(null)  // null | { mode: 'add'|'edit'|'gn-payment', row?: {} }
   const [submitError, setSubmitError] = useState('')
@@ -692,17 +701,21 @@ export default function BillsManagement() {
     const { data, error } = await supabase.from('ar_insurance_list').select('name,due_days')
     if (error) {
       const fallback = await supabase.from('ar_insurance_list').select('name')
-      setInsuranceDueDays(Object.fromEntries((fallback.data || []).map(item => [item.name, DEFAULT_DUE_DAYS])))
+      const names = (fallback.data || []).map(item => item.name).filter(Boolean)
+      setInsuranceOptions(names)
+      setInsuranceDueDays(Object.fromEntries(names.map(name => [name, DEFAULT_DUE_DAYS])))
       return
     }
-    setInsuranceDueDays(Object.fromEntries((data || []).map(item => [item.name, item.due_days || DEFAULT_DUE_DAYS])))
+    const insuranceRows = data || []
+    setInsuranceOptions(insuranceRows.map(item => item.name).filter(Boolean))
+    setInsuranceDueDays(Object.fromEntries(insuranceRows.map(item => [item.name, item.due_days || DEFAULT_DUE_DAYS])))
   }, [])
 
   const fetchRows = useCallback(async () => {
     setLoading(true)
     let q = applyBillFilters(
       supabase.from('ar_bills').select('*', { count: 'exact' }),
-      { search, dateFrom, dateTo, workload, customerTypeFilter, paymentTypeFilter, bankFilter },
+      { search, dateFrom, dateTo, workload, customerTypeFilter, insuranceFilter, paymentTypeFilter, bankFilter },
     )
 
     const { data, count, error } = await q
@@ -715,7 +728,7 @@ export default function BillsManagement() {
       setTotal(count || 0)
     }
     setLoading(false)
-  }, [search, dateFrom, dateTo, workload, customerTypeFilter, paymentTypeFilter, bankFilter, page, pageSize])
+  }, [search, dateFrom, dateTo, workload, customerTypeFilter, insuranceFilter, paymentTypeFilter, bankFilter, page, pageSize])
 
   const fetchBillSummary = useCallback(async () => {
     setSummaryLoading(true)
@@ -730,7 +743,7 @@ export default function BillsManagement() {
           supabase
             .from('ar_bills')
             .select('id,grand_total,cash,bcel,bcel2,ldb,debt', { count: 'exact' }),
-          { search, dateFrom, dateTo, workload, customerTypeFilter, paymentTypeFilter, bankFilter },
+          { search, dateFrom, dateTo, workload, customerTypeFilter, insuranceFilter, paymentTypeFilter, bankFilter },
         )
         const { data, count, error } = await q.range(from, from + PAGE - 1)
         if (error) throw error
@@ -745,7 +758,7 @@ export default function BillsManagement() {
     } finally {
       setSummaryLoading(false)
     }
-  }, [search, dateFrom, dateTo, workload, customerTypeFilter, paymentTypeFilter, bankFilter])
+  }, [search, dateFrom, dateTo, workload, customerTypeFilter, insuranceFilter, paymentTypeFilter, bankFilter])
 
   const fetchRetroCollectionSummary = useCallback(async () => {
     setRetroCollectionLoading(true)
@@ -762,13 +775,13 @@ export default function BillsManagement() {
               supabase
                 .from('ar_bills')
                 .select('id,date,bill_issued_at,payment_received_at,customer_type,cash,bcel,bcel2,ldb', { count: 'exact' }),
-              { search, workload, customerTypeFilter, paymentTypeFilter, bankFilter, retroDatePreset },
+              { search, workload, customerTypeFilter, insuranceFilter, paymentTypeFilter, bankFilter, retroDatePreset },
             )
           : applyBillFilters(
               supabase
                 .from('ar_bills')
                 .select('id,date,bill_issued_at,customer_type,cash,bcel,bcel2,ldb,debt', { count: 'exact' }),
-              { search, workload, customerTypeFilter, paymentTypeFilter, bankFilter },
+              { search, workload, customerTypeFilter, insuranceFilter, paymentTypeFilter, bankFilter },
             )
 
         let query = usePaymentReceivedAt
@@ -795,7 +808,7 @@ export default function BillsManagement() {
     } finally {
       setRetroCollectionLoading(false)
     }
-  }, [search, workload, customerTypeFilter, paymentTypeFilter, bankFilter, retroDatePreset])
+  }, [search, workload, customerTypeFilter, insuranceFilter, paymentTypeFilter, bankFilter, retroDatePreset])
 
   const openAddModal = useCallback(() => {
     setSubmitError('')
@@ -1158,8 +1171,8 @@ export default function BillsManagement() {
       />
 
       {/* Filters */}
-      <div className="bg-white rounded-xl border border-slate-100 p-3 flex flex-wrap gap-2.5 items-end" data-pdf-hidden="true">
-        <div className="w-full shrink-0 sm:w-56">
+      <div className="bg-white rounded-xl border border-slate-100 p-3 flex flex-wrap gap-2 items-end" data-pdf-hidden="true">
+        <div className="w-full shrink-0 sm:w-[190px]">
           <label className="block text-xs font-semibold text-slate-500 mb-1">ຄົ້ນຫາ</label>
           <input
             type="text" value={search} onChange={e => { setSearch(e.target.value); setPage(0) }}
@@ -1167,7 +1180,7 @@ export default function BillsManagement() {
             className="h-9 w-full text-sm border border-slate-200 rounded-lg px-3 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100"
           />
         </div>
-        <div className="w-[112px]">
+        <div className="w-[104px]">
           <label className="block text-xs font-semibold text-slate-500 mb-1">ກະ</label>
           <select value={workload} onChange={e => { setWorkload(e.target.value); setPage(0) }}
             className="h-9 w-full text-xs border border-slate-200 rounded-lg px-3 outline-none focus:border-primary-400">
@@ -1175,15 +1188,27 @@ export default function BillsManagement() {
             {WORKLOADS.map(w => <option key={w} value={w}>{w}</option>)}
           </select>
         </div>
-        <div className="w-[118px]">
+        <div className="w-[116px]">
           <label className="block text-xs font-semibold text-slate-500 mb-1">ປະເພດລູກຄ້າ</label>
-          <select value={customerTypeFilter} onChange={e => { setCustomerTypeFilter(e.target.value); setPage(0) }}
+          <select value={customerTypeFilter} onChange={e => { setCustomerTypeFilter(e.target.value); if (e.target.value === 'GN') setInsuranceFilter(''); setPage(0) }}
             className="h-9 w-full text-xs border border-slate-200 rounded-lg px-3 outline-none focus:border-primary-400">
             <option value="">ທັງໝົດ</option>
             {['GN', 'INS', 'B2B'].map(type => <option key={type} value={type}>{type}</option>)}
           </select>
         </div>
-        <div className="w-[132px]">
+        <div className="w-[128px]">
+          <label className="block text-xs font-semibold text-slate-500 mb-1">ປະກັນ</label>
+          <select
+            value={insuranceFilter}
+            onChange={e => { setInsuranceFilter(e.target.value); setPage(0) }}
+            disabled={customerTypeFilter === 'GN'}
+            className="h-9 w-full text-xs border border-slate-200 rounded-lg px-3 outline-none focus:border-primary-400 disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
+          >
+            <option value="">ທັງໝົດ</option>
+            {insuranceOptions.map(name => <option key={name} value={name}>{name}</option>)}
+          </select>
+        </div>
+        <div className="w-[124px]">
           <label className="block text-xs font-semibold text-slate-500 mb-1">Payment Type</label>
           <select value={paymentTypeFilter} onChange={e => { setPaymentTypeFilter(e.target.value); setPage(0) }}
             className="h-9 w-full text-xs border border-slate-200 rounded-lg px-3 outline-none focus:border-primary-400">
@@ -1191,7 +1216,7 @@ export default function BillsManagement() {
             {PAYMENT_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
           </select>
         </div>
-        <div className="w-[116px]">
+        <div className="w-[108px]">
           <label className="block text-xs font-semibold text-slate-500 mb-1">ທະນາຄານ</label>
           <select value={bankFilter} onChange={e => { setBankFilter(e.target.value); setPage(0) }}
             className="h-9 w-full text-xs border border-slate-200 rounded-lg px-3 outline-none focus:border-primary-400">
@@ -1203,17 +1228,17 @@ export default function BillsManagement() {
             <option value="debt">ມີໜີ້</option>
           </select>
         </div>
-        <div className="w-[136px]">
+        <div className="w-[128px]">
           <label className="block text-xs font-semibold text-slate-500 mb-1">ຈາກວັນທີ</label>
           <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setPage(0) }}
             className="h-9 w-full text-xs border border-slate-200 rounded-lg px-3 outline-none focus:border-primary-400" />
         </div>
-        <div className="w-[136px]">
+        <div className="w-[128px]">
           <label className="block text-xs font-semibold text-slate-500 mb-1">ຫາວັນທີ</label>
           <input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setPage(0) }}
             className="h-9 w-full text-xs border border-slate-200 rounded-lg px-3 outline-none focus:border-primary-400" />
         </div>
-        <div className="w-[142px]">
+        <div className="w-[136px]">
           <label className="block text-xs font-semibold text-slate-500 mb-1">ວັນທີຮັບຍ້ອນຫຼັງ</label>
           <select value={retroDatePreset} onChange={e => setRetroDatePreset(e.target.value)}
             className="h-9 w-full text-xs border border-amber-100 bg-amber-50 rounded-lg px-2 font-semibold text-amber-800 outline-none focus:border-amber-300 focus:ring-2 focus:ring-amber-100">
@@ -1222,18 +1247,18 @@ export default function BillsManagement() {
             ))}
           </select>
         </div>
-        <div className="w-[116px]">
+        <div className="w-[92px]">
           <label className="block text-xs font-semibold text-slate-500 mb-1">ຈຳນວນແຖວ</label>
           <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(0) }}
-            className="h-9 w-full text-xs border border-slate-200 rounded-lg px-3 outline-none focus:border-primary-400">
+            className="h-9 w-full text-xs border border-slate-200 rounded-lg px-2 outline-none focus:border-primary-400">
             <option value={20}>20 ແຖວ</option>
             <option value={50}>50 ແຖວ</option>
             <option value={100}>100 ແຖວ</option>
             <option value={200}>200 ແຖວ</option>
           </select>
         </div>
-        {(search || dateFrom || dateTo || workload || customerTypeFilter || paymentTypeFilter || bankFilter || retroDatePreset !== 'all') && (
-          <button onClick={() => { setSearch(''); setDateFrom(''); setDateTo(''); setWorkload(''); setCustomerTypeFilter(''); setPaymentTypeFilter(''); setBankFilter(''); setRetroDatePreset('all'); setPage(0) }}
+        {(search || dateFrom || dateTo || workload || customerTypeFilter || insuranceFilter || paymentTypeFilter || bankFilter || retroDatePreset !== 'all') && (
+          <button onClick={() => { setSearch(''); setDateFrom(''); setDateTo(''); setWorkload(''); setCustomerTypeFilter(''); setInsuranceFilter(''); setPaymentTypeFilter(''); setBankFilter(''); setRetroDatePreset('all'); setPage(0) }}
             className="h-9 px-1 text-xs text-slate-500 hover:text-slate-800 underline">
             ລ້າງ
           </button>
@@ -1243,7 +1268,7 @@ export default function BillsManagement() {
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1440px]">
+          <table className="w-full min-w-[1560px]">
             <thead>
               <tr className="border-b border-slate-100">
                 <th className="table-th">ເລກໃບບິນ</th>
@@ -1251,6 +1276,7 @@ export default function BillsManagement() {
                 <th className="table-th">ວັນທີຮັບເງິນ</th>
                 <th className="table-th">ຊື່ຄົນເຈັບ</th>
                 <th className="table-th">ປະເພດ</th>
+                <th className="table-th">ປະກັນ</th>
                 <th className="table-th">OPD/IPD</th>
                 <th className="table-th">Payment Type</th>
                 <th className="table-th text-right">ຍອດລວມສຸດທິ</th>
@@ -1262,9 +1288,9 @@ export default function BillsManagement() {
             </thead>
             <tbody className="divide-y divide-slate-50">
               {loading ? (
-                <tr><td colSpan={12} className="table-td text-center py-12 text-slate-400">ກຳລັງໂຫຼດ...</td></tr>
+                <tr><td colSpan={13} className="table-td text-center py-12 text-slate-400">ກຳລັງໂຫຼດ...</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={12} className="table-td text-center py-12 text-slate-400">ບໍ່ມີຂໍ້ມູນ</td></tr>
+                <tr><td colSpan={13} className="table-td text-center py-12 text-slate-400">ບໍ່ມີຂໍ້ມູນ</td></tr>
               ) : rows.map(row => (
                 <tr key={row.id} className="hover:bg-slate-50 transition-colors">
                   <td className="table-td font-mono text-xs font-semibold text-primary-600">{row.bill_no}</td>
@@ -1275,6 +1301,13 @@ export default function BillsManagement() {
                     <span className={`badge ${BADGE[row.customer_type] || 'bg-slate-100 text-slate-600'}`}>
                       {row.customer_type}
                     </span>
+                  </td>
+                  <td className="table-td text-xs">
+                    {displayInsurance(row) ? (
+                      <span className={row.customer_type === 'GN' ? 'text-slate-400' : 'text-slate-700'}>{displayInsurance(row)}</span>
+                    ) : (
+                      <span className="text-slate-300">—</span>
+                    )}
                   </td>
                   <td className="table-td text-xs">{row.opd_ipd}</td>
                   <td className="table-td">
