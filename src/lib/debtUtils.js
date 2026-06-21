@@ -51,19 +51,27 @@ export const SERVICE_FIELDS = [
 ]
 
 export const AGING_GROUPS = [
+  'N',
+  '0-15 Days',
   'Current Receivables',
   '1-15 Days',
   '16-30 Days',
   '31-45 Days',
   '46-90 Days',
+  '46-60+ Days',
+  'ຈ່າຍຕາມກຳນົດ',
 ]
 
 export const AGING_LABELS = {
+  'N': 'N',
+  '0-15 Days': '0-15 Days',
   'Current Receivables': 'Current Receivables',
   '1-15 Days': '1-15 Days',
   '16-30 Days': '16-30 Days',
   '31-45 Days': '31-45 Days',
   '46-90 Days': '46-90 Days',
+  '46-60+ Days': '46-60+ Days',
+  'ຈ່າຍຕາມກຳນົດ': 'ຈ່າຍຕາມກຳນົດ',
 }
 
 export function getAgingLabel(group) {
@@ -78,10 +86,11 @@ export function normalizeAgingGroup(value) {
     lower === key.toLowerCase() || lower === String(label).toLowerCase()
   )
   if (match) return match[0]
-  if (lower === 'n' || lower === 'due on schedule') return 'Current Receivables'
+  if (lower === 'n') return 'N'
+  if (lower === 'due on schedule') return 'ຈ່າຍຕາມກຳນົດ'
   if (lower === 'pay in installments') return null
-  if (lower === '0-15 days') return '1-15 Days'
-  if (lower === '46-60+ days' || lower === '46-60 days' || lower === '46–60+ days') return '46-90 Days'
+  if (lower === '0-15 days') return '0-15 Days'
+  if (lower === '46-60+ days' || lower === '46-60 days' || lower === '46–60+ days') return '46-60+ Days'
   if (lower === '90+' || lower === '90+ days') return '46-90 Days'
   return AGING_GROUPS.includes(text) ? text : null
 }

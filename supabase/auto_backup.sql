@@ -85,6 +85,114 @@ begin
 end;
 $$;
 
+create or replace function public.restore_ar_data_backup(
+  p_backup_id uuid,
+  p_make_safety_backup boolean default true
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_backup ar_data_backups%rowtype;
+  v_safety_id uuid;
+  v_now timestamp := now() at time zone 'Asia/Bangkok';
+begin
+  if auth.uid() is null then
+    raise exception 'Login is required to restore backup';
+  end if;
+
+  if public.current_user_role() <> 'admin' then
+    raise exception 'Only admin can restore backup';
+  end if;
+
+  select *
+    into v_backup
+  from ar_data_backups
+  where id = p_backup_id;
+
+  if not found then
+    raise exception 'Backup % was not found', p_backup_id;
+  end if;
+
+  if p_make_safety_backup then
+    insert into ar_data_backups (
+      backup_date,
+      backup_time,
+      backup_kind,
+      source,
+      counts,
+      payload
+    )
+    values (
+      v_now::date,
+      to_char(v_now, 'HH24:MI:SS'),
+      'pre_restore_' || to_char(clock_timestamp(), 'HH24MISSMS'),
+      'pre_restore_before_' || p_backup_id::text,
+      jsonb_build_object(
+        'ar_bills', (select count(*) from ar_bills),
+        'ar_debt', (select count(*) from ar_debt),
+        'ar_cashflow', (select count(*) from ar_cashflow),
+        'ar_insurance_list', (select count(*) from ar_insurance_list),
+        'ar_recorders_list', (select count(*) from ar_recorders_list),
+        'ar_config_options', (select count(*) from ar_config_options)
+      ),
+      jsonb_build_object(
+        'ar_bills', coalesce((select jsonb_agg(to_jsonb(t)) from ar_bills t), '[]'::jsonb),
+        'ar_debt', coalesce((select jsonb_agg(to_jsonb(t)) from ar_debt t), '[]'::jsonb),
+        'ar_cashflow', coalesce((select jsonb_agg(to_jsonb(t)) from ar_cashflow t), '[]'::jsonb),
+        'ar_insurance_list', coalesce((select jsonb_agg(to_jsonb(t)) from ar_insurance_list t), '[]'::jsonb),
+        'ar_recorders_list', coalesce((select jsonb_agg(to_jsonb(t)) from ar_recorders_list t), '[]'::jsonb),
+        'ar_config_options', coalesce((select jsonb_agg(to_jsonb(t)) from ar_config_options t), '[]'::jsonb)
+      )
+    )
+    returning id into v_safety_id;
+  end if;
+
+  delete from ar_cashflow;
+  delete from ar_debt;
+  delete from ar_bills;
+  delete from ar_config_options;
+  delete from ar_insurance_list;
+  delete from ar_recorders_list;
+
+  insert into ar_config_options
+  select *
+  from jsonb_populate_recordset(null::ar_config_options, coalesce(v_backup.payload->'ar_config_options', '[]'::jsonb));
+
+  insert into ar_insurance_list
+  select *
+  from jsonb_populate_recordset(null::ar_insurance_list, coalesce(v_backup.payload->'ar_insurance_list', '[]'::jsonb));
+
+  insert into ar_recorders_list
+  select *
+  from jsonb_populate_recordset(null::ar_recorders_list, coalesce(v_backup.payload->'ar_recorders_list', '[]'::jsonb));
+
+  insert into ar_bills
+  select *
+  from jsonb_populate_recordset(null::ar_bills, coalesce(v_backup.payload->'ar_bills', '[]'::jsonb));
+
+  insert into ar_debt
+  select *
+  from jsonb_populate_recordset(null::ar_debt, coalesce(v_backup.payload->'ar_debt', '[]'::jsonb));
+
+  insert into ar_cashflow
+  select *
+  from jsonb_populate_recordset(null::ar_cashflow, coalesce(v_backup.payload->'ar_cashflow', '[]'::jsonb));
+
+  return jsonb_build_object(
+    'restored_backup_id', v_backup.id,
+    'restored_backup_date', v_backup.backup_date,
+    'restored_backup_time', v_backup.backup_time,
+    'safety_backup_id', v_safety_id,
+    'counts', v_backup.counts
+  );
+end;
+$$;
+
+grant execute on function public.restore_ar_data_backup(uuid, boolean) to authenticated;
+
 -- Supabase pg_cron normally runs in UTC. 16:00 UTC = 23:00 Asia/Bangkok.
 do $$
 begin

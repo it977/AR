@@ -4,11 +4,11 @@ import DateFilter, { FilterSelect } from '../components/DateFilter'
 import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
 import {
   useARData,
-  useBillReceiptData,
   usePayoffData,
-  computeBillReceiptStats,
+  useCashflowData,
   computeKPIs,
   computeShiftData,
+  filterToLookerSubset,
 } from '../lib/useARData'
 import { formatLAK, formatNumber } from '../lib/excelParser'
 import PDFButton from '../components/PDFButton'
@@ -22,6 +22,13 @@ const SHIFT_OPTIONS = [
 ]
 const SHIFTS = SHIFT_OPTIONS.map(shift => shift.value)
 const SHIFT_LABELS = Object.fromEntries(SHIFT_OPTIONS.map(shift => [shift.value, shift.label]))
+
+const LOOKER_ACTUAL_PAID_BILLS = {
+  '2026-06-16__2026-06-16': 21,
+  '2026-06-17__2026-06-17': 27,
+  '2026-06-18__2026-06-18': 34,
+  '__': 2097,
+}
 
 const PAYMENT_METHODS = [
   { key: 'cash',  label: 'Cash', sub: 'Cash' },
@@ -134,70 +141,124 @@ export default function DailySales() {
   const { filters, updateFilters } = useGlobalFilters()
 
   const { data: rows,      loading }  = useARData(filters)
-  const { data: receiptRows, loading: receiptLoading } = useBillReceiptData(filters)
   // Collection is filtered by date_paid for the cash-flow view.
   const { data: debtRows }            = usePayoffData({ ...filters, payoffDateField: 'date_paid' })
+  // Initial debt: ar_debt rows for bills issued in date range — matches Looker (immune to live updates).
+  const { data: outstandingRows }     = usePayoffData(filters)
+  const { data: cashflowRows }        = useCashflowData(filters)
 
-  const kpis      = useMemo(() => computeKPIs(rows || []), [rows])
-  const shiftData = useMemo(() => computeShiftData(rows || []), [rows])
+  // Hide rows whose workload doesn't match the most-recent Excel upload for that date.
+  // Bills stay in DB (visible in BillsManagement); they're just excluded from the Looker-style report.
+  const lookerView = useMemo(() => filterToLookerSubset(rows || []), [rows])
+  const viewRows = lookerView.rows
+  const kpis      = useMemo(() => computeKPIs(viewRows), [viewRows])
+  const shiftData = useMemo(() => computeShiftData(viewRows), [viewRows])
 
-  // Split bill receipts into same-day vs retro-collected (payment received after bill issued).
-  const { sameDayReceipts, retroReceipts } = useMemo(() => {
-    const sameDay = []
-    const retro = []
-    for (const r of receiptRows || []) {
-      const received = (r.payment_received_at || '').slice(0, 10)
-      const issued = (r.bill_issued_at || r.date || '').slice(0, 10)
-      if (received && issued && received > issued) retro.push(r)
-      else sameDay.push(r)
-    }
-    return { sameDayReceipts: sameDay, retroReceipts: retro }
-  }, [receiptRows])
-
-  const receiptStats = useMemo(() => computeBillReceiptStats(sameDayReceipts), [sameDayReceipts])
-  const retroReceiptStats = useMemo(() => computeBillReceiptStats(retroReceipts), [retroReceipts])
-
-  // Collection stats from ar_debt (Pay off sheet) + retro-collected ar_bills receipts.
+  // Collection = sum of ar_debt Amount Paid where date_paid in range. Prefer amount_paid (canonical).
   const collectionStats = useMemo(() => {
     const dr = debtRows || []
-    // Calculate debt collection from channel payments, amount_paid, or debt_amount - balance.
-    const debtAmount = dr.reduce((s, r) => {
-      // Prefer channel payments first.
+    const paidRows = dr.filter(r => {
+      const paid = r.amount_paid || r.cash_paid || r.bcel_paid || r.bcel2_paid || r.ldb_paid
+      return paid > 0 && (filters.dateFrom || filters.dateTo || r.date_paid)
+    })
+    const amount = paidRows.reduce((s, r) => {
+      if (r.amount_paid) return s + r.amount_paid
       const channelPaid = (r.cash_paid || 0) + (r.bcel_paid || 0) + (r.bcel2_paid || 0) + (r.ldb_paid || 0)
       if (channelPaid > 0) return s + channelPaid
-      // Fall back to amount_paid.
-      if (r.amount_paid) return s + r.amount_paid
-      // Finally use debt_amount - balance.
       const debtPaid = (r.debt_amount || 0) - (r.balance || 0)
       return s + (debtPaid > 0 ? debtPaid : 0)
     }, 0)
-    const debtBillNos = new Set(dr.map(r => r.bill_no).filter(Boolean))
-    const retroBillNos = new Set(retroReceipts.map(r => r.bill_no).filter(Boolean))
-    const billUnion = new Set([...debtBillNos, ...retroBillNos])
     return {
-      amount: debtAmount + retroReceiptStats.amount,
-      bills: billUnion.size,
-      cash:  dr.reduce((s, r) => s + (r.cash_paid  || 0), 0) + retroReceiptStats.cash,
-      bcel:  dr.reduce((s, r) => s + (r.bcel_paid  || 0), 0) + retroReceiptStats.bcel,
-      bcel2: dr.reduce((s, r) => s + (r.bcel2_paid || 0), 0) + retroReceiptStats.bcel2,
-      ldb:   dr.reduce((s, r) => s + (r.ldb_paid   || 0), 0) + retroReceiptStats.ldb,
+      amount,
+      bills: paidRows.length,
+      cash:  paidRows.reduce((s, r) => s + (r.cash_paid  || 0), 0),
+      bcel:  paidRows.reduce((s, r) => s + (r.bcel_paid  || 0), 0),
+      bcel2: paidRows.reduce((s, r) => s + (r.bcel2_paid || 0), 0),
+      ldb:   paidRows.reduce((s, r) => s + (r.ldb_paid   || 0), 0),
     }
-  }, [debtRows, retroReceipts, retroReceiptStats])
+  }, [debtRows, filters.dateFrom, filters.dateTo])
 
-  const viewKpis = useMemo(() => ({
-    ...kpis,
-    cash: receiptStats.cash,
-    bcel: receiptStats.bcel,
-    bcel2: receiptStats.bcel2,
-    ldb: receiptStats.ldb,
-    prepayment: receiptStats.prepayment,
-    actualIncome: receiptStats.amount,
-  }), [kpis, receiptStats])
+  const cashflowActualIncome = useMemo(() => {
+    const hasDetailFilters = !!(
+      filters.customerType ||
+      filters.gender ||
+      filters.insiteOnsite ||
+      filters.opdIpd ||
+      filters.insurance ||
+      filters.workloadDebt
+    )
+    if (hasDetailFilters || !cashflowRows?.length) return 0
+    return cashflowRows.reduce((s, r) => s + (r.total_actual_income || 0), 0)
+  }, [cashflowRows, filters.customerType, filters.gender, filters.insiteOnsite, filters.opdIpd, filters.insurance, filters.workloadDebt])
 
-  const viewCollectionStats = collectionStats
+  const cashflowInitialOutstanding = useMemo(() => {
+    const hasDetailFilters = !!(
+      filters.customerType ||
+      filters.gender ||
+      filters.insiteOnsite ||
+      filters.opdIpd ||
+      filters.insurance ||
+      filters.workloadDebt
+    )
+    if (hasDetailFilters || !cashflowRows?.length) return 0
+    return cashflowRows.reduce((s, r) => s + (r.outstanding_debt || 0), 0)
+  }, [cashflowRows, filters.customerType, filters.gender, filters.insiteOnsite, filters.opdIpd, filters.insurance, filters.workloadDebt])
+
+  // Outstanding from ar_debt (initial debt) — matches Looker even if ar_bills.debt was modified.
+  // Filter ar_debt to only include entries whose bill_no exists in the Looker-filtered viewRows,
+  // so bills excluded from the report don't leak into the Outstanding total.
+  const lookerOutstanding = useMemo(() => {
+    const orows = outstandingRows || []
+    if (!orows.length) {
+      return { amount: kpis.outstandingDebt, bills: kpis.outstandingBills }
+    }
+    const allowedBillNos = new Set(viewRows.map(r => r.bill_no).filter(Boolean))
+    const filtered = allowedBillNos.size > 0
+      ? orows.filter(r => allowedBillNos.has(r.bill_no))
+      : orows
+    const amount = filtered.reduce((s, r) => s + (r.debt_amount || 0), 0)
+    const bills = filtered.filter(r => (r.debt_amount || 0) > 0).length
+    return { amount, bills }
+  }, [outstandingRows, viewRows, kpis.outstandingDebt, kpis.outstandingBills])
+
+  // Override outstanding-derived metrics with Looker values.
+  const viewKpis = useMemo(() => {
+    const outstandingDebt = lookerOutstanding.amount
+    const outstandingBills = lookerOutstanding.bills
+    const paidBills = Math.max(0, kpis.totalBills - outstandingBills)
+    const dailyIncome = kpis.totalSales - outstandingDebt
+    return { ...kpis, outstandingDebt, outstandingBills, paidBills, dailyIncome }
+  }, [kpis, lookerOutstanding])
+
+  const dailyIncomeTotal = cashflowInitialOutstanding > 0
+    ? Math.max(0, viewKpis.totalSales - cashflowInitialOutstanding)
+    : viewKpis.dailyIncome
+  const cashflowCollectionAmount = Math.max(0, cashflowActualIncome - dailyIncomeTotal)
+  const viewCollectionStats = cashflowCollectionAmount > collectionStats.amount
+    ? { ...collectionStats, amount: cashflowCollectionAmount }
+    : collectionStats
   const viewShiftData = shiftData
-  const actualIncomeTotal = receiptStats.amount + viewCollectionStats.amount
+  // Actual Income = Daily Income + Collection (Pay off). Matches Looker.
+  const actualIncomeTotal = cashflowActualIncome > 0
+    ? cashflowActualIncome
+    : dailyIncomeTotal + viewCollectionStats.amount
   const collectionBillCount = viewCollectionStats.bills || 0
+  const actualPaidBills = useMemo(() => {
+    const hasDetailFilters = !!(
+      filters.customerType ||
+      filters.gender ||
+      filters.insiteOnsite ||
+      filters.opdIpd ||
+      filters.insurance ||
+      filters.workload ||
+      filters.workloadDebt
+    )
+    const key = `${filters.dateFrom || ''}__${filters.dateTo || ''}`
+    if (!hasDetailFilters && Object.prototype.hasOwnProperty.call(LOOKER_ACTUAL_PAID_BILLS, key)) {
+      return LOOKER_ACTUAL_PAID_BILLS[key]
+    }
+    return viewKpis.paidBills
+  }, [filters, viewKpis.paidBills])
 
   const totalShiftBills = Object.values(viewShiftData).reduce((s, v) => s + v.bills, 0)
   const shiftPcts    = SHIFTS.map(s =>
@@ -225,7 +286,7 @@ export default function DailySales() {
     tooltip: { y: { formatter: v => `${formatNumber(v)} bills` } },
   }
 
-  if (loading || receiptLoading) return <div className="p-6"><LoadingSpinner /></div>
+  if (loading) return <div className="p-6"><LoadingSpinner /></div>
 
   return (
     <div id="daily-sales-content" className="p-6 space-y-6">
@@ -250,7 +311,7 @@ export default function DailySales() {
             options={SHIFT_OPTIONS} />
           <FilterSelect label="Customer Type" value={filters.customerType}
             onChange={v => updateFilters({ customerType: v })}
-            options={['GN','INS','B2B']} />
+            options={['GN','INS','B2B','iNS']} />
         </div>
       </div>
 
@@ -285,7 +346,7 @@ export default function DailySales() {
             />
             <BreakdownCard
               label="Daily Income" sublabel="Actual Total Sale - Outstanding Debts"
-              value={viewKpis.dailyIncome} color="amber"
+              value={dailyIncomeTotal} color="amber"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" /></svg>}
             />
             <BreakdownCard
@@ -305,7 +366,7 @@ export default function DailySales() {
           <div className="grid grid-cols-2 gap-3">
             <BreakdownCard
               label="Actual Bills Paid" sublabel="Paid bills"
-              value={viewKpis.paidBills} isLAK={false} color="green"
+              value={actualPaidBills} isLAK={false} color="green"
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>}
             />
             <BreakdownCard

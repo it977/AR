@@ -4,29 +4,16 @@ import KPICard from '../components/KPICard'
 import DateFilter, { FilterSelect } from '../components/DateFilter'
 import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
 import PDFButton from '../components/PDFButton'
-import { useARData, usePayoffData } from '../lib/useARData'
+import {
+  usePayoffData,
+  getLookerMaxDate,
+  capToLookerMaxDate,
+} from '../lib/useARData'
 import { formatLAK, formatNumber } from '../lib/excelParser'
 import { useGlobalFilters } from '../context/FilterContext'
 import { calcAging, getAgingLabel, getDebtCollectedAmount, toNumber } from '../lib/debtUtils'
 
-const LOOKER_OUTSTANDING_FALLBACK = {
-  totalOutstanding: 2411800546,
-  totalCollected: 2136247546,
-  remainingBalance: 275553000,
-  totalDebtBills: 1286,
-  byType: {
-    INS: { collected: 1102647546, balance: 274400000 },
-    GN: { collected: 962500000, balance: 1153000 },
-    B2B: { collected: 69300000, balance: 0 },
-    iNS: { collected: 1800000, balance: 0 },
-  },
-}
-
 const CUSTOMER_TYPES = ['INS', 'GN', 'B2B', 'iNS']
-
-function reportKey(row = {}) {
-  return [row.bill_no || '', row.date || '', row.workload || ''].join('|')
-}
 
 function getCollectedAmount(row = {}) {
   const direct = getDebtCollectedAmount(row)
@@ -71,19 +58,19 @@ export default function OutstandingDebt() {
   const [page, setPage] = useState(1)
   const PAGE_SIZE = 15
 
-  const { data: rows, loading } = useARData(filters)
-  const { data: debtRows } = usePayoffData(filters)
-  const hasActiveFilters = !!(filters.dateFrom || filters.dateTo || filters.customerType || filters.opdIpd || filters.workload)
-  const useLookerFallback = !hasActiveFilters
+  const { data: debtRows, loading } = usePayoffData(filters)
+
+  const lookerMaxDate = useMemo(() => {
+    return getLookerMaxDate(debtRows || [])
+  }, [debtRows])
+
+  const viewDebtRows = useMemo(() => {
+    return capToLookerMaxDate(debtRows || [], lookerMaxDate, filters)
+  }, [debtRows, lookerMaxDate, filters])
 
   const reportRows = useMemo(() => {
-    const debtReportRows = (debtRows || []).map(row => toDebtReportRow(row, 'debt'))
-    const existing = new Set(debtReportRows.map(reportKey))
-    const billOnlyDebtRows = (rows || [])
-      .filter(row => toNumber(row.debt) > 0 && !existing.has(reportKey(row)))
-      .map(row => toDebtReportRow(row, 'bill'))
-    return [...debtReportRows, ...billOnlyDebtRows]
-  }, [debtRows, rows])
+    return viewDebtRows.map(row => toDebtReportRow(row, 'debt'))
+  }, [viewDebtRows])
 
   const outstanding = useMemo(() => {
     return (reportRows || []).filter(r => toNumber(r.balance) > 0)
@@ -100,33 +87,25 @@ export default function OutstandingDebt() {
     }, { totalOutstanding: 0, totalCollected: 0, remainingBalance: 0 })
   }, [reportRows])
   const totalOutstanding = useMemo(() => {
-    if (useLookerFallback) return LOOKER_OUTSTANDING_FALLBACK.totalOutstanding
     return reportTotals.totalOutstanding
-  }, [reportTotals, useLookerFallback])
+  }, [reportTotals])
   const totalCollected = useMemo(() =>
-    useLookerFallback
-      ? LOOKER_OUTSTANDING_FALLBACK.totalCollected
-      : reportTotals.totalCollected,
-    [reportTotals, useLookerFallback]
+    reportTotals.totalCollected,
+    [reportTotals]
   )
 
   // Remaining balance = sum of balance from ar_debt (Pay off sheet)
   const remainingBalance = useMemo(() =>
-    useLookerFallback
-      ? LOOKER_OUTSTANDING_FALLBACK.remainingBalance
-      : reportTotals.remainingBalance,
-    [reportTotals, useLookerFallback]
+    reportTotals.remainingBalance,
+    [reportTotals]
   )
   const totalDebtBills = useMemo(() =>
-    useLookerFallback
-      ? LOOKER_OUTSTANDING_FALLBACK.totalDebtBills
-      : (reportRows || []).length,
-    [reportRows, useLookerFallback]
+    (reportRows || []).length,
+    [reportRows]
   )
 
   // By customer type - use ar_debt for balance
   const byType = useMemo(() => {
-    if (useLookerFallback) return LOOKER_OUTSTANDING_FALLBACK.byType
     const map = CUSTOMER_TYPES.reduce((acc, t) => ({ ...acc, [t]: { collected: 0, balance: 0 } }), {})
     ;(reportRows || []).forEach(r => {
       const t = r.customer_type
@@ -135,7 +114,7 @@ export default function OutstandingDebt() {
       map[t].balance += toNumber(r.balance)
     })
     return map
-  }, [reportRows, useLookerFallback])
+  }, [reportRows])
 
   const byTypeChartOpts = {
     chart: { type: 'bar', toolbar: { show: false }, fontFamily: 'Inter, Noto Sans Lao, sans-serif' },
@@ -224,7 +203,7 @@ export default function OutstandingDebt() {
         <div className="chart-card">
           <h3 className="section-title mb-1">Debt by Customer Type</h3>
           <p className="text-xs text-slate-400 mb-4">Outstanding debt by customer type</p>
-          {rows?.length > 0 ? (
+          {reportRows?.length > 0 ? (
             <ReactApexChart
               options={byTypeChartOpts}
               series={[

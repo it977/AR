@@ -894,11 +894,10 @@ export default function BillsManagement() {
     setSaving(false)
     if (!error) {
       // Only insurance-style customers go to ar_debt. GN repayments stay in ar_bills.
+      // Never DELETE ar_debt rows — keep them as historical Outstanding Debt snapshot so
+      // Daily Sales / Looker reports stay accurate for the bill's original date.
       if ((normalizedForm.debt || 0) > 0 && isInsuranceDebtBill(normalizedForm)) {
         try { await upsertArDebt(normalizedForm) } catch (e) {}
-      } else if (modal.mode === 'edit') {
-        // Keep GN out of ar_debt, and remove paid insurance debts.
-        try { await supabase.from('ar_debt').delete().eq('bill_no', form.bill_no) } catch (e) {}
       }
       try {
         await logAction({ action: modal.mode === 'add' ? 'ເພີ່ມໃບບິນ' : 'ແກ້ໄຂໃບບິນ', bill_no: form.bill_no, patient_name: form.patient_name, amount: form.grand_total, recorder: form.recorded_by })

@@ -22,6 +22,7 @@ export function getBackupClock(now = bangkokNow()) {
   return {
     date: iso.slice(0, 10),
     time: iso.slice(11, 16),
+    fullTime: iso.slice(11, 19),
   }
 }
 
@@ -48,9 +49,11 @@ async function fetchAllRows(table) {
 }
 
 export async function createDataBackup(source = 'manual') {
-  const { date } = getBackupClock()
+  const { date, fullTime } = getBackupClock()
   const payload = {}
   const counts = {}
+  const isDailyAuto = source === 'client_auto_23_00' || source === 'pg_cron_23_00'
+  const backupKind = isDailyAuto ? BACKUP_KIND : `manual_${fullTime.replace(/:/g, '')}_${Date.now()}`
 
   for (const table of TABLES) {
     const rows = await fetchAllRows(table)
@@ -60,18 +63,25 @@ export async function createDataBackup(source = 'manual') {
 
   const record = {
     backup_date: date,
-    backup_time: BACKUP_TIME,
-    backup_kind: BACKUP_KIND,
+    backup_time: isDailyAuto ? BACKUP_TIME : fullTime,
+    backup_kind: backupKind,
     source,
     counts,
     payload,
   }
 
-  const { data, error } = await supabase
+  const query = supabase
     .from('ar_data_backups')
-    .upsert(record, { onConflict: 'backup_date,backup_kind' })
-    .select('id,backup_date,backup_time,source,counts,created_at')
-    .single()
+
+  const { data, error } = isDailyAuto
+    ? await query
+      .upsert(record, { onConflict: 'backup_date,backup_kind' })
+      .select('id,backup_date,backup_time,backup_kind,source,counts,created_at')
+      .single()
+    : await query
+      .insert(record)
+      .select('id,backup_date,backup_time,backup_kind,source,counts,created_at')
+      .single()
 
   if (error) throw error
   localStorage.setItem(`ar_auto_backup_${date}`, 'done')
@@ -105,10 +115,20 @@ export async function runAutoBackupIfDue() {
 export async function listRecentBackups(limit = 7) {
   const { data, error } = await supabase
     .from('ar_data_backups')
-    .select('id,backup_date,backup_time,source,counts,created_at')
-    .order('backup_date', { ascending: false })
+    .select('id,backup_date,backup_time,backup_kind,source,counts,created_at')
+    .order('created_at', { ascending: false })
     .limit(limit)
 
   if (error) throw error
   return data || []
+}
+
+export async function restoreDataBackup(backupId) {
+  const { data, error } = await supabase.rpc('restore_ar_data_backup', {
+    p_backup_id: backupId,
+    p_make_safety_backup: true,
+  })
+
+  if (error) throw error
+  return data
 }

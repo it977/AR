@@ -211,30 +211,92 @@ export function useBillsDebtData(filters = {}) {
 // Compute helpers (pure functions — no Supabase calls)
 // ============================================================
 
+// For Looker-matching display: for each date, identify which workloads came from a recent
+// Excel upload (source_key row number below the EXCEL_ROWNUM_THRESHOLD). Keep bills in those
+// workloads; hide bills in workloads that have NO Excel-sourced rows (these are manual entries
+// the most recent Excel doesn't know about). Dates with all workloads Excel-sourced — or none —
+// pass through unchanged.
+const EXCEL_ROWNUM_THRESHOLD = 10000
+
+export function filterToLookerSubset(rows = []) {
+  const all = rows || []
+  const byDate = {}
+  for (const r of all) {
+    if (!r.date) continue
+    ;(byDate[r.date] = byDate[r.date] || []).push(r)
+  }
+  const out = []
+  let excludedCount = 0
+  let excludedAmount = 0
+  for (const [_date, list] of Object.entries(byDate)) {
+    const byWL = {}
+    for (const r of list) (byWL[r.workload || '?'] = byWL[r.workload || '?'] || []).push(r)
+    if (Object.keys(byWL).length <= 1) { out.push(...list); continue }
+    // For each workload, find the minimum source_key rowNum (Daily__N__...). A small rowNum
+    // means at least one of those rows came from a recent Excel re-upload.
+    const wlMinRow = {}
+    for (const [wl, arr] of Object.entries(byWL)) {
+      wlMinRow[wl] = arr.reduce((m, r) => {
+        const mm = String(r.source_key || '').match(/^Daily__(\d+)__/)
+        return mm ? Math.min(m, parseInt(mm[1])) : m
+      }, Infinity)
+    }
+    const excelWLs = Object.entries(wlMinRow).filter(([, n]) => n < EXCEL_ROWNUM_THRESHOLD).map(([wl]) => wl)
+    // If no workload has Excel-source rows, or all workloads do, keep everything as-is.
+    if (excelWLs.length === 0 || excelWLs.length === Object.keys(byWL).length) {
+      out.push(...list)
+      continue
+    }
+    // Otherwise keep only Excel-source workloads.
+    const keepSet = new Set(excelWLs)
+    for (const [wl, arr] of Object.entries(byWL)) {
+      if (keepSet.has(wl)) {
+        out.push(...arr)
+      } else {
+        excludedCount += arr.length
+        excludedAmount += arr.reduce((s, r) => s + (r.grand_total || 0), 0)
+      }
+    }
+  }
+  return { rows: out, excludedCount, excludedAmount }
+}
+
+export function getLookerMaxDate(rows = []) {
+  return (rows || []).reduce((max, row) => (
+    row.source_key && row.date && row.date > max ? row.date : max
+  ), '')
+}
+
+export function capToLookerMaxDate(rows = [], maxDate = '', filters = {}) {
+  if (!maxDate || filters.dateFrom || filters.dateTo) return rows || []
+  return (rows || []).filter(row => !row.date || row.date <= maxDate)
+}
+
 export function computeKPIs(rows = []) {
-  // totalSalesGross = sum of "Total" column (BEFORE discounts) — PDF "Total Sales"
+  // Looker-aligned: every metric derives from the same per-bill formula Looker uses.
   const totalSalesGross = rows.reduce((s, r) => s + (r.total      || 0), 0)
   const totalDiscounts  = rows.reduce((s, r) => s + (r.discounts  || 0), 0)
-  // totalSales = sum of "Grand Total" (AFTER discounts) = totalSalesGross - totalDiscounts
   const totalSales      = rows.reduce((s, r) => s + (r.grand_total || 0), 0)
+  // Total Bills = distinct bill number. Total Customers/visits remains the row count.
   const totalBills      = new Set(rows.map(r => r.bill_no).filter(Boolean)).size
-  // uniqueCustomers = total patient visits (matches PDF "Total Customers" = row count, not unique HN)
   const uniqueCustomers = rows.length
   const cash   = rows.reduce((s, r) => s + (r.cash  || 0), 0)
   const bcel   = rows.reduce((s, r) => s + (r.bcel  || 0), 0)
   const bcel2  = rows.reduce((s, r) => s + (r.bcel2 || 0), 0)
   const ldb    = rows.reduce((s, r) => s + (r.ldb   || 0), 0)
   const prepayment = rows.reduce((s, r) => s + (r.prepayment || 0), 0)
-  const outstandingDebt = rows.reduce((s, r) => s + (r.debt || 0), 0)
-  // actualIncome = cash collected at billing time (cash + bcel + bcel2 + ldb)
-  const actualIncome    = cash + bcel + bcel2 + ldb + prepayment
-  // dailyIncome = Actual Total Sale - Outstanding Debts
-  const dailyIncome     = totalSales - outstandingDebt
+  // Daily Income = channels collected at billing time.
+  const dailyIncome     = cash + bcel + bcel2 + ldb + prepayment
+  // Outstanding = Actual Total Sale - Daily Income (initial debt, never reduced post-billing).
+  const outstandingDebt = totalSales - dailyIncome
+  const actualIncome    = dailyIncome
 
-  // Use debt_status column for accurate bill counts (matches PDF definitions)
-  // null = paid in full at billing | 'pending' = still outstanding | 'paid' = collected via Pay off
-  const paidBills        = rows.filter(r => resolvePaymentStatus(r) === 'paid').length
-  const outstandingBills = rows.filter(r => ['pending', 'overdue'].includes(resolvePaymentStatus(r))).length
+  // Looker formula (exclusive — bills are either paid or outstanding):
+  //   paidBills        = bills with debt = 0 (no remaining)
+  //   outstandingBills = bills with debt > 0
+  // paidBills + outstandingBills = totalBills (always)
+  const paidBills = rows.filter(r => (r.debt || 0) === 0).length
+  const outstandingBills = rows.filter(r => (r.debt || 0) > 0).length
   const collectionBills  = rows.filter(r => r.debt_status === 'paid').length
   const discountedBills  = rows.filter(r => r.discounts && r.discounts > 0).length
 
@@ -425,11 +487,10 @@ export function computeAgingData(debtRows = []) {
   debtRows.forEach(r => {
     const balance = r.balance || 0
     if (balance <= 0) return
-    const g = calcAging(r)
-    if (buckets[g]) {
-      buckets[g].balance += balance
-      buckets[g].bills   += 1
-    }
+    const g = r.aging_group || calcAging(r)
+    if (!buckets[g]) buckets[g] = { balance: 0, bills: 0 }
+    buckets[g].balance += balance
+    buckets[g].bills   += 1
   })
   return buckets
 }

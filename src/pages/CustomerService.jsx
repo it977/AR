@@ -4,7 +4,7 @@ import KPICard, { CountCard } from '../components/KPICard'
 import DateFilter, { FilterSelect } from '../components/DateFilter'
 import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
 import PDFButton from '../components/PDFButton'
-import { useARData, computeServiceData, computeServiceSummary, computeLocationSummary } from '../lib/useARData'
+import { useARData, computeServiceData, computeServiceSummary, computeLocationSummary, filterToLookerSubset } from '../lib/useARData'
 import { formatLAK, formatNumber } from '../lib/excelParser'
 import { useGlobalFilters } from '../context/FilterContext'
 
@@ -48,25 +48,30 @@ export default function CustomerService() {
   const { filters, updateFilters } = useGlobalFilters()
 
   const { data: rows, loading } = useARData(filters)
+  // Apply Looker filter so Customer & Service totals match Daily Sales and Looker.
+  const viewRows = useMemo(() => filterToLookerSubset(rows || []).rows, [rows])
 
   const stats = useMemo(() => {
-    if (!rows?.length) return {}
-    const total = rows.length
-    const female = rows.filter(r => r.gender === 'Female' || r.gender === 'F').length
-    const male = rows.filter(r => r.gender === 'Male' || r.gender === 'M').length
-    const insite = rows.filter(r => r.insite_onsite === 'Insite').length
-    const onsite = rows.filter(r => r.insite_onsite === 'Onsite').length
-    const opd = rows.filter(r => r.opd_ipd === 'OPD').length
-    const ipd = rows.filter(r => r.opd_ipd === 'IPD').length
-    const gn = rows.filter(r => r.customer_type === 'GN').length
-    const ins = rows.filter(r => r.customer_type === 'INS').length
-    const b2b = rows.filter(r => r.customer_type === 'B2B').length
-    return { total, female, male, insite, onsite, opd, ipd, gn, ins, b2b }
-  }, [rows])
+    if (!viewRows.length) return {}
+    const total = viewRows.length
+    // Normalize gender: Female/F/Femal (typo) → Female; Male/M → Male.
+    const female = viewRows.filter(r => String(r.gender || '').trim() === 'Female').length
+    const male = viewRows.filter(r => String(r.gender || '').trim() === 'Male').length
+    const others = Math.max(0, total - female - male)
+    const insite = viewRows.filter(r => r.insite_onsite === 'Insite').length
+    const onsite = viewRows.filter(r => r.insite_onsite === 'Onsite').length
+    const opd = viewRows.filter(r => r.opd_ipd === 'OPD').length
+    const ipd = viewRows.filter(r => r.opd_ipd === 'IPD').length
+    const gn = viewRows.filter(r => r.customer_type === 'GN').length
+    const ins = viewRows.filter(r => r.customer_type === 'INS').length
+    const b2b = viewRows.filter(r => r.customer_type === 'B2B').length
+    const iNS = viewRows.filter(r => r.customer_type === 'iNS').length
+    return { total, female, male, others, insite, onsite, opd, ipd, gn, ins, b2b, iNS }
+  }, [viewRows])
 
-  const services = useMemo(() => computeServiceData(rows || []), [rows])
-  const serviceSummary = useMemo(() => computeServiceSummary(rows || []), [rows])
-  const locationSummary = useMemo(() => computeLocationSummary(rows || []), [rows])
+  const services = useMemo(() => computeServiceData(viewRows), [viewRows])
+  const serviceSummary = useMemo(() => computeServiceSummary(viewRows), [viewRows])
+  const locationSummary = useMemo(() => computeLocationSummary(viewRows), [viewRows])
 
   const serviceEntries = Object.entries(services)
     .sort(([, a], [, b]) => b - a)
@@ -74,8 +79,8 @@ export default function CustomerService() {
 
   const genderDonutOpts = {
     chart: { type: 'donut', fontFamily: 'Inter, Noto Sans Lao, sans-serif' },
-    labels: ['Female', 'Male'],
-    colors: ['#f472b6', '#60a5fa'],
+    labels: ['Female', 'Male', 'Others'],
+    colors: ['#f472b6', '#60a5fa', '#94a3b8'],
     legend: {
       position: 'bottom',
       labels: { colors: '#64748b' },
@@ -132,8 +137,8 @@ export default function CustomerService() {
   const customerTypeOpts = {
     chart: { type: 'bar', toolbar: { show: false }, fontFamily: 'Inter, Noto Sans Lao, sans-serif' },
     plotOptions: { bar: { borderRadius: 8, columnWidth: '50%', dataLabels: { position: 'top' } } },
-    colors: ['#4f46e5', '#06b6d4', '#f59e0b'],
-    xaxis: { categories: ['GN', 'INS', 'B2B'], labels: { style: { colors: '#64748b', fontSize: '13px', fontWeight: 600 } } },
+    colors: ['#4f46e5', '#06b6d4', '#f59e0b', '#ef4444'],
+    xaxis: { categories: ['GN', 'INS', 'B2B', 'iNS'], labels: { style: { colors: '#64748b', fontSize: '13px', fontWeight: 600 } } },
     yaxis: { labels: { style: { colors: '#94a3b8', fontSize: '11px' } } },
     grid: { borderColor: '#f1f5f9', strokeDashArray: 4 },
     legend: { show: false },
@@ -164,7 +169,7 @@ export default function CustomerService() {
             options={SHIFT_OPTIONS} />
           <FilterSelect label="Customer Type" value={filters.customerType}
             onChange={v => updateFilters({ customerType: v })}
-            options={['GN','INS','B2B']} />
+            options={['GN','INS','B2B','iNS']} />
           <FilterSelect label="Gender" value={filters.gender}
             onChange={v => updateFilters({ gender: v })}
             options={['Male','Female']} />
@@ -236,13 +241,14 @@ export default function CustomerService() {
             <>
               <ReactApexChart
                 options={genderDonutOpts}
-                series={[stats.female || 0, stats.male || 0]}
+                series={[stats.female || 0, stats.male || 0, stats.others || 0]}
                 type="donut" height={220}
               />
               <DonutBillSummary
                 items={[
                   { label: 'Female', value: stats.female || 0, color: '#f472b6' },
                   { label: 'Male', value: stats.male || 0, color: '#60a5fa' },
+                  { label: 'Others', value: stats.others || 0, color: '#94a3b8' },
                 ]}
               />
             </>
@@ -276,9 +282,10 @@ export default function CustomerService() {
             <ReactApexChart
               options={customerTypeOpts}
               series={[
-                { name: 'GN', data: [stats.gn || 0, 0, 0] },
-                { name: 'INS', data: [0, stats.ins || 0, 0] },
-                { name: 'B2B', data: [0, 0, stats.b2b || 0] },
+                { name: 'GN', data: [stats.gn || 0, 0, 0, 0] },
+                { name: 'INS', data: [0, stats.ins || 0, 0, 0] },
+                { name: 'B2B', data: [0, 0, stats.b2b || 0, 0] },
+                { name: 'iNS', data: [0, 0, 0, stats.iNS || 0] },
               ]}
               type="bar" height={220}
             />

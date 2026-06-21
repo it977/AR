@@ -6,13 +6,11 @@ import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
 import PDFButton from '../components/PDFButton'
 import {
   useARData,
-  useBillReceiptData,
   usePayoffData,
   useCashflowData,
-  computeBillReceiptStats,
   computeKPIs,
   computePaymentTypeSummary,
-  getBillReceiptDate,
+  filterToLookerSubset,
 } from '../lib/useARData'
 import { formatNumber } from '../lib/excelParser'
 import { useGlobalFilters } from '../context/FilterContext'
@@ -29,16 +27,6 @@ const SHIFT_OPTIONS = [
   { value: '4PM-12AM', label: '16:00PM-21:00PM' },
   { value: '12AM-8AM', label: '21:00PM-08:00AM' },
 ]
-
-const LOOKER_CASHFLOW_FALLBACK = {
-  cash: 1138060441,
-  bcel: 2731013506,
-  bcel2: 346466200,
-  ldb: 1007513350,
-  totalActualIncome: 5223053497,
-  debtCollection: 1495518906,
-  balance: 346873703,
-}
 
 // Bank logo icons (SVG inline)
 const BankIcon = ({ method }) => {
@@ -106,46 +94,56 @@ export default function PaymentChannel() {
   const { filters, updateFilters } = useGlobalFilters()
 
   const { data: rows, loading } = useARData(filters)
-  const { data: receiptRows, loading: receiptLoading } = useBillReceiptData(filters)
   // Two ar_debt views:
   //  - debtRows (date_paid) for cash-flow collection channels.
   //  - outstandingRows (date) for debt from bills issued in the filter date range.
   const { data: debtRows }        = usePayoffData({ ...filters, payoffDateField: 'date_paid' })
   const { data: outstandingRows } = usePayoffData(filters)
   const { data: cashflowRows } = useCashflowData(filters)
-  const kpis = useMemo(() => computeKPIs(rows || []), [rows])
-  const receiptStats = useMemo(() => computeBillReceiptStats(receiptRows || []), [receiptRows])
-  const paymentTypeSummary = useMemo(() => computePaymentTypeSummary(receiptRows || []), [receiptRows])
+  // Apply Looker-matching filter so totals match the Daily Sales dashboard.
+  const lookerView = useMemo(() => filterToLookerSubset(rows || []), [rows])
+  const viewRows = lookerView.rows
+  const kpis = useMemo(() => computeKPIs(viewRows), [viewRows])
+  // Use ar_bills (date in range) for payment-type breakdown — matches Looker (no retro receipts).
+  const paymentTypeSummary = useMemo(() => computePaymentTypeSummary(viewRows), [viewRows])
   const depositCollection = paymentTypeSummary.Deposit?.amount || 0
   const advanceCollection = paymentTypeSummary.Advance?.amount || 0
   const hasCashflow = !!cashflowRows?.length
-  const hasLiveReceipts = !!receiptRows?.length
-  const hasActiveFilters = !!(filters.dateFrom || filters.dateTo || filters.customerType || filters.workload)
-  const useLookerFallback = !hasCashflow && !hasActiveFilters && rows?.length === 4763 && debtRows?.length === 1285
+  const useCashflowSummary = hasCashflow && !filters.customerType
+  const cashflowActualIncome = useMemo(() => {
+    if (!useCashflowSummary) return 0
+    return (cashflowRows || []).reduce((s, r) => s + (r.total_actual_income || 0), 0)
+  }, [cashflowRows, useCashflowSummary])
+  const cashflowInitialOutstanding = useMemo(() => {
+    if (!useCashflowSummary) return 0
+    return (cashflowRows || []).reduce((s, r) => s + (r.outstanding_debt || 0), 0)
+  }, [cashflowRows, useCashflowSummary])
 
-  // Collection stats from ar_debt by channel.
+  // Collection stats from ar_debt — Amount Paid (canonical) per row, channel breakdown for display.
   const collectionStats = useMemo(() => {
     const dr = debtRows || []
-    const cash  = dr.reduce((s, r) => s + (r.cash_paid  || 0), 0)
-    const bcel  = dr.reduce((s, r) => s + (r.bcel_paid  || 0), 0)
-    const bcel2 = dr.reduce((s, r) => s + (r.bcel2_paid || 0), 0)
-    const ldb   = dr.reduce((s, r) => s + (r.ldb_paid   || 0), 0)
-    return { amount: cash + bcel + bcel2 + ldb, cash, bcel, bcel2, ldb }
-  }, [debtRows])
-  const useCashflowOnly = hasCashflow && !hasLiveReceipts && collectionStats.amount <= 0
+    const paidRows = dr.filter(r => {
+      const paid = r.amount_paid || r.cash_paid || r.bcel_paid || r.bcel2_paid || r.ldb_paid
+      return paid > 0 && (filters.dateFrom || filters.dateTo || r.date_paid)
+    })
+    const cash  = paidRows.reduce((s, r) => s + (r.cash_paid  || 0), 0)
+    const bcel  = paidRows.reduce((s, r) => s + (r.bcel_paid  || 0), 0)
+    const bcel2 = paidRows.reduce((s, r) => s + (r.bcel2_paid || 0), 0)
+    const ldb   = paidRows.reduce((s, r) => s + (r.ldb_paid   || 0), 0)
+    const amount = paidRows.reduce((s, r) => {
+      if (r.amount_paid) return s + r.amount_paid
+      const channelPaid = (r.cash_paid || 0) + (r.bcel_paid || 0) + (r.bcel2_paid || 0) + (r.ldb_paid || 0)
+      if (channelPaid > 0) return s + channelPaid
+      const debtPaid = (r.debt_amount || 0) - (r.balance || 0)
+      return s + (debtPaid > 0 ? debtPaid : 0)
+    }, 0)
+    return { amount, cash, bcel, bcel2, ldb }
+  }, [debtRows, filters.dateFrom, filters.dateTo])
 
-  // Combine bill receipts (by received date) and Pay off (ar_debt) for every channel.
+  // Combine ar_bills channels (date in range) and ar_debt channels (date_paid in range). Matches Looker.
   const totals = useMemo(() => {
     const t = { cash: 0, bcel: 0, bcel2: 0, ldb: 0 }
-    if (useLookerFallback) {
-      return {
-        cash: LOOKER_CASHFLOW_FALLBACK.cash,
-        bcel: LOOKER_CASHFLOW_FALLBACK.bcel,
-        bcel2: LOOKER_CASHFLOW_FALLBACK.bcel2,
-        ldb: LOOKER_CASHFLOW_FALLBACK.ldb,
-      }
-    }
-    if (useCashflowOnly) {
+    if (useCashflowSummary) {
       cashflowRows.forEach(r => {
         t.cash  += r.cash  || 0
         t.bcel  += r.bcel  || 0
@@ -154,32 +152,32 @@ export default function PaymentChannel() {
       })
       return t
     }
-    t.cash += receiptStats.cash
-    t.bcel += receiptStats.bcel
-    t.bcel2 += receiptStats.bcel2
-    t.ldb += receiptStats.ldb
-    t.cash  += collectionStats.cash
-    t.bcel  += collectionStats.bcel
-    t.bcel2 += collectionStats.bcel2
-    t.ldb   += collectionStats.ldb
+    t.cash  = (kpis.cash  || 0) + collectionStats.cash
+    t.bcel  = (kpis.bcel  || 0) + collectionStats.bcel
+    t.bcel2 = (kpis.bcel2 || 0) + collectionStats.bcel2
+    t.ldb   = (kpis.ldb   || 0) + collectionStats.ldb
     return t
-  }, [receiptStats, collectionStats, cashflowRows, useLookerFallback, useCashflowOnly])
+  }, [kpis, collectionStats, cashflowRows, useCashflowSummary])
 
   const methodCollected = totals.cash + totals.bcel + totals.bcel2 + totals.ldb
-  const totalCollected = methodCollected + depositCollection
-  // Daily Income = at-billing collections only (ar_bills channels, excluding payoff)
-  const dailyIncomeCollected = receiptStats.cash + receiptStats.bcel + receiptStats.bcel2 + receiptStats.ldb
+  const totalCollected = useCashflowSummary ? methodCollected : methodCollected + depositCollection
   const remainingBalance = useMemo(() => {
-    if (useLookerFallback) return LOOKER_CASHFLOW_FALLBACK.balance
-    if (useCashflowOnly) return (cashflowRows || []).reduce((s, r) => s + (r.balance || 0), 0)
-    // Use outstandingRows filtered by bill date, not debtRows filtered by date_paid.
-    return (outstandingRows || []).reduce((s, r) => s + (r.balance || 0), 0)
-  }, [cashflowRows, outstandingRows, useCashflowOnly, useLookerFallback])
+    if (useCashflowSummary) return (cashflowRows || []).reduce((s, r) => s + (r.balance || 0), 0)
+    // Use ar_debt.debt_amount (initial) to match Looker — immune to post-billing edits.
+    // Restrict to bills that survived the Looker filter so excluded bills don't leak in.
+    const orows = outstandingRows || []
+    if (!orows.length) return kpis.outstandingDebt
+    const allowedBillNos = new Set(viewRows.map(r => r.bill_no).filter(Boolean))
+    const filtered = allowedBillNos.size > 0
+      ? orows.filter(r => allowedBillNos.has(r.bill_no))
+      : orows
+    return filtered.reduce((s, r) => s + (r.debt_amount || 0), 0)
+  }, [cashflowRows, outstandingRows, viewRows, useCashflowSummary, kpis.outstandingDebt])
 
   // Monthly breakdown
   const monthly = useMemo(() => {
     const map = {}
-    if (useCashflowOnly) {
+    if (useCashflowSummary) {
       cashflowRows.forEach(r => {
         if (!r.date) return
         const mo = r.date.slice(0, 7)
@@ -191,10 +189,10 @@ export default function PaymentChannel() {
       })
       return map
     }
-    ;(receiptRows || []).forEach(r => {
-      const date = getBillReceiptDate(r)
-      if (!date) return
-      const mo = date.slice(0, 7)
+    // ar_bills by issue date (Looker-filtered) — matches Daily Sales.
+    viewRows.forEach(r => {
+      if (!r.date) return
+      const mo = String(r.date).slice(0, 7)
       if (!map[mo]) map[mo] = { cash: 0, bcel: 0, bcel2: 0, ldb: 0 }
       map[mo].cash  += r.cash  || 0
       map[mo].bcel  += r.bcel  || 0
@@ -211,7 +209,7 @@ export default function PaymentChannel() {
       map[mo].ldb += r.ldb_paid || 0
     })
     return map
-  }, [receiptRows, debtRows, cashflowRows, useCashflowOnly])
+  }, [viewRows, debtRows, cashflowRows, useCashflowSummary])
 
   const months = Object.keys(monthly).sort()
 
@@ -237,20 +235,29 @@ export default function PaymentChannel() {
     tooltip: { y: { formatter: v => `${formatNumber(v)} LAK` } },
   }
 
-  const grandTotal = totalCollected + remainingBalance
-  const collectedPct    = grandTotal > 0 ? (totalCollected / grandTotal * 100).toFixed(1) : '0.0'
+  // Actual Income = Daily Income + Collection (Pay off). Matches Looker.
+  const actualIncomeTotal = useCashflowSummary
+    ? cashflowActualIncome
+    : (kpis.totalSales - remainingBalance) + collectionStats.amount
+  const grandTotal = actualIncomeTotal + remainingBalance
+  const collectedPct    = grandTotal > 0 ? (actualIncomeTotal / grandTotal * 100).toFixed(1) : '0.0'
   const outstandingPct  = grandTotal > 0 ? (remainingBalance / grandTotal * 100).toFixed(1) : '0.0'
 
-  // For PDF-style: Actual Income = Daily Income + Collection from payoff
-  // Daily Income = Actual Total Sale - Outstanding Debts
-  const dailyIncome = kpis.totalSales - kpis.outstandingDebt
-  const actualIncomeTotal = useCashflowOnly
-    ? (cashflowRows || []).reduce((s, r) => s + (r.total_actual_income || 0), 0)
-    : useLookerFallback
-      ? LOOKER_CASHFLOW_FALLBACK.totalActualIncome
-      : dailyIncome + collectionStats.amount + depositCollection
+  // Daily Income on Looker is Actual Total Sale - initial Outstanding Debt.
+  // For Summary_CashFlow dates, read initial outstanding directly from that sheet so
+  // Payment Channel still matches Looker even if ar_debt rows have not been reuploaded yet.
+  const dailyIncome = useCashflowSummary
+    ? Math.max(0, kpis.totalSales - cashflowInitialOutstanding)
+    : kpis.totalSales - remainingBalance
+  const cashflowCollectionAmount = useCashflowSummary
+    ? Math.max(0, actualIncomeTotal - dailyIncome)
+    : 0
+  const effectiveCollectionStats = useCashflowSummary && cashflowCollectionAmount > collectionStats.amount
+    ? { ...collectionStats, amount: cashflowCollectionAmount }
+    : collectionStats
+  const dailyIncomeCollected = dailyIncome
 
-  if (loading || receiptLoading) return <div className="p-6"><LoadingSpinner /></div>
+  if (loading) return <div className="p-6"><LoadingSpinner /></div>
 
   return (
     <div id="payment-channel-content" className="p-6 space-y-6">
@@ -266,7 +273,7 @@ export default function PaymentChannel() {
           <DateFilter filters={filters} onChange={updateFilters} />
           <FilterSelect label="Customer Type" value={filters.customerType}
             onChange={v => updateFilters({ customerType: v })}
-            options={['GN','INS','B2B']} />
+            options={['GN','INS','B2B','iNS']} />
           <FilterSelect label="Shift" value={filters.workload}
             onChange={v => updateFilters({ workload: v })}
             options={SHIFT_OPTIONS} />
@@ -293,7 +300,7 @@ export default function PaymentChannel() {
         <div className="rounded-2xl p-5 text-white bg-gradient-to-br from-violet-500 to-violet-700 shadow-lg shadow-violet-200">
           <p className="text-xs font-semibold text-violet-200 uppercase tracking-wider">Debt Collection (Pay off)</p>
           <p className="text-xs text-violet-200 mb-3">Debt collection amount</p>
-          <p className="text-2xl font-extrabold leading-tight">{formatNumber(useLookerFallback ? LOOKER_CASHFLOW_FALLBACK.debtCollection : collectionStats.amount)}</p>
+          <p className="text-2xl font-extrabold leading-tight">{formatNumber(effectiveCollectionStats.amount)}</p>
           <p className="text-xs text-violet-200 mt-1">From ar_debt</p>
         </div>
         <div className="rounded-2xl p-5 text-white bg-gradient-to-br from-amber-500 to-amber-700 shadow-lg shadow-amber-200">

@@ -4,44 +4,44 @@ import KPICard from '../components/KPICard'
 import DateFilter, { FilterSelect } from '../components/DateFilter'
 import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
 import PDFButton from '../components/PDFButton'
-import { usePayoffData, computeAgingData } from '../lib/useARData'
+import { usePayoffData, computeAgingData, getLookerMaxDate, capToLookerMaxDate } from '../lib/useARData'
 import { formatLAK, formatNumber } from '../lib/excelParser'
 import { useGlobalFilters } from '../context/FilterContext'
 import { getAgingLabel } from '../lib/debtUtils'
 
 const AGING_CONFIG = [
+  { key: 'N', label: getAgingLabel('N'), color: '#0ea5e9', bg: 'bg-sky-50', border: 'border-sky-100', text: 'text-sky-700', badgeBg: 'bg-sky-100 text-sky-700' },
+  { key: '0-15 Days', label: '0-15 Days', color: '#10b981', bg: 'bg-emerald-50', border: 'border-emerald-100', text: 'text-emerald-700', badgeBg: 'bg-emerald-100 text-emerald-700' },
+  { key: 'ຈ່າຍຕາມກຳນົດ', label: getAgingLabel('ຈ່າຍຕາມກຳນົດ'), color: '#6366f1', bg: 'bg-indigo-50', border: 'border-indigo-100', text: 'text-indigo-700', badgeBg: 'bg-indigo-100 text-indigo-700' },
   { key: 'Current Receivables', label: getAgingLabel('Current Receivables'), color: '#0ea5e9', bg: 'bg-sky-50', border: 'border-sky-100', text: 'text-sky-700', badgeBg: 'bg-sky-100 text-sky-700' },
   { key: '1-15 Days', label: '1-15 Days', color: '#10b981', bg: 'bg-emerald-50', border: 'border-emerald-100', text: 'text-emerald-700', badgeBg: 'bg-emerald-100 text-emerald-700' },
   { key: '16-30 Days', label: '16-30 Days', color: '#f59e0b', bg: 'bg-amber-50', border: 'border-amber-100', text: 'text-amber-700', badgeBg: 'bg-amber-100 text-amber-700' },
   { key: '31-45 Days', label: '31-45 Days', color: '#f97316', bg: 'bg-orange-50', border: 'border-orange-100', text: 'text-orange-700', badgeBg: 'bg-orange-100 text-orange-700' },
+  { key: '46-60+ Days', label: '46-60+ Days', color: '#ef4444', bg: 'bg-red-50', border: 'border-red-100', text: 'text-red-700', badgeBg: 'bg-red-100 text-red-700' },
   { key: '46-90 Days', label: '46-90 Days', color: '#ef4444', bg: 'bg-red-50', border: 'border-red-100', text: 'text-red-700', badgeBg: 'bg-red-100 text-red-700' },
 ]
-
-const DEBT_MANAGEMENT_AGING_TOTALS = {
-  'Current Receivables': { balance: 235653125, bills: 217 },
-  '1-15 Days': { balance: 34038000, bills: 27 },
-  '16-30 Days': { balance: 0, bills: 0 },
-  '31-45 Days': { balance: 0, bills: 0 },
-  '46-90 Days': { balance: 0, bills: 0 },
-}
 
 export default function AgingReport() {
   const { filters, updateFilters } = useGlobalFilters()
   const [search, setSearch] = useState('')
 
   const { data: debtRows, loading } = usePayoffData(filters)
-  const hasActiveFilters = !!(filters.dateFrom || filters.dateTo || filters.customerType || filters.opdIpd || filters.workload || filters.insurance)
+  const lookerMaxDate = useMemo(() => getLookerMaxDate(debtRows || []), [debtRows])
   const reportRows = useMemo(() => {
-    if (filters.customerType) return debtRows || []
-    return (debtRows || []).filter(row => String(row.customer_type || '').toUpperCase() === 'INS')
-  }, [debtRows, filters.customerType])
+    return capToLookerMaxDate(debtRows || [], lookerMaxDate, filters)
+  }, [debtRows, lookerMaxDate, filters])
   const viewAgingData = useMemo(() => {
-    if (!hasActiveFilters) return DEBT_MANAGEMENT_AGING_TOTALS
     return computeAgingData(reportRows)
-  }, [hasActiveFilters, reportRows])
+  }, [reportRows])
 
-  const totalDebt = AGING_CONFIG.reduce((s, a) => s + (viewAgingData[a.key]?.balance || 0), 0)
-  const totalBills = AGING_CONFIG.reduce((s, a) => s + (viewAgingData[a.key]?.bills || 0), 0)
+  const activeAgingConfig = useMemo(() => {
+    const active = AGING_CONFIG.filter(a =>
+      (viewAgingData[a.key]?.balance || 0) > 0 || (viewAgingData[a.key]?.bills || 0) > 0
+    )
+    return active.length ? active : AGING_CONFIG
+  }, [viewAgingData])
+  const totalDebt = activeAgingConfig.reduce((s, a) => s + (viewAgingData[a.key]?.balance || 0), 0)
+  const totalBills = activeAgingConfig.reduce((s, a) => s + (viewAgingData[a.key]?.bills || 0), 0)
 
   // By insurance company
   const byInsurance = useMemo(() => {
@@ -60,9 +60,9 @@ export default function AgingReport() {
   const agingBarOpts = {
     chart: { type: 'bar', toolbar: { show: false }, fontFamily: 'Inter, Noto Sans Lao, sans-serif' },
     plotOptions: { bar: { borderRadius: 8, columnWidth: '50%', dataLabels: { position: 'top' } } },
-    colors: AGING_CONFIG.map(a => a.color),
+    colors: activeAgingConfig.map(a => a.color),
     xaxis: {
-      categories: AGING_CONFIG.map(a => a.label),
+      categories: activeAgingConfig.map(a => a.label),
       labels: { style: { colors: '#94a3b8', fontSize: '11px' } },
     },
     yaxis: { labels: { formatter: v => formatLAK(v), style: { colors: '#94a3b8', fontSize: '10px' } } },
@@ -82,8 +82,8 @@ export default function AgingReport() {
 
   const agingPieOpts = {
     chart: { type: 'donut', fontFamily: 'Inter, Noto Sans Lao, sans-serif' },
-    labels: AGING_CONFIG.map(a => a.label),
-    colors: AGING_CONFIG.map(a => a.color),
+    labels: activeAgingConfig.map(a => a.label),
+    colors: activeAgingConfig.map(a => a.color),
     legend: { position: 'bottom', labels: { colors: '#64748b' } },
     plotOptions: { pie: { donut: { size: '65%', labels: { show: true, total: { show: true, label: 'Total', color: '#64748b', formatter: () => formatLAK(totalDebt) } } } } },
     dataLabels: { formatter: val => `${val.toFixed(1)}%` },
@@ -152,7 +152,7 @@ export default function AgingReport() {
 
       {/* Aging bucket cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        {AGING_CONFIG.map(a => {
+        {activeAgingConfig.map(a => {
           const d = viewAgingData[a.key] || { balance: 0, bills: 0 }
           const pct = totalDebt > 0 ? (d.balance / totalDebt * 100).toFixed(1) : '0.0'
           return (
@@ -182,7 +182,7 @@ export default function AgingReport() {
           {totalDebt > 0 ? (
             <ReactApexChart
               options={agingBarOpts}
-              series={[{ name: 'Balance', data: AGING_CONFIG.map(a => viewAgingData[a.key]?.balance || 0) }]}
+              series={[{ name: 'Balance', data: activeAgingConfig.map(a => viewAgingData[a.key]?.balance || 0) }]}
               type="bar" height={260}
             />
           ) : <EmptyState message="No data" sublabel="Please upload Excel first" />}
@@ -194,7 +194,7 @@ export default function AgingReport() {
           {totalDebt > 0 ? (
             <ReactApexChart
               options={agingPieOpts}
-              series={AGING_CONFIG.map(a => viewAgingData[a.key]?.balance || 0)}
+              series={activeAgingConfig.map(a => viewAgingData[a.key]?.balance || 0)}
               type="donut" height={260}
             />
           ) : <EmptyState message="No data" />}

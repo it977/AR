@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { createDataBackup, listRecentBackups } from '../lib/autoBackup'
-import { confirmAction, showError, showSuccess } from '../lib/sweetAlert'
+import { createDataBackup, listRecentBackups, restoreDataBackup } from '../lib/autoBackup'
+import { confirmAction, confirmCodeAction, showError, showSuccess } from '../lib/sweetAlert'
 
 // ============================================================
 // Tab definitions
@@ -480,16 +480,24 @@ function BackupPanel({ hint }) {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [restoring, setRestoring] = useState(false)
+  const [selectedBackupId, setSelectedBackupId] = useState('')
   const [error, setError] = useState('')
 
   async function load() {
     setLoading(true)
     setError('')
     try {
-      setItems(await listRecentBackups())
+      const backups = await listRecentBackups(30)
+      setItems(backups)
+      setSelectedBackupId(current => {
+        if (current && backups.some(item => item.id === current)) return current
+        return backups[0]?.id || ''
+      })
     } catch (err) {
       setError(err.message)
       setItems([])
+      setSelectedBackupId('')
     } finally {
       setLoading(false)
     }
@@ -510,6 +518,40 @@ function BackupPanel({ hint }) {
     }
   }
 
+  function backupLabel(item) {
+    if (!item) return ''
+    const created = item.created_at ? new Date(item.created_at).toLocaleString('lo-LA') : ''
+    return `${item.backup_date} ${item.backup_time || ''} · ${item.source}${created ? ` · ${created}` : ''}`
+  }
+
+  async function restoreBackup(backupId = selectedBackupId) {
+    const backup = items.find(item => item.id === backupId)
+    if (!backup) {
+      showError('ບໍ່ພົບ backup', 'ກະລຸນາເລືອກ backup ກ່ອນ')
+      return
+    }
+
+    const confirmed = await confirmCodeAction({
+      title: 'ຢືນຢັນ Restore',
+      text: `ຈະກັບໄປຫາ backup: ${backup.backup_date} ${backup.backup_time}. ລະບົບຈະສ້າງ safety backup ກ່ອນທັບຂໍ້ມູນປັດຈຸບັນ.`,
+      confirmButtonText: 'Restore',
+    })
+    if (!confirmed) return
+
+    setRestoring(true)
+    setError('')
+    try {
+      const result = await restoreDataBackup(backup.id)
+      await load()
+      showSuccess('Restore ສຳເລັດ', `ກັບໄປຫາ ${result?.restored_backup_date || backup.backup_date} ${result?.restored_backup_time || backup.backup_time}`)
+    } catch (err) {
+      setError(err.message)
+      showError('Restore ບໍ່ສຳເລັດ', err.message)
+    } finally {
+      setRestoring(false)
+    }
+  }
+
   const latest = items[0]
 
   return (
@@ -521,7 +563,7 @@ function BackupPanel({ hint }) {
         {hint}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">ຕາຕະລາງເວລາ</p>
           <p className="text-2xl font-bold text-slate-800 mt-1">23:00</p>
@@ -542,13 +584,37 @@ function BackupPanel({ hint }) {
             {saving ? 'ກຳລັງສຳຮອງ...' : 'ສຳຮອງດຽວນີ້'}
           </button>
         </div>
+        <div className="rounded-xl border border-amber-100 bg-amber-50 p-4">
+          <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Restore</p>
+          <select
+            value={selectedBackupId}
+            onChange={event => setSelectedBackupId(event.target.value)}
+            disabled={loading || restoring || !items.length}
+            className="mt-2 w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 disabled:opacity-50"
+          >
+            {!items.length && <option value="">ບໍ່ມີ backup</option>}
+            {items.map(item => (
+              <option key={item.id} value={item.id}>{backupLabel(item)}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => restoreBackup()}
+            disabled={loading || saving || restoring || !selectedBackupId}
+            className="mt-3 w-full rounded-xl bg-amber-600 px-4 py-2 text-sm font-bold text-white hover:bg-amber-700 disabled:opacity-50"
+          >
+            {restoring ? 'ກຳລັງ Restore...' : 'Restore ຈຸດນີ້'}
+          </button>
+        </div>
       </div>
 
       {error && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
           {error.includes('ar_data_backups')
             ? 'ຍັງບໍ່ພົບ table ar_data_backups — ໃຫ້ run SQL supabase/auto_backup.sql ກ່ອນ'
-            : error}
+            : error.includes('restore_ar_data_backup')
+              ? 'ຍັງບໍ່ພົບ function restore_ar_data_backup — ໃຫ້ run SQL supabase/auto_backup.sql ກ່ອນ'
+              : error}
         </div>
       )}
 
@@ -561,11 +627,12 @@ function BackupPanel({ hint }) {
               <th className="table-th text-right">ໃບບິນ</th>
               <th className="table-th text-right">ໜີ້</th>
               <th className="table-th text-right">ກະແສເງິນ</th>
+              <th className="table-th text-right">Restore</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
             {loading ? (
-              <tr><td colSpan={5} className="table-td text-center text-slate-400 py-8">ກຳລັງໂຫຼດ...</td></tr>
+              <tr><td colSpan={6} className="table-td text-center text-slate-400 py-8">ກຳລັງໂຫຼດ...</td></tr>
             ) : items.length ? items.map(item => (
               <tr key={item.id}>
                 <td className="table-td font-semibold text-slate-700">{item.backup_date} {item.backup_time}</td>
@@ -573,9 +640,19 @@ function BackupPanel({ hint }) {
                 <td className="table-td text-right font-mono">{item.counts?.ar_bills || 0}</td>
                 <td className="table-td text-right font-mono">{item.counts?.ar_debt || 0}</td>
                 <td className="table-td text-right font-mono">{item.counts?.ar_cashflow || 0}</td>
+                <td className="table-td text-right">
+                  <button
+                    type="button"
+                    onClick={() => restoreBackup(item.id)}
+                    disabled={saving || restoring}
+                    className="rounded-lg border border-amber-200 px-3 py-1 text-[11px] font-bold text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+                  >
+                    Restore
+                  </button>
+                </td>
               </tr>
             )) : (
-              <tr><td colSpan={5} className="table-td text-center text-slate-400 py-8">ຍັງບໍ່ມີ backup</td></tr>
+              <tr><td colSpan={6} className="table-td text-center text-slate-400 py-8">ຍັງບໍ່ມີ backup</td></tr>
             )}
           </tbody>
         </table>

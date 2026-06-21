@@ -69,6 +69,7 @@ const MAP_DEBT = {
   'Grand Total': 'grand_total',
   'Outstanding Debt': 'debt_amount',
   'Date Paid': 'date_paid',
+  'Workload Debt': 'workload',
   'Submission Date': 'submit_date',
   'Amount Paid': 'amount_paid',
   'Cash Received Debt': 'cash_paid',
@@ -239,7 +240,8 @@ function makeSourceKey(sheetName, rowNumber, row) {
   ].map(v => String(v).replace(/\s+/g, ' ').trim()).join('__')
 }
 
-function parseSheet(sheet, columnMap, addDebtStatus = false, sheetName = 'Sheet') {
+function parseSheet(sheet, columnMap, addDebtStatus = false, sheetName = 'Sheet', options = {}) {
+  const { requireBillNo = true } = options
   // Use formatted cell values so Google Sheets exported dates stay on their displayed day.
   const rows = XLSX.utils.sheet_to_json(sheet, { defval: null })
   const parsed = rows.map((r, index) => {
@@ -247,7 +249,7 @@ function parseSheet(sheet, columnMap, addDebtStatus = false, sheetName = 'Sheet'
     row.source_key = makeSourceKey(sheetName, index + 2, row)
     if (addDebtStatus) row.debt_status = resolvePaymentStatus(row)
     return row
-  }).filter(r => r.bill_no && r.date)
+  }).filter(r => r.date && (!requireBillNo || r.bill_no))
 
   return parsed
 }
@@ -305,7 +307,7 @@ export function parseExcelFile(file) {
                 debt_status: resolvePaymentStatus(d),
               }))
           } else if (lower.includes('summary_cashflow')) {
-            result.cashflow = parseSheet(sheet, MAP_CASHFLOW, false, name)
+            result.cashflow = parseSheet(sheet, MAP_CASHFLOW, false, name, { requireBillNo: false })
               .filter(r =>
                 r.total_actual_income ||
                 r.balance ||
@@ -317,6 +319,14 @@ export function parseExcelFile(file) {
               )
           }
         })
+
+        const maxBillDate = result.bills.reduce(
+          (max, row) => (row.date && row.date > max ? row.date : max),
+          ''
+        )
+        if (maxBillDate && result.cashflow.length) {
+          result.cashflow = result.cashflow.filter(row => !row.date || row.date <= maxBillDate)
+        }
 
         resolve(result)
       } catch (err) {

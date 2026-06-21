@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx'
 import { parseExcelFile, formatNumber } from '../lib/excelParser'
 import { supabase } from '../lib/supabase'
 import { logAction } from '../lib/log'
+import { createDataBackup } from '../lib/autoBackup'
 
 // ============================================================
 // Template download — same column structure as the real Excel
@@ -108,34 +109,28 @@ function StepIndicator({ current }) {
 
 async function upsertBatch(table, rows) {
   if (!rows.length) return
-  
-  // Deduplicate rows by conflict key before upsert
-  const seen = new Map()
-  const uniqueRows = []
-  
+
   const conflictKey = (r) => r.source_key || (
     table === 'ar_bills'
       ? `${r.bill_no}__${r.date}__${r.workload || 'ALL'}`
       : `${r.bill_no}__${r.date}`
   )
-  
-  // Keep last occurrence of each unique key
+
+  // Keep every Excel row when source_key is present. Some official Looker rows reuse
+  // the same Bill No/date/workload for different patients or service lines.
+  const seen = new Map()
   for (const row of rows) {
-    const key = conflictKey(row)
-    seen.set(key, row)
+    seen.set(conflictKey(row), row)
   }
-  
-  uniqueRows.push(...seen.values())
-  
+  const uniqueRows = [...seen.values()]
+
   // ແບ່ງເປັນກຸ່ມຍ່ອຍໆລະ 100 ແຖວ ເພື່ອຫຼີກລ່ຽງ conflict
   const CHUNK_SIZE = 100
   for (let i = 0; i < uniqueRows.length; i += CHUNK_SIZE) {
     const chunk = uniqueRows.slice(i, i + CHUNK_SIZE)
-    
     const conflictKeyDb = chunk[0]?.source_key
       ? 'source_key'
       : (table === 'ar_bills' ? 'bill_no,date,workload' : 'bill_no,date')
-    
     let { error } = await supabase.from(table).upsert(chunk, {
       onConflict: conflictKeyDb,
       ignoreDuplicates: false,
@@ -144,7 +139,7 @@ async function upsertBatch(table, rows) {
     if (error && OPTIONAL_COLUMNS[table]?.some(col => error.message?.includes(col))) {
       const optional = new Set(OPTIONAL_COLUMNS[table])
       const stripped = chunk.map(row => Object.fromEntries(
-        Object.entries(row).filter(([key]) => !optional.has(key))
+        Object.entries(row).filter(([k]) => !optional.has(k))
       ))
       ;({ error } = await supabase.from(table).upsert(stripped, {
         onConflict: conflictKeyDb,
@@ -163,6 +158,30 @@ async function upsertBatch(table, rows) {
       }
     }
   }
+}
+
+function datesFromRows(rows) {
+  return [...new Set((rows || []).map(row => row.date).filter(Boolean))]
+}
+
+async function deleteRowsForDates(table, rows) {
+  const dates = datesFromRows(rows)
+  if (!dates.length) return 0
+
+  const CHUNK_SIZE = 100
+  let deleted = 0
+  for (let i = 0; i < dates.length; i += CHUNK_SIZE) {
+    const chunk = dates.slice(i, i + CHUNK_SIZE)
+    const { count, error } = await supabase
+      .from(table)
+      .delete({ count: 'exact' })
+      .in('date', chunk)
+
+    if (error) throw new Error(`[${table}] delete old rows failed: ${error.message}`)
+    deleted += count || 0
+  }
+
+  return deleted
 }
 
 export default function UploadExcel() {
@@ -214,7 +233,14 @@ export default function UploadExcel() {
       const cashflowTotal = parsed.cashflow?.length || 0
       const grandTotal = billsTotal + debtTotal + cashflowTotal
 
+      addLog('Creating safety backup before replace...')
+      const backup = await createDataBackup('pre_excel_replace')
+      addLog(`Safety backup created: ${backup.backup_date} ${backup.backup_time}`)
+
       if (billsTotal > 0) {
+        addLog(`Replacing old ar_bills rows for ${formatNumber(datesFromRows(parsed.bills).length)} Excel dates...`)
+        const deleted = await deleteRowsForDates('ar_bills', parsed.bills)
+        addLog(`Deleted old ar_bills rows: ${formatNumber(deleted)}`)
         addLog(`ກຳລັງອັບໂຫຼດ ar_bills (${formatNumber(billsTotal)} ແຖວ)...`)
         let done = 0
         for (let i = 0; i < billsTotal; i += BATCH_SIZE) {
@@ -226,6 +252,9 @@ export default function UploadExcel() {
       }
 
       if (debtTotal > 0) {
+        addLog(`Replacing old ar_debt rows for ${formatNumber(datesFromRows(debtRows).length)} Excel dates...`)
+        const deleted = await deleteRowsForDates('ar_debt', debtRows)
+        addLog(`Deleted old ar_debt rows: ${formatNumber(deleted)}`)
         addLog(`ກຳລັງອັບໂຫຼດ ar_debt (${formatNumber(debtTotal)} ແຖວ)...`)
         let done = billsTotal
         for (let i = 0; i < debtTotal; i += BATCH_SIZE) {
@@ -257,6 +286,9 @@ export default function UploadExcel() {
       }
 
       if (cashflowTotal > 0) {
+        addLog(`Replacing old ar_cashflow rows for ${formatNumber(datesFromRows(parsed.cashflow).length)} Excel dates...`)
+        const deleted = await deleteRowsForDates('ar_cashflow', parsed.cashflow)
+        addLog(`Deleted old ar_cashflow rows: ${formatNumber(deleted)}`)
         addLog(`ກຳລັງອັບໂຫຼດ ar_cashflow (${formatNumber(cashflowTotal)} ແຖວ)...`)
         let done = billsTotal + debtTotal
         for (let i = 0; i < cashflowTotal; i += BATCH_SIZE) {

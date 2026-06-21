@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useLanguage } from '../context/LanguageContext'
+import { createDataBackup } from '../lib/autoBackup'
 import { PERMISSIONS } from '../lib/rbac'
+import { showError, showSuccess } from '../lib/sweetAlert'
 
 // AR finance navigation items.
 const arItems = [
@@ -208,6 +210,57 @@ function NavGroup({ label, items, collapsed, defaultOpen = false, isSubgroup = f
   )
 }
 
+function BackupShortcut({ collapsed }) {
+  const [saving, setSaving] = useState(false)
+
+  async function handleBackup() {
+    if (saving) return
+    setSaving(true)
+    try {
+      const backup = await createDataBackup('manual_sidebar')
+      const bills = backup?.counts?.ar_bills || 0
+      const debt = backup?.counts?.ar_debt || 0
+      showSuccess('ສຳຮອງຂໍ້ມູນສຳເລັດ', `ໃບບິນ ${bills} ແຖວ, ໜີ້ ${debt} ແຖວ`)
+    } catch (error) {
+      showError('ສຳຮອງຂໍ້ມູນບໍ່ສຳເລັດ', error.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleBackup}
+      disabled={saving}
+      className={`nav-item nav-item-inactive mb-1 w-full disabled:cursor-wait disabled:opacity-60 ${
+        collapsed ? 'justify-center' : 'justify-between'
+      }`}
+      title={collapsed ? 'Backup data' : ''}
+      aria-label="Backup data"
+    >
+      <span className="flex items-center gap-2">
+        {saving ? (
+          <svg className="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+          </svg>
+        ) : (
+          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M8 12l4 4m0 0l4-4m-4 4V4" />
+          </svg>
+        )}
+        {!collapsed && <span className="text-xs font-semibold">{saving ? 'ກຳລັງ Backup...' : 'Backup'}</span>}
+      </span>
+      {!collapsed && (
+        <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-black text-emerald-200">
+          DB
+        </span>
+      )}
+    </button>
+  )
+}
+
 export default function Layout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const location = useLocation()
@@ -293,6 +346,7 @@ export default function Layout({ children }) {
               </div>
             </div>
           )}
+          {can(PERMISSIONS.PAGE_SETTINGS) && <BackupShortcut collapsed={collapsed} />}
           <a
             href={languageHref}
             data-no-translate
