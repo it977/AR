@@ -625,3 +625,30 @@ Expected result on Jun 19 Payment Channel:
 - Initial Outstanding for Daily Income: `10,522,750` -> `10,822,750`
 - Daily Income: `43,947,600` -> `43,647,600`
 - Actual Income: `48,128,225` -> `47,828,225`
+
+### 2026-06-22 (night, follow-up 4) - BCEL fixed but Actual Income still high
+
+User report: after the previous commit, `/payment-channel` shows BCEL correctly at `16,785,125`, but `Actual Income` still shows `48,128,225` instead of `47,828,225`.
+
+What this proves:
+
+- `deferredFromIssue` is working for the channel card because BCEL dropped by `300,000`.
+- The remaining error is not the payment-channel total anymore.
+- The remaining error is the Daily Income formula:
+  `dailyIncome = kpis.totalSales - initialOutstandingForDailyIncome`.
+- `initialOutstandingForDailyIncome` still missed the same `300,000` deferred transfer, so it stayed `10,522,750` instead of `10,822,750`.
+
+Completed code action:
+
+- Added `amount` to the existing `deferredFromIssue` aggregate (`bcel + bcel2 + ldb`).
+- Added `deferredFromIssue.amount` to `initialOutstandingForDailyIncome`.
+- This mirrors Looker's accounting rule:
+  - On the bill issue date, late-arriving transfer channels are Outstanding.
+  - On the receipt date, late-arriving transfer channels are Collection.
+  - Cash remains on the bill issue date.
+
+Expected result on Jun 19 Payment Channel:
+
+- `initialOutstandingForDailyIncome = 10,522,750 + 300,000 = 10,822,750`
+- `Daily Income = 54,470,350 - 10,822,750 = 43,647,600`
+- `Actual Income = 43,647,600 + 4,180,625 = 47,828,225`

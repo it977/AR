@@ -218,7 +218,7 @@ export default function PaymentChannel() {
         ldb   += Number(row.ldb   || 0)
       }
     }
-    return { bcel, bcel2, ldb }
+    return { bcel, bcel2, ldb, amount: bcel + bcel2 + ldb }
   }, [viewRows])
 
   // Combine ar_bills channels (date in range) and ar_debt channels (date_paid in range). Matches Looker.
@@ -330,8 +330,8 @@ export default function PaymentChannel() {
     const filtered = allowedBillNos.size > 0
       ? orows.filter(r => allowedBillNos.has(r.bill_no) || hasDebtPaymentInRange(r))
       : orows
-    return filtered.reduce((s, r) => s + getDebtInitialAmount(r), 0) + sameDaySettledDebt.amount
-  }, [outstandingRows, viewRows, kpis.outstandingDebt, sameDaySettledDebt.amount, filters.dateFrom, filters.dateTo])
+    return filtered.reduce((s, r) => s + getDebtInitialAmount(r), 0) + sameDaySettledDebt.amount + deferredFromIssue.amount
+  }, [outstandingRows, viewRows, kpis.outstandingDebt, sameDaySettledDebt.amount, deferredFromIssue.amount, filters.dateFrom, filters.dateTo])
 
   const dailyIncome = useCashflowSummary && cashflowInitialOutstanding > 0
     ? Math.max(0, kpis.totalSales - cashflowInitialOutstanding)
