@@ -348,6 +348,21 @@ Completed code action:
 - Updated `src/pages/PaymentChannel.jsx` so `initialOutstandingForDailyIncome` keeps same-day settled `ar_debt` rows (`date_paid === date`) even when the bill number is not in the filtered Daily rows.
 - Verified `npm run build` passes.
 
+### 2026-06-22 - Payment Channel still unchanged after same-day date check
+
+Latest screenshot still shows `Actual Income = 48,128,225` and `Daily Income = 43,947,600`.
+
+New root cause:
+
+- Payment Channel used a raw string comparison for same-day debt rows:
+  - `String(row.date).slice(0, 10) === String(row.date_paid).slice(0, 10)`
+- This can fail when DB dates are stored/displayed as `DD/MM/YYYY`, or when payment is stored in `payment_1_date/payment_2_date/payment_3_date`.
+- The correct test should use the existing date-range-aware helper `getDebtPaidAmountForDateRange()`.
+
+Next code action:
+
+- Include `ar_debt` rows in Payment Channel initial outstanding when they have paid amount in the selected report date range, even if their bill number is not present in Daily rows.
+
 ### 2026-06-22 (mid) - Same-day filter too narrow; cross-reference ar_debt
 
 Symptom: after the previous fix shipped, Jun 19 still showed the same `+300,000 / -1 bill` gap. Jun 20 had the same shape. Past dates were also at risk.
@@ -584,3 +599,29 @@ Expected result on Jun 19 Payment Channel:
 - Actual Income: previous `48,128,225` → `47,828,225` ✓
 - Outstanding Balance: unchanged at `10,522,750` ✓
 - Cash: still `29,435,700` (the +3,600 vs Looker is a separate known discrepancy between `kpis.cash` and the Daily-sheet cash total; investigate separately if user flags it).
+
+### 2026-06-22 (night, follow-up 3) - Payment Channel still kept Actual Income too high
+
+User report: `/payment-channel` still showed `Actual Income = 48,128,225` after refresh, while Looker shows `47,828,225`.
+
+Root cause found in `initialOutstandingForDailyIncome`:
+
+- The Payment Channel page was checking same-day debt with raw date text:
+  `String(row.date).slice(0, 10) === String(row.date_paid).slice(0, 10)`.
+- That is too brittle because uploaded debt rows can store payment dates in different fields/formats (`date_paid`, installment payment dates, or parsed Excel dates).
+- When this check misses a paid debt row, initial outstanding stays `10,522,750` instead of `10,822,750`.
+- Then Daily Income becomes `54,470,350 - 10,522,750 = 43,947,600`, which is `300,000` too high.
+- Actual Income becomes `43,947,600 + 4,180,625 = 48,128,225`, also `300,000` too high.
+
+Completed code action:
+
+- Replaced the raw same-day date comparison with the shared helper:
+  `getDebtPaidAmountForDateRange(row, filters.dateFrom, filters.dateTo) > 0`.
+- This makes Payment Channel include any `ar_debt` row that has a payment in the selected report date range, matching how Collection is already detected.
+- Added `filters.dateFrom` and `filters.dateTo` to the memo dependencies so date changes recompute the outstanding base.
+
+Expected result on Jun 19 Payment Channel:
+
+- Initial Outstanding for Daily Income: `10,522,750` -> `10,822,750`
+- Daily Income: `43,947,600` -> `43,647,600`
+- Actual Income: `48,128,225` -> `47,828,225`

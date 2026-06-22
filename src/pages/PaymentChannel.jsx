@@ -325,15 +325,13 @@ export default function PaymentChannel() {
     const orows = outstandingRows || []
     if (!orows.length) return kpis.outstandingDebt + sameDaySettledDebt.amount
     const allowedBillNos = new Set(viewRows.map(r => r.bill_no).filter(Boolean))
-    const isSameDaySettledDebt = (row = {}) => {
-      if (!row.date || !row.date_paid) return false
-      return String(row.date).slice(0, 10) === String(row.date_paid).slice(0, 10)
-    }
+    const hasDebtPaymentInRange = (row = {}) =>
+      getDebtPaidAmountForDateRange(row, filters.dateFrom, filters.dateTo) > 0
     const filtered = allowedBillNos.size > 0
-      ? orows.filter(r => allowedBillNos.has(r.bill_no) || isSameDaySettledDebt(r))
+      ? orows.filter(r => allowedBillNos.has(r.bill_no) || hasDebtPaymentInRange(r))
       : orows
     return filtered.reduce((s, r) => s + getDebtInitialAmount(r), 0) + sameDaySettledDebt.amount
-  }, [outstandingRows, viewRows, kpis.outstandingDebt, sameDaySettledDebt.amount])
+  }, [outstandingRows, viewRows, kpis.outstandingDebt, sameDaySettledDebt.amount, filters.dateFrom, filters.dateTo])
 
   const dailyIncome = useCashflowSummary && cashflowInitialOutstanding > 0
     ? Math.max(0, kpis.totalSales - cashflowInitialOutstanding)
