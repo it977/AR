@@ -250,3 +250,44 @@ Completed code action:
   - JavaScript `Date`
 - Updated `isRetroBillCollection()` to use `toDateOnly(row.bill_issued_at) || toDateOnly(row.date)`, so malformed/empty issue timestamps do not block valid receipt-date rows.
 - Verified `npm run build` passes.
+
+### 2026-06-22 - Collection fixed, but income/outstanding still off by 300,000
+
+Latest app values after Collection fix:
+
+| Metric | App | Looker | Diff |
+| --- | ---: | ---: | ---: |
+| Actual Income | 48,128,225 | 47,828,225 | +300,000 |
+| Outstanding Debts | 10,522,750 | 10,822,750 | -300,000 |
+| Daily Income | 43,947,600 | 43,647,600 | +300,000 |
+| Actual Bills Paid | 33 | 33 | 0 |
+| Outstanding Bills | 10 | 11 | -1 |
+| Collection | 4,180,625 | 4,180,625 | 0 |
+| Collection Bills | 3 | 3 | 0 |
+
+Conclusion:
+
+- Collection is now correct.
+- The remaining mismatch is exactly `300,000`.
+- This matches Looker Outstanding page behavior: `Total Outstanding 10,822,750`, `Daily Collected 300,000`, `Remaining Balance 10,522,750`.
+- App currently treats this same-day settled debt bill as daily income. Looker treats it as initial outstanding, with balance reduced to zero.
+
+Next code action:
+
+- In Daily Sales, identify same-day settled debt bills from daily rows:
+  - insurance/debt customer type (`INS`/`iNS`);
+  - remaining `debt <= 0`;
+  - has collected channel amount;
+  - bill date is in the selected Daily Sales date range.
+- Add those amounts to initial Outstanding Debts and subtract them from Daily Income.
+- Add those bill counts back to Actual Bills Paid so the paid count stays aligned after outstanding bills increase.
+
+Completed code action:
+
+- Added `getSameDaySettledDebtStats()` in `src/pages/DailySales.jsx`.
+- Daily Sales now reclassifies same-day settled INS debt rows:
+  - adds amount to `Outstanding Debts`;
+  - increases `Outstanding Bills`;
+  - lowers `Daily Income` through the existing formula `Actual Total Sale - Outstanding Debts`;
+  - keeps `Actual Bills Paid` aligned by adding those settled debt bills back after outstanding bill count increases.
+- Verified `npm run build` passes.

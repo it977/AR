@@ -44,6 +44,20 @@ const PAYMENT_METHODS = [
   { key: 'ldb',   label: 'LDB',     sub: 'Lao Dev Bank' },
 ]
 
+function getSameDaySettledDebtStats(rows = []) {
+  const debtRows = (rows || []).filter(row => {
+    const customerType = String(row.customer_type || '').toUpperCase()
+    const collected = getBillCollectionAmount(row)
+    const remainingDebt = Number(row.debt || 0)
+    return customerType === 'INS' && remainingDebt <= 0 && collected > 0
+  })
+  const billNos = new Set(debtRows.map(row => row.bill_no).filter(Boolean))
+  return {
+    amount: debtRows.reduce((sum, row) => sum + getBillCollectionAmount(row), 0),
+    bills: billNos.size || debtRows.length,
+  }
+}
+
 function PaymentIcon({ method }) {
   if (method === 'cash') return (
     <svg viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
@@ -161,6 +175,7 @@ export default function DailySales() {
   const viewRows = lookerView.rows
   const kpis      = useMemo(() => computeKPIs(viewRows), [viewRows])
   const shiftData = useMemo(() => computeShiftData(viewRows), [viewRows])
+  const sameDaySettledDebt = useMemo(() => getSameDaySettledDebtStats(viewRows), [viewRows])
 
   // Collection = debt payments in the selected date range.
   // Prefer installment dates when present; otherwise fall back to date_paid.
@@ -251,7 +266,10 @@ export default function DailySales() {
   const lookerOutstanding = useMemo(() => {
     const orows = outstandingRows || []
     if (!orows.length) {
-      return { amount: kpis.outstandingDebt, bills: kpis.outstandingBills }
+      return {
+        amount: kpis.outstandingDebt + sameDaySettledDebt.amount,
+        bills: kpis.outstandingBills + sameDaySettledDebt.bills,
+      }
     }
     const allowedBillNos = new Set(viewRows.map(r => r.bill_no).filter(Boolean))
     const filtered = allowedBillNos.size > 0
@@ -259,8 +277,11 @@ export default function DailySales() {
       : orows
     const amount = filtered.reduce((s, r) => s + getDebtInitialAmount(r), 0)
     const bills = filtered.filter(r => getDebtInitialAmount(r) > 0).length
-    return { amount, bills }
-  }, [outstandingRows, viewRows, kpis.outstandingDebt, kpis.outstandingBills])
+    return {
+      amount: amount + sameDaySettledDebt.amount,
+      bills: bills + sameDaySettledDebt.bills,
+    }
+  }, [outstandingRows, viewRows, kpis.outstandingDebt, kpis.outstandingBills, sameDaySettledDebt])
 
   // Override outstanding-derived metrics with Looker values.
   const viewKpis = useMemo(() => {
@@ -300,8 +321,8 @@ export default function DailySales() {
     if (!hasDetailFilters && Object.prototype.hasOwnProperty.call(LOOKER_ACTUAL_PAID_BILLS, key)) {
       return LOOKER_ACTUAL_PAID_BILLS[key]
     }
-    return viewKpis.paidBills + collectionBillCount
-  }, [filters, viewKpis.paidBills, collectionBillCount])
+    return viewKpis.paidBills + collectionBillCount + sameDaySettledDebt.bills
+  }, [filters, viewKpis.paidBills, collectionBillCount, sameDaySettledDebt.bills])
 
   const totalShiftBills = Object.values(viewShiftData).reduce((s, v) => s + v.bills, 0)
   const shiftPcts    = SHIFTS.map(s =>
