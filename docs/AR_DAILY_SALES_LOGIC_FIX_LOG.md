@@ -324,6 +324,30 @@ Completed code action:
 - Payment Channel `actualIncomeTotal` now uses `dailyIncome + collectionStats.amount`.
 - Verified `npm run build` passes.
 
+### 2026-06-22 - Payment Channel still did not move after refresh
+
+Latest screenshot still shows:
+
+| Metric | App | Looker | Diff |
+| --- | ---: | ---: | ---: |
+| Actual Income | 48,128,225 | 47,828,225 | +300,000 |
+| Daily Income | 43,947,600 | 43,647,600 | +300,000 |
+
+New conclusion:
+
+- The `300,000` is not being found by Payment Channel's INS-only same-day helper.
+- Looker Outstanding page shows the 300,000 as a same-day collected debt bucket, and earlier charts indicated it can be in GN, not INS.
+- Payment Channel also filtered `ar_debt` rows to only bill numbers present in the Daily bill view. That can drop same-day Pay off rows when Pay off exists without a matching Daily upload row.
+
+Next code action:
+
+- In Payment Channel, include `ar_debt` rows where `date_paid === date` in initial outstanding, even if their bill number is not present in the filtered Daily rows.
+
+Completed code action:
+
+- Updated `src/pages/PaymentChannel.jsx` so `initialOutstandingForDailyIncome` keeps same-day settled `ar_debt` rows (`date_paid === date`) even when the bill number is not in the filtered Daily rows.
+- Verified `npm run build` passes.
+
 ### 2026-06-22 (mid) - Same-day filter too narrow; cross-reference ar_debt
 
 Symptom: after the previous fix shipped, Jun 19 still showed the same `+300,000 / -1 bill` gap. Jun 20 had the same shape. Past dates were also at risk.

@@ -325,8 +325,12 @@ export default function PaymentChannel() {
     const orows = outstandingRows || []
     if (!orows.length) return kpis.outstandingDebt + sameDaySettledDebt.amount
     const allowedBillNos = new Set(viewRows.map(r => r.bill_no).filter(Boolean))
+    const isSameDaySettledDebt = (row = {}) => {
+      if (!row.date || !row.date_paid) return false
+      return String(row.date).slice(0, 10) === String(row.date_paid).slice(0, 10)
+    }
     const filtered = allowedBillNos.size > 0
-      ? orows.filter(r => allowedBillNos.has(r.bill_no))
+      ? orows.filter(r => allowedBillNos.has(r.bill_no) || isSameDaySettledDebt(r))
       : orows
     return filtered.reduce((s, r) => s + getDebtInitialAmount(r), 0) + sameDaySettledDebt.amount
   }, [outstandingRows, viewRows, kpis.outstandingDebt, sameDaySettledDebt.amount])
