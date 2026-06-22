@@ -23,6 +23,20 @@ import { formatNumber } from '../lib/excelParser'
 import { toNumber } from '../lib/debtUtils'
 import { useGlobalFilters } from '../context/FilterContext'
 
+function getSameDaySettledDebtStats(rows = []) {
+  const debtRows = (rows || []).filter(row => {
+    const customerType = String(row.customer_type || '').toUpperCase()
+    const collected = getBillCollectionAmount(row)
+    const remainingDebt = Number(row.debt || 0)
+    return customerType === 'INS' && remainingDebt <= 0 && collected > 0
+  })
+  const billNos = new Set(debtRows.map(row => row.bill_no).filter(Boolean))
+  return {
+    amount: debtRows.reduce((sum, row) => sum + getBillCollectionAmount(row), 0),
+    bills: billNos.size || debtRows.length,
+  }
+}
+
 const METHODS = [
   { key: 'cash',  label: 'Cash', sublabel: 'Cash',               color: '#10b981', bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-100' },
   { key: 'bcel',  label: 'BCEL',    sublabel: 'BCEL Bank Transfer',  color: '#cc1c2e', bg: 'bg-red-50',     text: 'text-red-700',     border: 'border-red-100' },
@@ -113,6 +127,7 @@ export default function PaymentChannel() {
   const lookerView = useMemo(() => filterToLookerSubset(rows || []), [rows])
   const viewRows = lookerView.rows
   const kpis = useMemo(() => computeKPIs(viewRows), [viewRows])
+  const sameDaySettledDebt = useMemo(() => getSameDaySettledDebtStats(viewRows), [viewRows])
   // Use ar_bills (date in range) for payment-type breakdown — matches Looker (no retro receipts).
   const paymentTypeSummary = useMemo(() => computePaymentTypeSummary(viewRows), [viewRows])
   const depositCollection = paymentTypeSummary.Deposit?.amount || 0
@@ -165,9 +180,13 @@ export default function PaymentChannel() {
     const retroRows = (billReceiptRows || [])
       .filter(isRetroBillCollection)
       .filter(row => !row.bill_no || !debtBillNos.has(row.bill_no))
+    // Deferred-receipt retro: cash was received on the bill's issue day, only the
+    // transfer portion (bcel / bcel2 / ldb) landed on the receipt date. Exclude cash
+    // from the retro totals so it isn't double-counted on the receipt day. Matches
+    // Looker's Collection breakdown (transfer-only for deferred bills).
     const retroTotals = retroRows.reduce((sum, row) => {
-      sum.amount += getBillCollectionAmount(row)
-      sum.cash += row.cash || 0
+      const transferOnly = Number(row.bcel || 0) + Number(row.bcel2 || 0) + Number(row.ldb || 0)
+      sum.amount += transferOnly
       sum.bcel += row.bcel || 0
       sum.bcel2 += row.bcel2 || 0
       sum.ldb += row.ldb || 0
@@ -182,6 +201,26 @@ export default function PaymentChannel() {
     }
   }, [debtRows, billReceiptRows, filters.dateFrom, filters.dateTo])
 
+  // Deferred-receipt subtraction: bills where `payment_received_at > date` had their
+  // transfer portion (bcel / bcel2 / ldb) actually land in the account on a later day.
+  // For the issue date's Payment Channel view, those transfers should NOT count yet —
+  // they will appear as Collection on their receipt date instead (handled via retroRows
+  // in `collectionStats`). Cash is always immediate and stays in the issue-day total.
+  const deferredFromIssue = useMemo(() => {
+    let bcel = 0, bcel2 = 0, ldb = 0
+    for (const row of viewRows || []) {
+      if (!row.date || !row.payment_received_at) continue
+      const issue = String(row.date).slice(0, 10)
+      const received = String(row.payment_received_at).slice(0, 10)
+      if (received > issue) {
+        bcel  += Number(row.bcel  || 0)
+        bcel2 += Number(row.bcel2 || 0)
+        ldb   += Number(row.ldb   || 0)
+      }
+    }
+    return { bcel, bcel2, ldb }
+  }, [viewRows])
+
   // Combine ar_bills channels (date in range) and ar_debt channels (date_paid in range). Matches Looker.
   const totals = useMemo(() => {
     const t = { cash: 0, bcel: 0, bcel2: 0, ldb: 0 }
@@ -195,11 +234,11 @@ export default function PaymentChannel() {
       return t
     }
     t.cash  = (kpis.cash  || 0) + collectionStats.cash
-    t.bcel  = (kpis.bcel  || 0) + collectionStats.bcel
-    t.bcel2 = (kpis.bcel2 || 0) + collectionStats.bcel2
-    t.ldb   = (kpis.ldb   || 0) + collectionStats.ldb
+    t.bcel  = Math.max(0, (kpis.bcel  || 0) - deferredFromIssue.bcel)  + collectionStats.bcel
+    t.bcel2 = Math.max(0, (kpis.bcel2 || 0) - deferredFromIssue.bcel2) + collectionStats.bcel2
+    t.ldb   = Math.max(0, (kpis.ldb   || 0) - deferredFromIssue.ldb)   + collectionStats.ldb
     return t
-  }, [kpis, collectionStats, cashflowRows, useCashflowSummary])
+  }, [kpis, collectionStats, cashflowRows, useCashflowSummary, deferredFromIssue])
 
   const methodCollected = totals.cash + totals.bcel + totals.bcel2 + totals.ldb
   const totalCollected = useCashflowSummary ? methodCollected : methodCollected + depositCollection
@@ -279,30 +318,29 @@ export default function PaymentChannel() {
     tooltip: { y: { formatter: v => `${formatNumber(v)} LAK` } },
   }
 
-  // Actual Income = Daily Income + Collection (Pay off). Matches Looker.
-  const actualIncomeTotal = useCashflowSummary
-    ? cashflowActualIncome
-    : (kpis.totalSales - remainingBalance) + collectionStats.amount
-  const grandTotal = actualIncomeTotal + remainingBalance
-  const collectedPct    = grandTotal > 0 ? (actualIncomeTotal / grandTotal * 100).toFixed(1) : '0.0'
-  const outstandingPct  = grandTotal > 0 ? (remainingBalance / grandTotal * 100).toFixed(1) : '0.0'
-
   // Daily Income on Looker is Actual Total Sale - initial Outstanding Debt.
   // For Summary_CashFlow dates, read initial outstanding directly from that sheet so
   // Payment Channel still matches Looker even if ar_debt rows have not been reuploaded yet.
   const initialOutstandingForDailyIncome = useMemo(() => {
     const orows = outstandingRows || []
-    if (!orows.length) return kpis.outstandingDebt
+    if (!orows.length) return kpis.outstandingDebt + sameDaySettledDebt.amount
     const allowedBillNos = new Set(viewRows.map(r => r.bill_no).filter(Boolean))
     const filtered = allowedBillNos.size > 0
       ? orows.filter(r => allowedBillNos.has(r.bill_no))
       : orows
-    return filtered.reduce((s, r) => s + getDebtInitialAmount(r), 0)
-  }, [outstandingRows, viewRows, kpis.outstandingDebt])
+    return filtered.reduce((s, r) => s + getDebtInitialAmount(r), 0) + sameDaySettledDebt.amount
+  }, [outstandingRows, viewRows, kpis.outstandingDebt, sameDaySettledDebt.amount])
 
   const dailyIncome = useCashflowSummary && cashflowInitialOutstanding > 0
     ? Math.max(0, kpis.totalSales - cashflowInitialOutstanding)
     : kpis.totalSales - initialOutstandingForDailyIncome
+  // Actual Income = Daily Income + Collection (Pay off). Matches Looker.
+  const actualIncomeTotal = useCashflowSummary
+    ? cashflowActualIncome
+    : dailyIncome + collectionStats.amount
+  const grandTotal = actualIncomeTotal + remainingBalance
+  const collectedPct    = grandTotal > 0 ? (actualIncomeTotal / grandTotal * 100).toFixed(1) : '0.0'
+  const outstandingPct  = grandTotal > 0 ? (remainingBalance / grandTotal * 100).toFixed(1) : '0.0'
   const cashflowCollectionAmount = useCashflowSummary
     ? Math.max(0, actualIncomeTotal - dailyIncome)
     : 0
