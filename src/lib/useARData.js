@@ -38,7 +38,26 @@ async function fetchAllRows(buildQuery) {
 }
 
 function toDateOnly(value) {
-  return value ? String(value).slice(0, 10) : ''
+  if (!value) return ''
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const y = value.getFullYear()
+    const m = String(value.getMonth() + 1).padStart(2, '0')
+    const d = String(value.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }
+
+  const text = String(value).trim()
+  let match = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)
+  if (match) {
+    return `${match[1]}-${String(match[2]).padStart(2, '0')}-${String(match[3]).padStart(2, '0')}`
+  }
+
+  match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/)
+  if (match) {
+    return `${match[3]}-${String(match[2]).padStart(2, '0')}-${String(match[1]).padStart(2, '0')}`
+  }
+
+  return ''
 }
 
 function inDateRange(date, from, to) {
@@ -73,7 +92,7 @@ export function isRetroBillCollection(row = {}) {
   if (String(row.customer_type || '').toUpperCase() === 'INS') return false
   const receiptDate = getBillReceiptDate(row)
   if (!receiptDate) return false
-  const issuedDate = toDateOnly(row.bill_issued_at || row.date)
+  const issuedDate = toDateOnly(row.bill_issued_at) || toDateOnly(row.date)
   return !issuedDate || receiptDate > issuedDate
 }
 

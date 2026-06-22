@@ -212,3 +212,41 @@ Expected effect:
 
 - If the missing `3,880,625` is stored as non-INS retro bill receipts in `ar_bills.payment_received_at`, Actual Income and payment channels should now move from app value `43,947,600` toward Looker `47,828,225`.
 - If Outstanding Debts still remains `10,522,750` instead of `10,822,750`, the remaining missing piece is the `300,000` same-day debt collected amount shown on Looker's Outstanding page. That amount requires either a preserved `ar_debt.amount_paid/payment_*` row or a trusted Looker cashflow/summary row; it cannot be inferred safely from overwritten `ar_bills.debt` alone.
+
+### 2026-06-22 - User shows Bills Management receipt rows exist
+
+Screenshots from Bills Management show receipt-date rows for `2026-06-19`:
+
+| Bill No | Issue Date | Receipt Date | Amount |
+| --- | --- | --- | ---: |
+| INV68985 | 2026-06-11 | 2026-06-19 | 2,509,625 |
+| INV69261 | 2026-06-18 | 2026-06-19 | 766,000 |
+| INV69260 | 2026-06-18 | 2026-06-19 | 905,000 |
+
+Total: `4,180,625`, exactly the Looker Collection value.
+
+Next code action:
+
+- Make Daily Sales collection use receipt-date GN bill rows directly from `ar_bills.payment_received_at`.
+- Ensure `Collection Bills` counts these 3 receipt bills.
+- Keep `ar_debt` Pay off rows only for insurance/debt payoff collections to avoid double counting.
+
+Additional root cause found:
+
+- Bills Management modal displays receipt dates as `19/06/2026`.
+- Daily Sales filter date is ISO (`2026-06-19`).
+- Existing `toDateOnly()` only sliced strings and did not normalize `DD/MM/YYYY` to ISO, so receipt rows could be rejected before they reached `Collection Bills`.
+
+Next code action:
+
+- Normalize date strings in `useARData.js` so both `YYYY-MM-DD` and `DD/MM/YYYY` compare as ISO.
+- In retro collection checks, fall back from invalid `bill_issued_at` to `date`.
+
+Completed code action:
+
+- Updated `toDateOnly()` in `src/lib/useARData.js` to normalize:
+  - `YYYY-MM-DD`
+  - `DD/MM/YYYY`
+  - JavaScript `Date`
+- Updated `isRetroBillCollection()` to use `toDateOnly(row.bill_issued_at) || toDateOnly(row.date)`, so malformed/empty issue timestamps do not block valid receipt-date rows.
+- Verified `npm run build` passes.
