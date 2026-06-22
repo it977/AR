@@ -652,3 +652,20 @@ Expected result on Jun 19 Payment Channel:
 - `initialOutstandingForDailyIncome = 10,522,750 + 300,000 = 10,822,750`
 - `Daily Income = 54,470,350 - 10,822,750 = 43,647,600`
 - `Actual Income = 43,647,600 + 4,180,625 = 47,828,225`
+
+### 2026-06-22 (deploy follow-up) - Cloudflare did not show the new commits
+
+User report: the fixed commits were not visible in Cloudflare deployments.
+
+Root cause:
+
+- Local `main` had the report-fix commits, but GitHub `origin/main` was still at the old commit until pushed.
+- After pushing, another mismatch was found: Cloudflare production is for Worker `ar-finance-lxh`, while local `wrangler.toml` on `main` still had `name = "ar-main-system-lxh"`.
+- A remote branch created by Cloudflare (`update_worker_name_to_ar-finance-lxh`) already contained the correct Worker name, but that commit was not merged into `main`.
+
+Completed action:
+
+- Pushed local report-fix commits to `origin/main`.
+- Fetched `origin/update_worker_name_to_ar-finance-lxh`.
+- Fast-forward merged the Cloudflare Worker-name commit into `main`.
+- `wrangler.toml` now uses `name = "ar-finance-lxh"`, matching the Cloudflare service in the dashboard.
