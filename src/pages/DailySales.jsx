@@ -5,10 +5,17 @@ import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
 import {
   useARData,
   usePayoffData,
+  useBillReceiptData,
   useCashflowData,
   computeKPIs,
   computeShiftData,
   filterToLookerSubset,
+  getBillCollectionAmount,
+  getDebtInitialAmount,
+  getDebtPaidAmountForDateRange,
+  getDebtPaidChannelTotalsForDateRange,
+  isRetroBillCollection,
+  isUsableCashflowSummary,
 } from '../lib/useARData'
 import { formatLAK, formatNumber } from '../lib/excelParser'
 import PDFButton from '../components/PDFButton'
@@ -143,6 +150,7 @@ export default function DailySales() {
   const { data: rows,      loading }  = useARData(filters)
   // Collection is filtered by date_paid for the cash-flow view.
   const { data: debtRows }            = usePayoffData({ ...filters, payoffDateField: 'date_paid' })
+  const { data: billReceiptRows }     = useBillReceiptData(filters)
   // Initial debt: ar_debt rows for bills issued in date range — matches Looker (immune to live updates).
   const { data: outstandingRows }     = usePayoffData(filters)
   const { data: cashflowRows }        = useCashflowData(filters)
@@ -154,55 +162,88 @@ export default function DailySales() {
   const kpis      = useMemo(() => computeKPIs(viewRows), [viewRows])
   const shiftData = useMemo(() => computeShiftData(viewRows), [viewRows])
 
-  // Collection = sum of ar_debt Amount Paid where date_paid in range. Prefer amount_paid (canonical).
+  // Collection = debt payments in the selected date range.
+  // Prefer installment dates when present; otherwise fall back to date_paid.
   const collectionStats = useMemo(() => {
     const dr = debtRows || []
     const paidRows = dr.filter(r => {
-      const paid = r.amount_paid || r.cash_paid || r.bcel_paid || r.bcel2_paid || r.ldb_paid
-      return paid > 0 && (filters.dateFrom || filters.dateTo || r.date_paid)
+      return getDebtPaidAmountForDateRange(r, filters.dateFrom, filters.dateTo) > 0
     })
     const amount = paidRows.reduce((s, r) => {
-      if (r.amount_paid) return s + r.amount_paid
-      const channelPaid = (r.cash_paid || 0) + (r.bcel_paid || 0) + (r.bcel2_paid || 0) + (r.ldb_paid || 0)
-      if (channelPaid > 0) return s + channelPaid
-      const debtPaid = (r.debt_amount || 0) - (r.balance || 0)
-      return s + (debtPaid > 0 ? debtPaid : 0)
+      return s + getDebtPaidAmountForDateRange(r, filters.dateFrom, filters.dateTo)
     }, 0)
+    const channelTotals = paidRows.reduce((totals, row) => {
+      const rowTotals = getDebtPaidChannelTotalsForDateRange(row, filters.dateFrom, filters.dateTo)
+      totals.cash += rowTotals.cash
+      totals.bcel += rowTotals.bcel
+      totals.bcel2 += rowTotals.bcel2
+      totals.ldb += rowTotals.ldb
+      return totals
+    }, { cash: 0, bcel: 0, bcel2: 0, ldb: 0 })
+    const debtBillNos = new Set(paidRows.map(row => row.bill_no).filter(Boolean))
+    const retroRows = (billReceiptRows || [])
+      .filter(isRetroBillCollection)
+      .filter(row => !row.bill_no || !debtBillNos.has(row.bill_no))
+    const retroAmount = retroRows.reduce((s, row) => s + getBillCollectionAmount(row), 0)
+    const retroChannels = retroRows.reduce((totals, row) => {
+      totals.cash += row.cash || 0
+      totals.bcel += row.bcel || 0
+      totals.bcel2 += row.bcel2 || 0
+      totals.ldb += row.ldb || 0
+      return totals
+    }, { cash: 0, bcel: 0, bcel2: 0, ldb: 0 })
+    const billNos = new Set([
+      ...paidRows.map(row => row.bill_no).filter(Boolean),
+      ...retroRows.map(row => row.bill_no).filter(Boolean),
+    ])
     return {
-      amount,
-      bills: paidRows.length,
-      cash:  paidRows.reduce((s, r) => s + (r.cash_paid  || 0), 0),
-      bcel:  paidRows.reduce((s, r) => s + (r.bcel_paid  || 0), 0),
-      bcel2: paidRows.reduce((s, r) => s + (r.bcel2_paid || 0), 0),
-      ldb:   paidRows.reduce((s, r) => s + (r.ldb_paid   || 0), 0),
+      amount: amount + retroAmount,
+      bills: billNos.size || paidRows.length + retroRows.length,
+      cash: channelTotals.cash + retroChannels.cash,
+      bcel: channelTotals.bcel + retroChannels.bcel,
+      bcel2: channelTotals.bcel2 + retroChannels.bcel2,
+      ldb: channelTotals.ldb + retroChannels.ldb,
     }
-  }, [debtRows, filters.dateFrom, filters.dateTo])
+  }, [debtRows, billReceiptRows, filters.dateFrom, filters.dateTo])
+
+  const hasCashflowDetailFilters = !!(
+    filters.customerType ||
+    filters.gender ||
+    filters.insiteOnsite ||
+    filters.opdIpd ||
+    filters.insurance ||
+    filters.workloadDebt
+  )
+
+  const rawCashflowActualIncome = useMemo(() => {
+    if (hasCashflowDetailFilters || !cashflowRows?.length) return 0
+    return cashflowRows.reduce((s, r) => s + (r.total_actual_income || 0), 0)
+  }, [cashflowRows, hasCashflowDetailFilters])
+
+  const rawCashflowInitialOutstanding = useMemo(() => {
+    if (hasCashflowDetailFilters || !cashflowRows?.length) return 0
+    return cashflowRows.reduce((s, r) => s + (r.outstanding_debt || 0), 0)
+  }, [cashflowRows, hasCashflowDetailFilters])
+
+  const canUseCashflowSummary = useMemo(() => {
+    if (hasCashflowDetailFilters) return false
+    return isUsableCashflowSummary({
+      totalSales: kpis.totalSales,
+      actualIncome: rawCashflowActualIncome,
+      outstandingDebt: rawCashflowInitialOutstanding,
+      fallbackDailyIncome: kpis.dailyIncome,
+    })
+  }, [hasCashflowDetailFilters, kpis.totalSales, kpis.dailyIncome, rawCashflowActualIncome, rawCashflowInitialOutstanding])
 
   const cashflowActualIncome = useMemo(() => {
-    const hasDetailFilters = !!(
-      filters.customerType ||
-      filters.gender ||
-      filters.insiteOnsite ||
-      filters.opdIpd ||
-      filters.insurance ||
-      filters.workloadDebt
-    )
-    if (hasDetailFilters || !cashflowRows?.length) return 0
-    return cashflowRows.reduce((s, r) => s + (r.total_actual_income || 0), 0)
-  }, [cashflowRows, filters.customerType, filters.gender, filters.insiteOnsite, filters.opdIpd, filters.insurance, filters.workloadDebt])
+    if (!canUseCashflowSummary) return 0
+    return rawCashflowActualIncome
+  }, [canUseCashflowSummary, rawCashflowActualIncome])
 
   const cashflowInitialOutstanding = useMemo(() => {
-    const hasDetailFilters = !!(
-      filters.customerType ||
-      filters.gender ||
-      filters.insiteOnsite ||
-      filters.opdIpd ||
-      filters.insurance ||
-      filters.workloadDebt
-    )
-    if (hasDetailFilters || !cashflowRows?.length) return 0
-    return cashflowRows.reduce((s, r) => s + (r.outstanding_debt || 0), 0)
-  }, [cashflowRows, filters.customerType, filters.gender, filters.insiteOnsite, filters.opdIpd, filters.insurance, filters.workloadDebt])
+    if (!canUseCashflowSummary) return 0
+    return rawCashflowInitialOutstanding
+  }, [canUseCashflowSummary, rawCashflowInitialOutstanding])
 
   // Outstanding from ar_debt (initial debt) — matches Looker even if ar_bills.debt was modified.
   // Filter ar_debt to only include entries whose bill_no exists in the Looker-filtered viewRows,
@@ -216,8 +257,8 @@ export default function DailySales() {
     const filtered = allowedBillNos.size > 0
       ? orows.filter(r => allowedBillNos.has(r.bill_no))
       : orows
-    const amount = filtered.reduce((s, r) => s + (r.debt_amount || 0), 0)
-    const bills = filtered.filter(r => (r.debt_amount || 0) > 0).length
+    const amount = filtered.reduce((s, r) => s + getDebtInitialAmount(r), 0)
+    const bills = filtered.filter(r => getDebtInitialAmount(r) > 0).length
     return { amount, bills }
   }, [outstandingRows, viewRows, kpis.outstandingDebt, kpis.outstandingBills])
 
@@ -230,16 +271,18 @@ export default function DailySales() {
     return { ...kpis, outstandingDebt, outstandingBills, paidBills, dailyIncome }
   }, [kpis, lookerOutstanding])
 
-  const dailyIncomeTotal = cashflowInitialOutstanding > 0
+  const dailyIncomeTotal = canUseCashflowSummary && cashflowInitialOutstanding > 0
     ? Math.max(0, viewKpis.totalSales - cashflowInitialOutstanding)
     : viewKpis.dailyIncome
-  const cashflowCollectionAmount = Math.max(0, cashflowActualIncome - dailyIncomeTotal)
+  const cashflowCollectionAmount = canUseCashflowSummary
+    ? Math.max(0, cashflowActualIncome - dailyIncomeTotal)
+    : 0
   const viewCollectionStats = cashflowCollectionAmount > collectionStats.amount
     ? { ...collectionStats, amount: cashflowCollectionAmount }
     : collectionStats
   const viewShiftData = shiftData
   // Actual Income = Daily Income + Collection (Pay off). Matches Looker.
-  const actualIncomeTotal = cashflowActualIncome > 0
+  const actualIncomeTotal = canUseCashflowSummary
     ? cashflowActualIncome
     : dailyIncomeTotal + viewCollectionStats.amount
   const collectionBillCount = viewCollectionStats.bills || 0
@@ -257,8 +300,8 @@ export default function DailySales() {
     if (!hasDetailFilters && Object.prototype.hasOwnProperty.call(LOOKER_ACTUAL_PAID_BILLS, key)) {
       return LOOKER_ACTUAL_PAID_BILLS[key]
     }
-    return viewKpis.paidBills
-  }, [filters, viewKpis.paidBills])
+    return viewKpis.paidBills + collectionBillCount
+  }, [filters, viewKpis.paidBills, collectionBillCount])
 
   const totalShiftBills = Object.values(viewShiftData).reduce((s, v) => s + v.bills, 0)
   const shiftPcts    = SHIFTS.map(s =>

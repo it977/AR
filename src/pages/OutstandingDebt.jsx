@@ -6,20 +6,19 @@ import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
 import PDFButton from '../components/PDFButton'
 import {
   usePayoffData,
+  getDebtInitialAmount,
+  getDebtPaidAmount,
   getLookerMaxDate,
   capToLookerMaxDate,
 } from '../lib/useARData'
 import { formatLAK, formatNumber } from '../lib/excelParser'
 import { useGlobalFilters } from '../context/FilterContext'
-import { calcAging, getAgingLabel, getDebtCollectedAmount, toNumber } from '../lib/debtUtils'
+import { calcAging, getAgingLabel, toNumber } from '../lib/debtUtils'
 
 const CUSTOMER_TYPES = ['INS', 'GN', 'B2B', 'iNS']
 
 function getCollectedAmount(row = {}) {
-  const direct = getDebtCollectedAmount(row)
-  if (direct > 0) return direct
-  const debtPaid = toNumber(row.debt_amount) - toNumber(row.balance)
-  return debtPaid > 0 ? debtPaid : 0
+  return getDebtPaidAmount(row)
 }
 
 function toDebtReportRow(row = {}, source = 'debt') {
@@ -38,7 +37,7 @@ function toDebtReportRow(row = {}, source = 'debt') {
   const collected = getCollectedAmount(row)
   return {
     ...row,
-    debt_amount: toNumber(row.debt_amount) || collected + balance || toNumber(row.grand_total),
+    debt_amount: getDebtInitialAmount(row),
     amount_paid: collected,
     balance,
   }
@@ -79,7 +78,7 @@ export default function OutstandingDebt() {
     return (reportRows || []).reduce((totals, row) => {
       const collected = getCollectedAmount(row) || toNumber(row.amount_paid)
       const balance = toNumber(row.balance)
-      const total = toNumber(row.debt_amount) || collected + balance
+      const total = getDebtInitialAmount(row)
       totals.totalOutstanding += total
       totals.totalCollected += collected
       totals.remainingBalance += balance

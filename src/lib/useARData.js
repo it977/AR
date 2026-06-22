@@ -48,10 +48,37 @@ function inDateRange(date, from, to) {
   return true
 }
 
+function paymentEntryInRange(entry, from, to) {
+  if (!from && !to) return toNumber(entry.amount) > 0
+  return toNumber(entry.amount) > 0 && inDateRange(entry.date, from, to)
+}
+
+function normalizePaymentMethod(value) {
+  const text = String(value || '').trim().toLowerCase()
+  if (!text) return ''
+  if (text.includes('bcel') && text.includes('2')) return 'bcel2'
+  if (text.includes('bcel')) return 'bcel'
+  if (text.includes('ldb')) return 'ldb'
+  if (text.includes('cash') || text.includes('ເງິນສົດ')) return 'cash'
+  return text
+}
+
 export function getBillReceiptDate(row = {}) {
   const explicitDate = toDateOnly(row.payment_received_at)
   if (explicitDate) return explicitDate
   return getBillingCollectedAmount(row) > 0 ? toDateOnly(row.date) : ''
+}
+
+export function isRetroBillCollection(row = {}) {
+  if (String(row.customer_type || '').toUpperCase() === 'INS') return false
+  const receiptDate = getBillReceiptDate(row)
+  if (!receiptDate) return false
+  const issuedDate = toDateOnly(row.bill_issued_at || row.date)
+  return !issuedDate || receiptDate > issuedDate
+}
+
+export function getBillCollectionAmount(row = {}) {
+  return getBillingCollectedAmount(row)
 }
 
 export function useARData(filters = {}) {
@@ -136,15 +163,18 @@ export function usePayoffData(filters = {}) {
       try {
         const { rows } = await fetchAllRows((from, to) => {
           let q = supabase.from('ar_debt').select('*', { count: 'exact' }).order(dateField, { ascending: false })
-          if (filters.dateFrom)     q = q.gte(dateField, filters.dateFrom)
-          if (filters.dateTo)       q = q.lte(dateField, filters.dateTo)
+          if (dateField !== 'date_paid' && filters.dateFrom) q = q.gte(dateField, filters.dateFrom)
+          if (dateField !== 'date_paid' && filters.dateTo) q = q.lte(dateField, filters.dateTo)
           if (filters.agingGroup)   q = q.eq('aging_group', filters.agingGroup)
           if (filters.customerType) q = q.eq('customer_type', filters.customerType)
           if (filters.insurance)    q = q.ilike('insurance', `%${filters.insurance}%`)
           if (filters.workloadDebt) q = q.eq('workload', filters.workloadDebt)
           return q.range(from, to)
         })
-        setData(rows)
+        const filteredRows = dateField === 'date_paid'
+          ? rows.filter(row => hasDebtPaymentInDateRange(row, filters.dateFrom, filters.dateTo))
+          : rows
+        setData(filteredRows)
       } catch { setData([]) }
       setLoading(false)
     }
@@ -270,6 +300,93 @@ export function getLookerMaxDate(rows = []) {
 export function capToLookerMaxDate(rows = [], maxDate = '', filters = {}) {
   if (!maxDate || filters.dateFrom || filters.dateTo) return rows || []
   return (rows || []).filter(row => !row.date || row.date <= maxDate)
+}
+
+export function getDebtInitialAmount(row = {}) {
+  const explicit = toNumber(row.debt_amount)
+  const balance = toNumber(row.balance ?? row.debt)
+  const collected = getDebtCollectedAmount(row)
+  if (balance > 0 || collected > 0) return Math.max(explicit, balance + collected)
+  if (explicit > 0) return explicit
+  return toNumber(row.grand_total)
+}
+
+export function getDebtPaidAmount(row = {}) {
+  const direct = getDebtCollectedAmount(row)
+  if (direct > 0) return direct
+  const paid = getDebtInitialAmount(row) - toNumber(row.balance ?? row.debt)
+  return paid > 0 ? paid : 0
+}
+
+export function getDebtPaymentEntries(row = {}) {
+  const installmentEntries = [1, 2, 3].map(number => ({
+    number,
+    date: toDateOnly(row[`payment_${number}_date`]),
+    method: normalizePaymentMethod(row[`payment_${number}_method`]),
+    amount: toNumber(row[`payment_${number}_amount`]),
+  })).filter(entry => entry.amount > 0)
+
+  if (installmentEntries.length) return installmentEntries
+
+  const fallbackDate = toDateOnly(row.date_paid)
+  const channelEntries = [
+    { method: 'cash', amount: toNumber(row.cash_paid) },
+    { method: 'bcel', amount: toNumber(row.bcel_paid) },
+    { method: 'bcel2', amount: toNumber(row.bcel2_paid) },
+    { method: 'ldb', amount: toNumber(row.ldb_paid) },
+  ].filter(entry => entry.amount > 0)
+
+  if (channelEntries.length) {
+    return channelEntries.map((entry, index) => ({
+      number: index + 1,
+      date: fallbackDate,
+      ...entry,
+    }))
+  }
+
+  const amount = getDebtPaidAmount(row)
+  return amount > 0 ? [{ number: 1, date: fallbackDate, method: '', amount }] : []
+}
+
+export function getDebtPaidAmountForDateRange(row = {}, from = '', to = '') {
+  return getDebtPaymentEntries(row)
+    .filter(entry => paymentEntryInRange(entry, from, to))
+    .reduce((sum, entry) => sum + toNumber(entry.amount), 0)
+}
+
+export function getDebtPaidChannelTotalsForDateRange(row = {}, from = '', to = '') {
+  const totals = { cash: 0, bcel: 0, bcel2: 0, ldb: 0, amount: 0 }
+  getDebtPaymentEntries(row)
+    .filter(entry => paymentEntryInRange(entry, from, to))
+    .forEach(entry => {
+      const amount = toNumber(entry.amount)
+      totals.amount += amount
+      if (totals[entry.method] !== undefined) totals[entry.method] += amount
+    })
+  return totals
+}
+
+export function hasDebtPaymentInDateRange(row = {}, from = '', to = '') {
+  return getDebtPaidAmountForDateRange(row, from, to) > 0
+}
+
+export function isUsableCashflowSummary({
+  totalSales = 0,
+  actualIncome = 0,
+  outstandingDebt = 0,
+  fallbackDailyIncome = 0,
+} = {}) {
+  const summaryDebt = toNumber(outstandingDebt)
+  const dailyIncomeFromSummary = summaryDebt > 0
+    ? Math.max(0, toNumber(totalSales) - summaryDebt)
+    : toNumber(fallbackDailyIncome)
+  const actual = toNumber(actualIncome)
+  if (actual <= 0) return false
+
+  // Summary_CashFlow can contain partial collection-only rows for dates whose Daily
+  // rows came from another upload. Only trust it when it covers the billing-day
+  // income implied by Actual Total Sale and initial Outstanding Debt.
+  return actual + 0.5 >= dailyIncomeFromSummary
 }
 
 export function computeKPIs(rows = []) {

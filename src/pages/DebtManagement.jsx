@@ -585,11 +585,6 @@ export default function DebtManagement() {
     // 2) Update ar_bills (ຫາໂດຍ bill_no)
     if (!debtErr) {
       const billUpdate = {
-        cash: form.cash || 0,
-        bcel: form.bcel || 0,
-        bcel2: form.bcel2 || 0,
-        ldb: form.ldb || 0,
-        debt: form.debt || 0,
         debt_status: form.debt_status,
         payment_received_at: form.date_paid || null,
         aging_group: form.aging_group,
