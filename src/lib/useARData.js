@@ -20,15 +20,26 @@ import {
 // Hooks
 // ============================================================
 
-// Fetch ALL rows from a Supabase table in 1000-row batches (bypass API max_rows limit)
-async function fetchAllRows(buildQuery) {
+// Fetch ALL rows from a Supabase table in 1000-row batches with retry
+async function fetchAllRows(buildQuery, retries = 3) {
   const PAGE = 1000
   let allRows = []
   let from = 0
   let total = null
+  let attempt = 0
   while (true) {
-    const { data: rows, error, count } = await buildQuery(from, from + PAGE - 1)
-    if (error) throw error
+    attempt = 0
+    let success = false
+    let rows, error, count
+    while (attempt < retries) {
+      const res = await buildQuery(from, from + PAGE - 1)
+      rows = res.data; error = res.error; count = res.count
+      if (!error) { success = true; break }
+      attempt++
+      if (attempt >= retries) throw error
+      await new Promise(r => setTimeout(r, 1000 * attempt))
+    }
+    if (!success) throw error
     if (total === null && count != null) total = count
     if (rows?.length) allRows = allRows.concat(rows)
     if (!rows?.length || allRows.length >= (total ?? Infinity) || rows.length < PAGE) break

@@ -44,18 +44,78 @@ const PAYMENT_METHODS = [
   { key: 'ldb',   label: 'LDB',     sub: 'Lao Dev Bank' },
 ]
 
-function getSameDaySettledDebtStats(rows = []) {
-  const debtRows = (rows || []).filter(row => {
-    const customerType = String(row.customer_type || '').toUpperCase()
-    const collected = getBillCollectionAmount(row)
-    const remainingDebt = Number(row.debt || 0)
-    return customerType === 'INS' && remainingDebt <= 0 && collected > 0
-  })
-  const billNos = new Set(debtRows.map(row => row.bill_no).filter(Boolean))
-  return {
-    amount: debtRows.reduce((sum, row) => sum + getBillCollectionAmount(row), 0),
-    bills: billNos.size || debtRows.length,
+// Bills that Looker treats as Outstanding for the issue date even though the app's
+// ar_bills row looks fully paid (debt=0, channels=grand_total). Three patterns exist:
+//
+//   A) ar_debt entry exists with date_paid === date (Excel "Pay off" upload)
+//      → already counted via outstandingRows path; do not add again.
+//
+//   B) Bill is INS/insurance, paid in full on the issue day inside the app, no Pay
+//      off journal entry created. ar_bills.debt=0, channels>0, no ar_debt row.
+//      → add to Outstanding for the issue date.
+//
+//   C) Deferred-receipt bill: bill was issued on `date`, customer paid cash that day,
+//      but a transfer portion (BCEL / BCEL2 / LDB) only landed in the account on a
+//      LATER day (`payment_received_at > date`). Looker keeps the transfer portion in
+//      Outstanding for the issue date and as Collection for the receipt date. The app
+//      writes the channel as paid immediately, which is what causes the recurring
+//      "+ X,000 / -1 bill" gap with Looker.
+//      → add `bcel + bcel2 + ldb` (excluding cash/prepayment, which are immediate) to
+//        Outstanding for the issue date.
+function getSameDaySettledDebtStats(viewRows = [], outstandingRows = []) {
+  const debtBillSet = new Set(
+    (outstandingRows || []).map(r => r.bill_no).filter(Boolean)
+  )
+  const dateOnly = (v) => (v ? String(v).slice(0, 10) : '')
+  const isDeferredReceipt = (row) => {
+    const issue = dateOnly(row.date)
+    const received = dateOnly(row.payment_received_at)
+    return issue && received && received > issue
   }
+  const deferredAmount = (row) =>
+    Number(row.bcel || 0) + Number(row.bcel2 || 0) + Number(row.ldb || 0)
+
+  const billsByNo = new Set()
+  // Subset of `billsByNo` that should ALSO count toward "Actual Bills Paid" for the
+  // issue date — i.e., bills that had at least some payment received on `date`:
+  //   - Pattern B: bill was fully settled in-app on the issue day → always counts.
+  //   - Pattern C: only counts if the cash portion was received on the issue day
+  //     (i.e., cash > 0). Pure-deferred bills (cash = 0, transfers all late) had
+  //     NO payment event on the issue day, so Looker does not include them.
+  const paidBillsByNo = new Set()
+  let total = 0
+  for (const row of viewRows || []) {
+    if (row.bill_no && debtBillSet.has(row.bill_no)) continue
+    const remainingDebt = Number(row.debt || 0)
+    if (remainingDebt > 0) continue
+    const collected = getBillCollectionAmount(row)
+    if (collected <= 0) continue
+
+    // Pattern C — deferred-receipt bill. Take ONLY the transfer portion.
+    if (isDeferredReceipt(row)) {
+      const amount = deferredAmount(row)
+      if (amount > 0) {
+        total += amount
+        if (row.bill_no) {
+          billsByNo.add(row.bill_no)
+          if (Number(row.cash || 0) > 0) paidBillsByNo.add(row.bill_no)
+        }
+        continue
+      }
+    }
+
+    // Pattern B — INS / insurance bill settled in-app, no ar_debt journal entry.
+    const customerType = String(row.customer_type || '').toUpperCase()
+    const insurance = String(row.insurance || '').trim()
+    if (customerType === 'INS' || insurance.length > 0) {
+      total += collected
+      if (row.bill_no) {
+        billsByNo.add(row.bill_no)
+        paidBillsByNo.add(row.bill_no)
+      }
+    }
+  }
+  return { amount: total, bills: billsByNo.size, paidBills: paidBillsByNo.size }
 }
 
 function PaymentIcon({ method }) {
@@ -169,13 +229,14 @@ export default function DailySales() {
   const { data: outstandingRows }     = usePayoffData(filters)
   const { data: cashflowRows }        = useCashflowData(filters)
 
-  // Hide rows whose workload doesn't match the most-recent Excel upload for that date.
-  // Bills stay in DB (visible in BillsManagement); they're just excluded from the Looker-style report.
-  const lookerView = useMemo(() => filterToLookerSubset(rows || []), [rows])
-  const viewRows = lookerView.rows
+  // Use all rows directly (no Looker-style filtering) so Dashboard matches AR List totals.
+  const viewRows = useMemo(() => rows || [], [rows])
   const kpis      = useMemo(() => computeKPIs(viewRows), [viewRows])
   const shiftData = useMemo(() => computeShiftData(viewRows), [viewRows])
-  const sameDaySettledDebt = useMemo(() => getSameDaySettledDebtStats(viewRows), [viewRows])
+  const sameDaySettledDebt = useMemo(
+    () => getSameDaySettledDebtStats(viewRows, outstandingRows || []),
+    [viewRows, outstandingRows]
+  )
 
   // Collection = debt payments in the selected date range.
   // Prefer installment dates when present; otherwise fall back to date_paid.
@@ -199,9 +260,17 @@ export default function DailySales() {
     const retroRows = (billReceiptRows || [])
       .filter(isRetroBillCollection)
       .filter(row => !row.bill_no || !debtBillNos.has(row.bill_no))
-    const retroAmount = retroRows.reduce((s, row) => s + getBillCollectionAmount(row), 0)
+    // Deferred-receipt retro bills: the cash portion was actually received on the
+    // bill's issue date (immediate, never deferred). Only the transfer portion
+    // (bcel + bcel2 + ldb) is the part that landed late and belongs in the receipt
+    // date's Collection. Matches Looker: for a bill issued Jun-19 with cash 1,482,500
+    // collected that night and BCEL 300,000 received Jun-20, Collection on Jun-20
+    // shows 300,000 (transfer only), not the full 1,782,500.
+    const retroAmount = retroRows.reduce(
+      (s, row) => s + Number(row.bcel || 0) + Number(row.bcel2 || 0) + Number(row.ldb || 0),
+      0,
+    )
     const retroChannels = retroRows.reduce((totals, row) => {
-      totals.cash += row.cash || 0
       totals.bcel += row.bcel || 0
       totals.bcel2 += row.bcel2 || 0
       totals.ldb += row.ldb || 0
@@ -260,28 +329,95 @@ export default function DailySales() {
     return rawCashflowInitialOutstanding
   }, [canUseCashflowSummary, rawCashflowInitialOutstanding])
 
-  // Outstanding from ar_debt (initial debt) — matches Looker even if ar_bills.debt was modified.
-  // Filter ar_debt to only include entries whose bill_no exists in the Looker-filtered viewRows,
-  // so bills excluded from the report don't leak into the Outstanding total.
+  // Outstanding debt from ar_bills.debt — matches AR List total.
   const lookerOutstanding = useMemo(() => {
-    const orows = outstandingRows || []
-    if (!orows.length) {
-      return {
-        amount: kpis.outstandingDebt + sameDaySettledDebt.amount,
-        bills: kpis.outstandingBills + sameDaySettledDebt.bills,
-      }
-    }
-    const allowedBillNos = new Set(viewRows.map(r => r.bill_no).filter(Boolean))
-    const filtered = allowedBillNos.size > 0
-      ? orows.filter(r => allowedBillNos.has(r.bill_no))
-      : orows
-    const amount = filtered.reduce((s, r) => s + getDebtInitialAmount(r), 0)
-    const bills = filtered.filter(r => getDebtInitialAmount(r) > 0).length
     return {
-      amount: amount + sameDaySettledDebt.amount,
-      bills: bills + sameDaySettledDebt.bills,
+      amount: kpis.outstandingDebt,
+      bills: kpis.outstandingBills,
     }
-  }, [outstandingRows, viewRows, kpis.outstandingDebt, kpis.outstandingBills, sameDaySettledDebt])
+  }, [kpis.outstandingDebt, kpis.outstandingBills])
+
+  // Diagnostic data — gated on ?debug=1 URL param. Displayed as a visible panel below.
+  const debugInfo = useMemo(() => {
+    if (typeof window === 'undefined') return null
+    const enabled = new URLSearchParams(window.location.search).get('debug') === '1'
+    if (!enabled || !viewRows.length) return null
+    const channelBills = viewRows
+      .filter(r => getBillCollectionAmount(r) > 0)
+      .map(r => ({
+        bill_no: r.bill_no,
+        customer_type: r.customer_type,
+        insurance: r.insurance,
+        debt: Number(r.debt || 0),
+        channels: getBillCollectionAmount(r),
+        grand_total: Number(r.grand_total || 0),
+        debt_status: r.debt_status,
+        payment_type: r.payment_type,
+        workload: r.workload,
+        inArDebt: (outstandingRows || []).some(o => o.bill_no === r.bill_no),
+      }))
+    const arDebtList = (outstandingRows || []).map(r => ({
+      bill_no: r.bill_no,
+      date: r.date,
+      date_paid: r.date_paid,
+      debt_amount: Number(r.debt_amount || 0),
+      balance: Number(r.balance || 0),
+      sameDay: r.date && r.date_paid && String(r.date).slice(0,10) === String(r.date_paid).slice(0,10),
+      inViewRows: viewRows.some(v => v.bill_no === r.bill_no),
+    }))
+    const outstandingBillsList = viewRows
+      .filter(r => Number(r.debt || 0) > 0)
+      .map(r => ({ bill_no: r.bill_no, debt: Number(r.debt || 0), customer_type: r.customer_type }))
+    // Suspect: bills that LOOK like cash sales (debt=0, channels>0) but may have been
+    // originally debt bills settled directly in the app.
+    const suspectBills = viewRows
+      .filter(r => Number(r.debt || 0) === 0 && getBillCollectionAmount(r) > 0)
+      .map(r => ({
+        bill_no: r.bill_no,
+        customer_type: r.customer_type,
+        insurance: r.insurance,
+        payment_type: r.payment_type,
+        debt_status: r.debt_status,
+        debt: Number(r.debt || 0),
+        cash: Number(r.cash || 0),
+        bcel: Number(r.bcel || 0),
+        bcel2: Number(r.bcel2 || 0),
+        ldb: Number(r.ldb || 0),
+        prepayment: Number(r.prepayment || 0),
+        grand_total: Number(r.grand_total || 0),
+        note: r.note,
+        bill_issued_at: r.bill_issued_at,
+        payment_received_at: r.payment_received_at,
+        inArDebt: (outstandingRows || []).some(o => o.bill_no === r.bill_no),
+      }))
+    const cashflowDump = (cashflowRows || []).map(r => ({ ...r }))
+    return {
+      date: `${filters.dateFrom} → ${filters.dateTo}`,
+      counts: {
+        viewRows: viewRows.length,
+        outstandingRows: (outstandingRows || []).length,
+        debtRows: (debtRows || []).length,
+        cashflowRows: (cashflowRows || []).length,
+      },
+      sameDaySettledDebt,
+      lookerOutstanding,
+      cashflow: {
+        canUseCashflowSummary,
+        cashflowInitialOutstanding,
+        cashflowActualIncome,
+      },
+      kpis: {
+        outstandingDebt: kpis.outstandingDebt,
+        outstandingBills: kpis.outstandingBills,
+        totalSales: kpis.totalSales,
+      },
+      outstandingBillsList,
+      channelBills,
+      arDebtList,
+      suspectBills,
+      cashflowDump,
+    }
+  }, [viewRows, outstandingRows, debtRows, cashflowRows, sameDaySettledDebt, lookerOutstanding, canUseCashflowSummary, cashflowInitialOutstanding, cashflowActualIncome, kpis, filters.dateFrom, filters.dateTo])
 
   // Override outstanding-derived metrics with Looker values.
   const viewKpis = useMemo(() => {
@@ -308,21 +444,8 @@ export default function DailySales() {
     : dailyIncomeTotal + viewCollectionStats.amount
   const collectionBillCount = viewCollectionStats.bills || 0
   const actualPaidBills = useMemo(() => {
-    const hasDetailFilters = !!(
-      filters.customerType ||
-      filters.gender ||
-      filters.insiteOnsite ||
-      filters.opdIpd ||
-      filters.insurance ||
-      filters.workload ||
-      filters.workloadDebt
-    )
-    const key = `${filters.dateFrom || ''}__${filters.dateTo || ''}`
-    if (!hasDetailFilters && Object.prototype.hasOwnProperty.call(LOOKER_ACTUAL_PAID_BILLS, key)) {
-      return LOOKER_ACTUAL_PAID_BILLS[key]
-    }
-    return viewKpis.paidBills + collectionBillCount + sameDaySettledDebt.bills
-  }, [filters, viewKpis.paidBills, collectionBillCount, sameDaySettledDebt.bills])
+    return viewKpis.paidBills + collectionBillCount
+  }, [viewKpis.paidBills, collectionBillCount])
 
   const totalShiftBills = Object.values(viewShiftData).reduce((s, v) => s + v.bills, 0)
   const shiftPcts    = SHIFTS.map(s =>
@@ -354,6 +477,38 @@ export default function DailySales() {
 
   return (
     <div id="daily-sales-content" className="p-6 space-y-6">
+
+      {debugInfo && (
+        <div className="rounded-lg border-2 border-amber-400 bg-amber-50 p-4 text-xs font-mono" data-pdf-hidden="true">
+          <div className="mb-2 font-bold text-amber-900">DEBUG (?debug=1) — {debugInfo.date}</div>
+          <div className="mb-2 text-amber-900">
+            counts: {JSON.stringify(debugInfo.counts)} | sameDay: {JSON.stringify(debugInfo.sameDaySettledDebt)} | lookerOutstanding: {JSON.stringify(debugInfo.lookerOutstanding)}
+          </div>
+          <div className="mb-2 text-amber-900">
+            cashflow: {JSON.stringify(debugInfo.cashflow)} | kpis: {JSON.stringify(debugInfo.kpis)}
+          </div>
+          <details className="mb-2" open>
+            <summary className="cursor-pointer font-bold">Suspect bills (debt=0 AND channels&gt;0, candidates for same-day settled) ({debugInfo.suspectBills.length})</summary>
+            <pre className="mt-1 max-h-80 overflow-auto bg-white p-2">{JSON.stringify(debugInfo.suspectBills, null, 2)}</pre>
+          </details>
+          <details className="mb-2" open>
+            <summary className="cursor-pointer font-bold">cashflowRows ({debugInfo.cashflowDump.length}) — should sum to Looker Outstanding 10,822,750</summary>
+            <pre className="mt-1 max-h-60 overflow-auto bg-white p-2">{JSON.stringify(debugInfo.cashflowDump, null, 2)}</pre>
+          </details>
+          <details className="mb-2">
+            <summary className="cursor-pointer font-bold">Bills with debt &gt; 0 in viewRows ({debugInfo.outstandingBillsList.length})</summary>
+            <pre className="mt-1 max-h-60 overflow-auto bg-white p-2">{JSON.stringify(debugInfo.outstandingBillsList, null, 2)}</pre>
+          </details>
+          <details className="mb-2">
+            <summary className="cursor-pointer font-bold">Bills with channels &gt; 0 in viewRows ({debugInfo.channelBills.length})</summary>
+            <pre className="mt-1 max-h-60 overflow-auto bg-white p-2">{JSON.stringify(debugInfo.channelBills, null, 2)}</pre>
+          </details>
+          <details>
+            <summary className="cursor-pointer font-bold">ar_debt rows (outstandingRows) ({debugInfo.arDebtList.length})</summary>
+            <pre className="mt-1 max-h-60 overflow-auto bg-white p-2">{JSON.stringify(debugInfo.arDebtList, null, 2)}</pre>
+          </details>
+        </div>
+      )}
 
       {/* -- Header -- */}
       <div className="flex flex-wrap items-center justify-between gap-4">
