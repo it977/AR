@@ -17,6 +17,26 @@ import {
 } from './debtUtils'
 
 // ============================================================
+// Retry wrapper for write operations
+// ============================================================
+
+export async function withRetry(fn, retries = 3) {
+  let lastError
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const result = await fn()
+      return result
+    } catch (err) {
+      lastError = err
+      if (attempt < retries - 1) {
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)))
+      }
+    }
+  }
+  throw lastError
+}
+
+// ============================================================
 // Hooks
 // ============================================================
 
@@ -270,56 +290,6 @@ export function useBillsDebtData(filters = {}) {
 // ============================================================
 // Compute helpers (pure functions — no Supabase calls)
 // ============================================================
-
-// For Looker-matching display: for each date, identify which workloads came from a recent
-// Excel upload (source_key row number below the EXCEL_ROWNUM_THRESHOLD). Keep bills in those
-// workloads; hide bills in workloads that have NO Excel-sourced rows (these are manual entries
-// the most recent Excel doesn't know about). Dates with all workloads Excel-sourced — or none —
-// pass through unchanged.
-const EXCEL_ROWNUM_THRESHOLD = 10000
-
-export function filterToLookerSubset(rows = []) {
-  const all = rows || []
-  const byDate = {}
-  for (const r of all) {
-    if (!r.date) continue
-    ;(byDate[r.date] = byDate[r.date] || []).push(r)
-  }
-  const out = []
-  let excludedCount = 0
-  let excludedAmount = 0
-  for (const [_date, list] of Object.entries(byDate)) {
-    const byWL = {}
-    for (const r of list) (byWL[r.workload || '?'] = byWL[r.workload || '?'] || []).push(r)
-    if (Object.keys(byWL).length <= 1) { out.push(...list); continue }
-    // For each workload, find the minimum source_key rowNum (Daily__N__...). A small rowNum
-    // means at least one of those rows came from a recent Excel re-upload.
-    const wlMinRow = {}
-    for (const [wl, arr] of Object.entries(byWL)) {
-      wlMinRow[wl] = arr.reduce((m, r) => {
-        const mm = String(r.source_key || '').match(/^Daily__(\d+)__/)
-        return mm ? Math.min(m, parseInt(mm[1])) : m
-      }, Infinity)
-    }
-    const excelWLs = Object.entries(wlMinRow).filter(([, n]) => n < EXCEL_ROWNUM_THRESHOLD).map(([wl]) => wl)
-    // If no workload has Excel-source rows, or all workloads do, keep everything as-is.
-    if (excelWLs.length === 0 || excelWLs.length === Object.keys(byWL).length) {
-      out.push(...list)
-      continue
-    }
-    // Otherwise keep only Excel-source workloads.
-    const keepSet = new Set(excelWLs)
-    for (const [wl, arr] of Object.entries(byWL)) {
-      if (keepSet.has(wl)) {
-        out.push(...arr)
-      } else {
-        excludedCount += arr.length
-        excludedAmount += arr.reduce((s, r) => s + (r.grand_total || 0), 0)
-      }
-    }
-  }
-  return { rows: out, excludedCount, excludedAmount }
-}
 
 export function getLookerMaxDate(rows = []) {
   return (rows || []).reduce((max, row) => (

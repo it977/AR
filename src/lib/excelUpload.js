@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { withRetry } from './useARData'
 
 const OPTIONAL_COLUMNS = {
   ar_bills: [
@@ -18,24 +19,27 @@ function conflictKeyOf(table, r) {
   return r.source_key || (
     table === 'ar_bills'
       ? `${r.bill_no}__${r.date}__${r.workload || 'ALL'}`
+      : table === 'ar_cashflow'
+      ? `${r.date}__${r.workload || 'ALL'}`
       : `${r.bill_no}__${r.date}`
   )
 }
 
 function conflictKeyDb(table, sample) {
   if (sample?.source_key) return 'source_key'
+  if (table === 'ar_cashflow') return 'date,workload'
   return table === 'ar_bills' ? 'bill_no,date,workload' : 'bill_no,date'
 }
 
 async function upsertChunk(table, chunk) {
   const keyDb = conflictKeyDb(table, chunk[0])
-  let { error } = await supabase.from(table).upsert(chunk, { onConflict: keyDb, ignoreDuplicates: false })
+  let { error } = await withRetry(() => supabase.from(table).upsert(chunk, { onConflict: keyDb, ignoreDuplicates: false }))
   if (error && OPTIONAL_COLUMNS[table]?.some(col => error.message?.includes(col))) {
     const optional = new Set(OPTIONAL_COLUMNS[table])
     const stripped = chunk.map(row => Object.fromEntries(
       Object.entries(row).filter(([k]) => !optional.has(k))
     ))
-    ;({ error } = await supabase.from(table).upsert(stripped, { onConflict: keyDb, ignoreDuplicates: false }))
+    ;({ error } = await withRetry(() => supabase.from(table).upsert(stripped, { onConflict: keyDb, ignoreDuplicates: false })))
   }
   return error
 }
@@ -70,6 +74,29 @@ export async function upsertRows(table, rows, onProgress) {
   return unique.length
 }
 
+export function datesFromRows(rows) {
+  return [...new Set((rows || []).map(row => row.date).filter(Boolean))]
+}
+
+export async function deleteRowsForDates(table, rows) {
+  const dates = datesFromRows(rows)
+  if (!dates.length) return 0
+
+  const CHUNK_DELETE = 100
+  let deleted = 0
+  for (let i = 0; i < dates.length; i += CHUNK_DELETE) {
+    const chunk = dates.slice(i, i + CHUNK_DELETE)
+    const { count, error } = await withRetry(() => supabase
+      .from(table)
+      .delete({ count: 'exact' })
+      .in('date', chunk))
+
+    if (error) throw new Error(`[${table}] delete old rows failed: ${error.message}`)
+    deleted += count || 0
+  }
+  return deleted
+}
+
 // Update only debt_status on ar_bills (from Pay off sheet)
 export async function syncDebtStatus(billUpdates, onProgress) {
   if (!billUpdates?.length) return 0
@@ -78,7 +105,7 @@ export async function syncDebtStatus(billUpdates, onProgress) {
   for (let i = 0; i < billUpdates.length; i += CHUNK_UP) {
     const chunk = billUpdates.slice(i, i + CHUNK_UP)
     await Promise.all(chunk.map(({ bill_no, date, debt_status }) =>
-      supabase.from('ar_bills').update({ debt_status }).eq('bill_no', bill_no).eq('date', date)
+      withRetry(() => supabase.from('ar_bills').update({ debt_status }).eq('bill_no', bill_no).eq('date', date))
     ))
     done += chunk.length
     onProgress?.(Math.round(done / billUpdates.length * 100), done, billUpdates.length)

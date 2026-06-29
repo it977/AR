@@ -17,12 +17,14 @@ dist
 supabase/.temp/
 
 # Reports / binary exports
+outputs/
 *.xlsx
 *.pdf
 
 # Local test artifacts
 .tmp/
 backups/
+vite*.log
 *-screenshot.png
 ar-*.png
 scripts/probe_supabase.py

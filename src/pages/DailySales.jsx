@@ -9,7 +9,6 @@ import {
   useCashflowData,
   computeKPIs,
   computeShiftData,
-  filterToLookerSubset,
   getBillCollectionAmount,
   getDebtInitialAmount,
   getDebtPaidAmountForDateRange,
@@ -29,13 +28,6 @@ const SHIFT_OPTIONS = [
 ]
 const SHIFTS = SHIFT_OPTIONS.map(shift => shift.value)
 const SHIFT_LABELS = Object.fromEntries(SHIFT_OPTIONS.map(shift => [shift.value, shift.label]))
-
-const LOOKER_ACTUAL_PAID_BILLS = {
-  '2026-06-16__2026-06-16': 21,
-  '2026-06-17__2026-06-17': 27,
-  '2026-06-18__2026-06-18': 34,
-  '__': 2097,
-}
 
 const PAYMENT_METHODS = [
   { key: 'cash',  label: 'Cash', sub: 'Cash' },
@@ -116,6 +108,27 @@ function getSameDaySettledDebtStats(viewRows = [], outstandingRows = []) {
     }
   }
   return { amount: total, bills: billsByNo.size, paidBills: paidBillsByNo.size }
+}
+
+function countDistinctBills(rows = []) {
+  const billNos = new Set()
+  let rowsWithoutBillNo = 0
+  for (const row of rows || []) {
+    if (row?.bill_no) billNos.add(row.bill_no)
+    else rowsWithoutBillNo += 1
+  }
+  return billNos.size + rowsWithoutBillNo
+}
+
+function isPaidOnIssueDate(row = {}) {
+  if (getBillCollectionAmount(row) <= 0) return false
+  const issueDate = String(row.bill_issued_at || row.date || '').slice(0, 10)
+  const receiptDate = String(row.payment_received_at || issueDate || '').slice(0, 10)
+  if (!issueDate || !receiptDate || receiptDate <= issueDate) return true
+
+  // If only transfer money landed later, Looker keeps this bill outstanding on the
+  // issue date. Cash is immediate and still counts as paid on that issue date.
+  return Number(row.cash || 0) > 0
 }
 
 function PaymentIcon({ method }) {
@@ -329,13 +342,35 @@ export default function DailySales() {
     return rawCashflowInitialOutstanding
   }, [canUseCashflowSummary, rawCashflowInitialOutstanding])
 
-  // Outstanding debt from ar_bills.debt — matches AR List total.
+  // Looker keeps the issue-day debt from Summary_CashFlow; ar_bills.debt is the
+  // live remaining balance after later payoffs.
+  const billingPaidBillCount = useMemo(() => {
+    return countDistinctBills(viewRows.filter(isPaidOnIssueDate))
+  }, [viewRows])
+
+  const issuedDebtBillCount = useMemo(() => {
+    if (hasCashflowDetailFilters) return 0
+    return countDistinctBills(outstandingRows || [])
+  }, [outstandingRows, hasCashflowDetailFilters])
+
   const lookerOutstanding = useMemo(() => {
-    return {
-      amount: kpis.outstandingDebt,
-      bills: kpis.outstandingBills,
+    if (canUseCashflowSummary && cashflowInitialOutstanding > 0) {
+      return {
+        amount: cashflowInitialOutstanding,
+        bills: issuedDebtBillCount || kpis.outstandingBills,
+      }
     }
-  }, [kpis.outstandingDebt, kpis.outstandingBills])
+    if (!hasCashflowDetailFilters && (outstandingRows || []).length) {
+      return {
+        amount: (outstandingRows || []).reduce((sum, row) => sum + getDebtInitialAmount(row), 0) + sameDaySettledDebt.amount,
+        bills: countDistinctBills(outstandingRows || []) + sameDaySettledDebt.bills,
+      }
+    }
+    return {
+      amount: kpis.outstandingDebt + sameDaySettledDebt.amount,
+      bills: kpis.outstandingBills + sameDaySettledDebt.bills,
+    }
+  }, [canUseCashflowSummary, cashflowInitialOutstanding, issuedDebtBillCount, hasCashflowDetailFilters, outstandingRows, kpis.outstandingDebt, kpis.outstandingBills, sameDaySettledDebt])
 
   // Diagnostic data — gated on ?debug=1 URL param. Displayed as a visible panel below.
   const debugInfo = useMemo(() => {
@@ -423,10 +458,10 @@ export default function DailySales() {
   const viewKpis = useMemo(() => {
     const outstandingDebt = lookerOutstanding.amount
     const outstandingBills = lookerOutstanding.bills
-    const paidBills = Math.max(0, kpis.totalBills - outstandingBills)
+    const paidBills = billingPaidBillCount
     const dailyIncome = kpis.totalSales - outstandingDebt
     return { ...kpis, outstandingDebt, outstandingBills, paidBills, dailyIncome }
-  }, [kpis, lookerOutstanding])
+  }, [kpis, lookerOutstanding, billingPaidBillCount])
 
   const dailyIncomeTotal = canUseCashflowSummary && cashflowInitialOutstanding > 0
     ? Math.max(0, viewKpis.totalSales - cashflowInitialOutstanding)
@@ -444,8 +479,8 @@ export default function DailySales() {
     : dailyIncomeTotal + viewCollectionStats.amount
   const collectionBillCount = viewCollectionStats.bills || 0
   const actualPaidBills = useMemo(() => {
-    return viewKpis.paidBills + collectionBillCount
-  }, [viewKpis.paidBills, collectionBillCount])
+    return viewKpis.paidBills
+  }, [viewKpis.paidBills])
 
   const totalShiftBills = Object.values(viewShiftData).reduce((s, v) => s + v.bills, 0)
   const shiftPcts    = SHIFTS.map(s =>

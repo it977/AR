@@ -9,6 +9,7 @@ import Can from '../components/Can'
 import { PERMISSIONS } from '../lib/rbac'
 import { parseExcelFile } from '../lib/excelParser'
 import { upsertRows, syncDebtStatus } from '../lib/excelUpload'
+import { withRetry } from '../lib/useARData'
 import { showError, showInfo, showSuccess } from '../lib/sweetAlert'
 
 const PAYOFF_HEADERS = [
@@ -229,8 +230,8 @@ function applyDebtQueryFilters(query, filters) {
 
   if (insuranceFilter === 'GN') {
     query = query.eq('customer_type', 'GN')
-  } else {
-    query = query.eq('customer_type', 'INS')
+  } else if (insuranceFilter) {
+    query = query.eq('insurance', insuranceFilter)
   }
   if (search) query = query.or(`bill_no.ilike.%${search}%,patient_name.ilike.%${search}%`)
   const today = todayIso()
@@ -242,7 +243,6 @@ function applyDebtQueryFilters(query, filters) {
   if (statusFilter === 'past_due') query = query.gt('balance', 0).lt('due_date', today)
   if (statusFilter === 'paid') query = query.lte('balance', 0)
   if (paymentTypeFilter) query = query.eq('payment_type', paymentTypeFilter)
-  if (insuranceFilter && insuranceFilter !== 'GN') query = query.eq('insurance', insuranceFilter)
   if (dateFrom) query = query.gte('date', dateFrom)
   if (dateTo) query = query.lte('date', dateTo)
   if (paidDateFrom) query = query.gte('date_paid', paidDateFrom)
@@ -580,7 +580,7 @@ export default function DebtManagement() {
       aging_group: form.aging_group,
       ...installmentPayload,
     }
-    const { error: debtErr } = await supabase.from('ar_debt').update(debtUpdate).eq('id', form.id)
+    const { error: debtErr } = await withRetry(() => supabase.from('ar_debt').update(debtUpdate).eq('id', form.id))
 
     // 2) Update ar_bills (ຫາໂດຍ bill_no)
     if (!debtErr) {
@@ -591,15 +591,15 @@ export default function DebtManagement() {
         note: form.note,
       }
       let billPayload = { ...billUpdate, recorded_by_debt: form.recorded_by_debt }
-      let { error: billSyncErr } = await supabase.from('ar_bills').update(billPayload).eq('bill_no', form.bill_no)
+      let { error: billSyncErr } = await withRetry(() => supabase.from('ar_bills').update(billPayload).eq('bill_no', form.bill_no))
       if (billSyncErr && String(billSyncErr.message || '').includes('recorded_by_debt')) {
         billPayload = { ...billUpdate }
-        ;({ error: billSyncErr } = await supabase.from('ar_bills').update(billPayload).eq('bill_no', form.bill_no))
+        ;({ error: billSyncErr } = await withRetry(() => supabase.from('ar_bills').update(billPayload).eq('bill_no', form.bill_no)))
       }
       if (billSyncErr && String(billSyncErr.message || '').includes('payment_received_at')) {
         const fallbackBillUpdate = { ...billPayload }
         delete fallbackBillUpdate.payment_received_at
-        await supabase.from('ar_bills').update(fallbackBillUpdate).eq('bill_no', form.bill_no)
+        await withRetry(() => supabase.from('ar_bills').update(fallbackBillUpdate).eq('bill_no', form.bill_no))
       }
     }
 
@@ -658,13 +658,13 @@ export default function DebtManagement() {
       'total','discounts','grand_total','cash','bcel','bcel2','ldb','debt','prepayment','payment_type','bill_issued_at','payment_received_at','due_date','note','aging_group','recorded_by']
     const payload = { debt_status }
     for (const k of billCols) if (form[k] !== undefined) payload[k] = form[k]
-    const { error } = await supabase.from('ar_bills').update(payload).eq('bill_no', form.bill_no)
+    const { error } = await withRetry(() => supabase.from('ar_bills').update(payload).eq('bill_no', form.bill_no))
 
     // Sync ar_debt ໃຫ້ຕົງກັນ
     if (!error) {
       const collected = (form.cash||0)+(form.bcel||0)+(form.bcel2||0)+(form.ldb||0)
       try {
-        await supabase.from('ar_debt').update({
+        await withRetry(() => supabase.from('ar_debt').update({
           date: form.date, customer_type: form.customer_type, insurance: form.insurance,
           insite_onsite: form.insite_onsite, opd_ipd: form.opd_ipd, payment_type: form.payment_type,
           hn: form.hn, patient_name: form.patient_name, gender: form.gender, workload: form.workload,
@@ -675,7 +675,7 @@ export default function DebtManagement() {
           submit_date: form.submit_date || null,
           due_date: form.due_date || null,
           aging_group: form.aging_group,
-        }).eq('bill_no', form.bill_no)
+        }).eq('bill_no', form.bill_no))
       } catch (e) {}
     }
 
@@ -689,7 +689,7 @@ export default function DebtManagement() {
 
   async function handleDelete() {
     setSaving(true)
-    const { error } = await supabase.from('ar_debt').delete().eq('id', delTarget.id)
+    const { error } = await withRetry(() => supabase.from('ar_debt').delete().eq('id', delTarget.id))
     setSaving(false)
     if (!error) {
       logAction({ action: 'ລົບໜີ້', bill_no: delTarget.bill_no, patient_name: delTarget.patient_name, amount: delTarget.debt })
@@ -700,7 +700,7 @@ export default function DebtManagement() {
 
   async function handleDeleteAll() {
     setSaving(true)
-    const { error } = await supabase.from('ar_debt').delete().not('id', 'is', null)
+    const { error } = await withRetry(() => supabase.from('ar_debt').delete().not('id', 'is', null))
     setSaving(false)
     if (!error) { 
       logAction({ action: 'ລົບໜີ້ທັງໝົດ', details: 'ລຶບທັງໝົດຈາກ ar_debt' })

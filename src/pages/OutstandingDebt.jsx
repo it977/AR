@@ -5,7 +5,9 @@ import DateFilter, { FilterSelect } from '../components/DateFilter'
 import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
 import PDFButton from '../components/PDFButton'
 import {
+  useARData,
   usePayoffData,
+  computeKPIs,
   getDebtInitialAmount,
   getDebtPaidAmount,
   getLookerMaxDate,
@@ -57,7 +59,10 @@ export default function OutstandingDebt() {
   const [page, setPage] = useState(1)
   const PAGE_SIZE = 15
 
+  const { data: billRows, loading: billsLoading } = useARData(filters)
   const { data: debtRows, loading } = usePayoffData(filters)
+
+  const billKpis = useMemo(() => computeKPIs(billRows || []), [billRows])
 
   const lookerMaxDate = useMemo(() => {
     return getLookerMaxDate(debtRows || [])
@@ -161,7 +166,7 @@ export default function OutstandingDebt() {
   const totalPages = Math.ceil(outstanding.length / PAGE_SIZE)
   const pageData = outstanding.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
-  if (loading) return <div className="p-6"><LoadingSpinner /></div>
+  if (loading || billsLoading) return <div className="p-6"><LoadingSpinner /></div>
 
   return (
     <div id="outstanding-debt-content" className="p-6 space-y-6">
@@ -182,8 +187,28 @@ export default function OutstandingDebt() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <KPICard label="Total Outstanding Debt" sublabel="Total outstanding amount"
+      {/* Source reconciliation banner */}
+      {(() => {
+        const arBillsDebt = billKpis.outstandingDebt
+        const arDebtBalance = remainingBalance
+        const diff = Math.abs(arBillsDebt - arDebtBalance)
+        if (diff < 0.01) return null
+        return (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+            <strong>Reconciliation:</strong> ar_bills.debt ({formatNumber(arBillsDebt)} LAK) differs from
+            ar_debt.balance ({formatNumber(arDebtBalance)} LAK) by {formatNumber(diff)} LAK.
+            This is expected when Pay Off entries have not yet been re-uploaded after bill edits.
+          </div>
+        )
+      })()}
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <KPICard label="Outstanding (ar_bills)" sublabel="From bills table"
+          value={billKpis.outstandingDebt} color="red" fullNumber
+          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" /></svg>}
+          badge={`${formatNumber(billKpis.outstandingBills)} bills`} badgeColor="bg-red-100 text-red-700"
+        />
+        <KPICard label="Outstanding (ar_debt)" sublabel="From debt table"
           value={totalOutstanding} color="red" fullNumber
           icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" /></svg>}
           badge={`${formatNumber(totalDebtBills)} bills`} badgeColor="bg-red-100 text-red-700"
@@ -192,7 +217,7 @@ export default function OutstandingDebt() {
           value={totalCollected} color="green" fullNumber
           icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
         />
-        <KPICard label="Remaining Balance" sublabel="Remaining Balance"
+        <KPICard label="Remaining Balance" sublabel="ar_debt.balance"
           value={remainingBalance} color="orange" fullNumber
           icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
         />

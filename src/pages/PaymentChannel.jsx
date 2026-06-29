@@ -11,7 +11,6 @@ import {
   useCashflowData,
   computeKPIs,
   computePaymentTypeSummary,
-  filterToLookerSubset,
   getBillCollectionAmount,
   getDebtInitialAmount,
   getDebtPaidAmountForDateRange,
@@ -123,9 +122,8 @@ export default function PaymentChannel() {
   const { data: billReceiptRows } = useBillReceiptData(filters)
   const { data: outstandingRows } = usePayoffData(filters)
   const { data: cashflowRows } = useCashflowData(filters)
-  // Apply Looker-matching filter so totals match the Daily Sales dashboard.
-  const lookerView = useMemo(() => filterToLookerSubset(rows || []), [rows])
-  const viewRows = lookerView.rows
+  // Use raw filtered rows directly — matches Dashboard and AR List totals.
+  const viewRows = useMemo(() => rows || [], [rows])
   const kpis = useMemo(() => computeKPIs(viewRows), [viewRows])
   const sameDaySettledDebt = useMemo(() => getSameDaySettledDebtStats(viewRows), [viewRows])
   // Use ar_bills (date in range) for payment-type breakdown — matches Looker (no retro receipts).

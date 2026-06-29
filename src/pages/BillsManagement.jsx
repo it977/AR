@@ -18,7 +18,8 @@ import {
   todayIso,
 } from '../lib/debtUtils'
 import { parseExcelFile } from '../lib/excelParser'
-import { upsertRows } from '../lib/excelUpload'
+import { deleteRowsForDates, syncDebtStatus, upsertRows } from '../lib/excelUpload'
+import { withRetry } from '../lib/useARData'
 import { showError, showInfo, showSuccess } from '../lib/sweetAlert'
 
 const DAILY_HEADERS = [
@@ -104,6 +105,12 @@ const AR_BILL_COLUMNS = [
 const OPTIONAL_AR_BILL_COLUMNS = [
   'payment_type', 'due_date', 'bill_issued_at', 'payment_received_at', 'recorded_by',
 ]
+const OPTIONAL_AR_DEBT_COLUMNS = [
+  'insite_onsite', 'opd_ipd', 'payment_type',
+  'payment_1_date', 'payment_1_method', 'payment_1_amount',
+  'payment_2_date', 'payment_2_method', 'payment_2_amount',
+  'payment_3_date', 'payment_3_method', 'payment_3_amount',
+]
 const INSURANCE_DEBT_CUSTOMER_TYPES = new Set(['INS'])
 const RECORDER_SOURCE_ACTIONS = new Set(['ເພີ່ມໃບບິນ', 'ອັບໂຫຼດໃບບິນ (Excel)'])
 
@@ -130,6 +137,20 @@ function stripColumns(payload, columns) {
     delete nextPayload[col]
   })
   return nextPayload
+}
+
+async function saveArDebtRecord(record, existingId = null) {
+  const runSave = (payload) => existingId
+    ? supabase.from('ar_debt').update(payload).eq('id', existingId)
+    : supabase.from('ar_debt').insert(payload)
+
+  let { error } = await withRetry(() => runSave(record))
+  const missingColumns = missingOptionalColumns(error, OPTIONAL_AR_DEBT_COLUMNS)
+  if (error && missingColumns.length) {
+    const fallbackPayload = stripColumns(record, missingColumns)
+    ;({ error } = await withRetry(() => runSave(fallbackPayload)))
+  }
+  return error
 }
 
 function displayPaymentType(row) {
@@ -209,14 +230,110 @@ function isGeneralBillPaid(row = {}) {
 
 async function saveArBillById(id, payload, options = {}) {
   const requiredColumns = options.requiredColumns || []
-  let { error } = await supabase.from('ar_bills').update(payload).eq('id', id)
+  const { error } = await withRetry(() => supabase.from('ar_bills').update(payload).eq('id', id))
   const missingColumns = missingOptionalColumns(error)
   if (error && missingColumns.length) {
     if (requiredColumns.some(col => missingColumns.includes(col))) return error
     const fallbackPayload = stripColumns(payload, missingColumns)
-    ;({ error } = await supabase.from('ar_bills').update(fallbackPayload).eq('id', id))
+    const { error: fallbackErr } = await withRetry(() => supabase.from('ar_bills').update(fallbackPayload).eq('id', id))
+    return fallbackErr
   }
   return error
+}
+
+function getInitialDebtAmount(row = {}) {
+  const explicitDebt = Number(row.debt) || 0
+  if (explicitDebt > 0) return explicitDebt
+  const balance = Number(row.balance) || 0
+  const paid = Number(row.amount_paid) || 0
+  if (balance > 0 || paid > 0) return balance + paid
+  return getOutstandingBalance(row)
+}
+
+function nextInstallments(existing = {}, payment = {}) {
+  const rows = [1, 2, 3].map(number => ({
+    number,
+    date: existing[`payment_${number}_date`] || null,
+    method: existing[`payment_${number}_method`] || null,
+    amount: Number(existing[`payment_${number}_amount`]) || 0,
+  }))
+
+  const paidDate = payment.paidDate || todayIso()
+  const active = rows.filter(row => row.date || row.method || row.amount > 0)
+  const sameDaySameMethod = active.find(row => row.date === paidDate && row.method === payment.method)
+  if (sameDaySameMethod) {
+    sameDaySameMethod.amount += payment.amount
+  } else if (active.length < 3) {
+    active.push({
+      number: active.length + 1,
+      date: paidDate,
+      method: payment.method,
+      amount: payment.amount,
+    })
+  }
+
+  return [1, 2, 3].reduce((payload, number) => {
+    const row = active[number - 1] || {}
+    payload[`payment_${number}_date`] = row.date || null
+    payload[`payment_${number}_method`] = row.method || null
+    payload[`payment_${number}_amount`] = Number(row.amount) || 0
+    return payload
+  }, {})
+}
+
+async function upsertDebtPaymentSnapshot(row, payment, newBalance, insuranceDueDays = {}) {
+  const paidDate = payment.paidDate || todayIso()
+  const initialDebt = getInitialDebtAmount(row)
+  const { data: existingRows, error: fetchError } = await withRetry(() => supabase
+    .from('ar_debt')
+    .select('*')
+    .eq('bill_no', row.bill_no)
+    .eq('date', row.date)
+    .limit(1))
+
+  if (fetchError) return fetchError
+
+  const existing = existingRows?.[0] || {}
+  const previousPaid = Number(existing.amount_paid) || 0
+  const nextPaid = previousPaid + payment.amount
+  const submitDate = existing.submit_date || (row.customer_type === 'INS' ? todayIso() : null)
+  const dueDate = existing.due_date || row.due_date || (submitDate ? calcDueDate(submitDate, insuranceDueDays, row.insurance) : null)
+  const channelKey = `${payment.method}_paid`
+  const installments = nextInstallments(existing, payment)
+  const debtRecord = {
+    date: row.date,
+    bill_no: row.bill_no,
+    insite_onsite: row.insite_onsite,
+    opd_ipd: row.opd_ipd,
+    payment_type: displayPaymentType(row) || null,
+    customer_type: row.customer_type,
+    insurance: row.insurance,
+    hn: row.hn,
+    patient_name: row.patient_name,
+    gender: row.gender,
+    workload: row.workload,
+    grand_total: row.grand_total,
+    debt_amount: Number(existing.debt_amount) || initialDebt,
+    date_paid: paidDate,
+    submit_date: submitDate,
+    amount_paid: nextPaid,
+    cash_paid: Number(existing.cash_paid) || 0,
+    bcel_paid: Number(existing.bcel_paid) || 0,
+    bcel2_paid: Number(existing.bcel2_paid) || 0,
+    ldb_paid: Number(existing.ldb_paid) || 0,
+    balance: newBalance,
+    due_date: dueDate,
+    aging_group: calcAging({ ...existing, submit_date: submitDate, due_date: dueDate, balance: newBalance }),
+    ...installments,
+  }
+  if (channelKey in debtRecord) {
+    debtRecord[channelKey] = (Number(existing[channelKey]) || 0) + payment.amount
+  }
+
+  if (existing.id) {
+    return saveArDebtRecord(debtRecord, existing.id)
+  }
+  return saveArDebtRecord(debtRecord)
 }
 
 function preferLatestRecorder(map, log) {
@@ -343,7 +460,7 @@ function computeBillSummary(rows) {
     const transfer = bcel + bcel2 + ldb
     const debt = Number(row.debt) || 0
 
-    summary.total.amount += Number(row.grand_total) || 0
+    summary.total.amount += Number(row.total) || ((Number(row.grand_total) || 0) + (Number(row.discounts) || 0))
     summary.total.bills += 1
     if (cash > 0 && transfer > 0) addMetric(summary.mixed, cash + transfer)
     else if (cash > 0) addMetric(summary.cash, cash)
@@ -718,10 +835,11 @@ export default function BillsManagement() {
       { search, dateFrom, dateTo, workload, customerTypeFilter, insuranceFilter, paymentTypeFilter, bankFilter },
     )
 
-    const { data, count, error } = await q
+    const { data, count, error } = await withRetry(() => q
       .order('date', { ascending: false })
       .order('bill_no', { ascending: false })
       .range(page * pageSize, page * pageSize + pageSize - 1)
+    )
 
     if (!error) {
       setRows(await hydrateBillRowsWithRecorders(data || []))
@@ -742,10 +860,10 @@ export default function BillsManagement() {
         let q = applyBillFilters(
           supabase
             .from('ar_bills')
-            .select('id,grand_total,cash,bcel,bcel2,ldb,debt', { count: 'exact' }),
+            .select('id,total,discounts,grand_total,cash,bcel,bcel2,ldb,debt', { count: 'exact' }),
           { search, dateFrom, dateTo, workload, customerTypeFilter, insuranceFilter, paymentTypeFilter, bankFilter },
         )
-        const { data, count, error } = await q.range(from, from + PAGE - 1)
+        const { data, count, error } = await withRetry(() => q.range(from, from + PAGE - 1))
         if (error) throw error
         if (expectedTotal === null) expectedTotal = count ?? 0
         if (data?.length) all = all.concat(data)
@@ -788,7 +906,7 @@ export default function BillsManagement() {
           ? q.order('payment_received_at', { ascending: false })
           : q.order('date', { ascending: false })
 
-        const { data, count, error } = await query.range(from, from + PAGE - 1)
+        const { data, count, error } = await withRetry(() => query.range(from, from + PAGE - 1))
         if (error && usePaymentReceivedAt && String(error.message || '').includes('payment_received_at')) {
           usePaymentReceivedAt = false
           all = []
@@ -821,7 +939,8 @@ export default function BillsManagement() {
   useEffect(() => { fetchInsuranceDueDays() }, [fetchInsuranceDueDays])
 
   async function upsertArDebt(bill) {
-    const submitDate = todayIso()
+    const submitDate = bill.submit_date || (isInsuranceDebtBill(bill) ? todayIso() : null)
+    const dueDate = bill.due_date || (submitDate ? calcDueDate(submitDate, insuranceDueDays, bill.insurance) : null)
     const debtRecord = {
       date: bill.date,
       bill_no: bill.bill_no,
@@ -844,18 +963,18 @@ export default function BillsManagement() {
       bcel2_paid: 0,
       ldb_paid: 0,
       balance: bill.debt,
-      due_date: bill.due_date || calcDueDate(submitDate, insuranceDueDays, bill.insurance),
+      due_date: dueDate,
       aging_group: calcAging({
         submit_date: submitDate,
-        due_date: bill.due_date || calcDueDate(submitDate, insuranceDueDays, bill.insurance),
+        due_date: dueDate,
         balance: bill.debt,
       }),
     }
-    const { data: existing } = await supabase.from('ar_debt').select('id').eq('bill_no', bill.bill_no).limit(1)
+    const { data: existing } = await withRetry(() => supabase.from('ar_debt').select('id').eq('bill_no', bill.bill_no).eq('date', bill.date).limit(1))
     if (existing && existing.length > 0) {
-      await supabase.from('ar_debt').update(debtRecord).eq('id', existing[0].id)
+      await saveArDebtRecord(debtRecord, existing[0].id)
     } else {
-      await supabase.from('ar_debt').insert(debtRecord)
+      await saveArDebtRecord(debtRecord)
     }
   }
 
@@ -878,25 +997,24 @@ export default function BillsManagement() {
     const payload = buildArBillPayload({ ...normalizedForm, debt_status: resolvePaymentStatus(normalizedForm) })
     let error
     if (modal.mode === 'add') {
-      ;({ error } = await supabase.from('ar_bills').insert(payload))
+      ;({ error } = await withRetry(() => supabase.from('ar_bills').insert(payload)))
     } else {
-      ;({ error } = await supabase.from('ar_bills').update(payload).eq('id', form.id))
+      ;({ error } = await withRetry(() => supabase.from('ar_bills').update(payload).eq('id', form.id)))
     }
     const submitMissingColumns = missingOptionalColumns(error)
     if (error && submitMissingColumns.length) {
       const fallbackPayload = stripColumns(payload, submitMissingColumns)
       if (modal.mode === 'add') {
-        ;({ error } = await supabase.from('ar_bills').insert(fallbackPayload))
+        ;({ error } = await withRetry(() => supabase.from('ar_bills').insert(fallbackPayload)))
       } else {
-        ;({ error } = await supabase.from('ar_bills').update(fallbackPayload).eq('id', form.id))
+        ;({ error } = await withRetry(() => supabase.from('ar_bills').update(fallbackPayload).eq('id', form.id)))
       }
     }
     setSaving(false)
     if (!error) {
-      // Only insurance-style customers go to ar_debt. GN repayments stay in ar_bills.
-      // Never DELETE ar_debt rows — keep them as historical Outstanding Debt snapshot so
-      // Daily Sales / Looker reports stay accurate for the bill's original date.
-      if ((normalizedForm.debt || 0) > 0 && isInsuranceDebtBill(normalizedForm)) {
+      // Keep historical debt snapshots for all customer types so issue-date reports
+      // stay aligned with Looker after later payment edits.
+      if ((normalizedForm.debt || 0) > 0) {
         try { await upsertArDebt(normalizedForm) } catch (e) {}
       }
       try {
@@ -931,10 +1049,13 @@ export default function BillsManagement() {
     updated.payment_type = deriveChannelPaymentType(updated) || null
     updated.debt_status = resolvePaymentStatus(updated)
 
-    const error = await saveArBillById(row.id, buildArBillPayload(updated))
+    let error = await saveArBillById(row.id, buildArBillPayload(updated))
 
     if (!error) {
-      try { await supabase.from('ar_debt').delete().eq('bill_no', row.bill_no) } catch (e) {}
+      error = await upsertDebtPaymentSnapshot(row, payment, newDebt, insuranceDueDays)
+    }
+
+    if (!error) {
       try {
         await logAction({
           action: 'ຮັບຊຳລະ GN',
@@ -962,9 +1083,8 @@ export default function BillsManagement() {
 
   async function handleDelete() {
     setSaving(true)
-    const { error } = await supabase.from('ar_bills').delete().eq('id', delTarget.id)
+    const { error } = await withRetry(() => supabase.from('ar_bills').delete().eq('id', delTarget.id))
     if (!error) {
-      // ລຶບອອກຈາກ ar_debt ນຳ
       try { await supabase.from('ar_debt').delete().eq('bill_no', delTarget.bill_no) } catch (e) {}
     }
     setSaving(false)
@@ -983,8 +1103,8 @@ export default function BillsManagement() {
   async function handleDeleteAll() {
     setSaving(true)
     // ລຶບທັງ ar_bills ແລະ ar_debt ທີ່ກ່ຽວຂ້ອງ
-    const { error: errorDebt } = await supabase.from('ar_debt').delete().not('id', 'is', null)
-    const { error: errorBills } = await supabase.from('ar_bills').delete().not('id', 'is', null)
+    const { error: errorDebt } = await withRetry(() => supabase.from('ar_debt').delete().not('id', 'is', null))
+    const { error: errorBills } = await withRetry(() => supabase.from('ar_bills').delete().not('id', 'is', null))
     setSaving(false)
     if (!errorBills && !errorDebt) {
       try {
@@ -1015,27 +1135,77 @@ export default function BillsManagement() {
         ...row,
         recorded_by: row.recorded_by || defaultRecorder,
       }))
-      if (!bills.length) {
-        throw new Error('ບໍ່ພົບຂໍ້ມູນໃນ sheet "Daily" — ກວດສອບໂຄງສ້າງໄຟລ')
+      const debtRows = result.debt || []
+      const cashflowRows = result.cashflow || []
+      const grandTotal = bills.length + debtRows.length + cashflowRows.length
+      if (!grandTotal) {
+        throw new Error('ບໍ່ພົບຂໍ້ມູນໃນ sheet "Daily", "Pay off" ຫຼື "Summary_CashFlow" — ກວດສອບໂຄງສ້າງໄຟລ')
       }
-      addLog(`ພົບ ${bills.length} ແຖວ ໃນ sheet Daily — ກຳລັງອັບໂຫຼດ...`)
-      setUploadState(s => ({ ...s, log: [...log], total: bills.length }))
-      const uploaded = await upsertRows('ar_bills', bills, (pct, done, total) => {
-        setUploadState(s => ({ ...s, progress: pct, done, total }))
-      })
-      addLog(`✓ ສຳເລັດ: ${uploaded} ແຖວ`)
+      addLog(`ພົບ Daily ${fmt(bills.length)} ແຖວ, Pay off ${fmt(debtRows.length)} ແຖວ, Cashflow ${fmt(cashflowRows.length)} ແຖວ`)
+      setUploadState(s => ({ ...s, log: [...log], total: grandTotal }))
+
+      let doneBase = 0
+      let uploadedBills = 0
+      let uploadedDebt = 0
+      let uploadedCashflow = 0
+
+      if (bills.length) {
+        addLog(`Replacing old ar_bills rows for ${fmt(new Set(bills.map(row => row.date).filter(Boolean)).size)} Excel dates...`)
+        setUploadState(s => ({ ...s, log: [...log] }))
+        const deleted = await deleteRowsForDates('ar_bills', bills)
+        addLog(`Deleted old ar_bills rows: ${fmt(deleted)}`)
+        setUploadState(s => ({ ...s, log: [...log] }))
+        uploadedBills = await upsertRows('ar_bills', bills, (pct, done) => {
+          setUploadState(s => ({ ...s, progress: Math.round((doneBase + done) / grandTotal * 100), done: doneBase + done, total: grandTotal }))
+        })
+        doneBase += bills.length
+        addLog(`✓ ar_bills: ${fmt(uploadedBills)} ແຖວ`)
+      }
+
+      if (debtRows.length) {
+        addLog(`Replacing old ar_debt rows for ${fmt(new Set(debtRows.map(row => row.date).filter(Boolean)).size)} Excel dates...`)
+        setUploadState(s => ({ ...s, log: [...log] }))
+        const deleted = await deleteRowsForDates('ar_debt', debtRows)
+        addLog(`Deleted old ar_debt rows: ${fmt(deleted)}`)
+        setUploadState(s => ({ ...s, log: [...log] }))
+        uploadedDebt = await upsertRows('ar_debt', debtRows, (pct, done) => {
+          setUploadState(s => ({ ...s, progress: Math.round((doneBase + done) / grandTotal * 100), done: doneBase + done, total: grandTotal }))
+        })
+        doneBase += debtRows.length
+        addLog(`✓ ar_debt: ${fmt(uploadedDebt)} ແຖວ`)
+
+        const billUpdates = result.billUpdates || []
+        if (billUpdates.length) {
+          addLog(`Sync debt status → ar_bills: ${fmt(billUpdates.length)} ໃບບິນ`)
+          setUploadState(s => ({ ...s, log: [...log] }))
+          await syncDebtStatus(billUpdates)
+        }
+      }
+
+      if (cashflowRows.length) {
+        addLog(`Replacing old ar_cashflow rows for ${fmt(new Set(cashflowRows.map(row => row.date).filter(Boolean)).size)} Excel dates...`)
+        setUploadState(s => ({ ...s, log: [...log] }))
+        const deleted = await deleteRowsForDates('ar_cashflow', cashflowRows)
+        addLog(`Deleted old ar_cashflow rows: ${fmt(deleted)}`)
+        setUploadState(s => ({ ...s, log: [...log] }))
+        uploadedCashflow = await upsertRows('ar_cashflow', cashflowRows, (pct, done) => {
+          setUploadState(s => ({ ...s, progress: Math.round((doneBase + done) / grandTotal * 100), done: doneBase + done, total: grandTotal }))
+        })
+        doneBase += cashflowRows.length
+        addLog(`✓ ar_cashflow: ${fmt(uploadedCashflow)} ແຖວ`)
+      }
       try {
         await logAction({
           action: 'ອັບໂຫຼດໃບບິນ (Excel)',
           action_type: 'data.upload',
           entity_type: 'excel_file',
           entity_id: file.name,
-          details: `ອັບໂຫຼດ ${uploaded} ໃບບິນ ຈາກ ${file.name}`,
-          metadata: { file_name: file.name, bills: uploaded },
+          details: `ອັບໂຫຼດ ${grandTotal} ແຖວ ຈາກ ${file.name}`,
+          metadata: { file_name: file.name, bills: uploadedBills, debt: uploadedDebt, cashflow: uploadedCashflow },
         })
       } catch (_) {}
       setUploadState(s => ({ ...s, log: [...log], progress: 100 }))
-      showSuccess('ອັບໂຫຼດ Excel ສຳເລັດ', `${uploaded} ແຖວ`)
+      showSuccess('ອັບໂຫຼດ Excel ສຳເລັດ', `${fmt(grandTotal)} ແຖວ`)
       fetchRows()
       fetchBillSummary()
       fetchRetroCollectionSummary()

@@ -4,7 +4,7 @@ import KPICard, { CountCard } from '../components/KPICard'
 import DateFilter, { FilterSelect } from '../components/DateFilter'
 import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
 import PDFButton from '../components/PDFButton'
-import { useARData, computeServiceData, computeServiceSummary, computeLocationSummary, filterToLookerSubset } from '../lib/useARData'
+import { useARData, computeServiceData, computeServiceSummary, computeLocationSummary } from '../lib/useARData'
 import { formatLAK, formatNumber } from '../lib/excelParser'
 import { useGlobalFilters } from '../context/FilterContext'
 
@@ -48,8 +48,8 @@ export default function CustomerService() {
   const { filters, updateFilters } = useGlobalFilters()
 
   const { data: rows, loading } = useARData(filters)
-  // Apply Looker filter so Customer & Service totals match Daily Sales and Looker.
-  const viewRows = useMemo(() => filterToLookerSubset(rows || []).rows, [rows])
+  // Use raw filtered rows directly — matches Dashboard and AR List totals.
+  const viewRows = useMemo(() => rows || [], [rows])
 
   const stats = useMemo(() => {
     if (!viewRows.length) return {}
