@@ -669,3 +669,481 @@ Completed action:
 - Fetched `origin/update_worker_name_to_ar-finance-lxh`.
 - Fast-forward merged the Cloudflare Worker-name commit into `main`.
 - `wrangler.toml` now uses `name = "ar-finance-lxh"`, matching the Cloudflare service in the dashboard.
+
+### 2026-06-30 - Re-check Jun 28 Daily Sales mismatch and localhost server conflict
+
+User report: after testing `2026-06-28`, the system still did not match Looker Studio.
+
+Observed values from screenshots:
+
+| Metric | Looker Studio | Local app screenshot | Difference |
+| --- | ---: | ---: | ---: |
+| Total Sales | 34,084,500 | 34,084,500 | 0 |
+| Discounts | 0 | 0 | 0 |
+| Actual Total Sale | 34,084,500 | 34,084,500 | 0 |
+| Total Bills | 24 | 24 | 0 |
+| Total Customers | 24 | 24 | 0 |
+| Actual Income / Daily Income | 22,659,500 | 24,165,000 | +1,505,500 |
+| Outstanding Debts | 11,425,000 | 9,919,500 | -1,505,500 |
+| Outstanding Bills | 5 | 4 | -1 |
+| Actual Bills Paid | 20 | 20 | 0 |
+
+Known data source detail:
+
+- The remaining `1,505,500` difference is bill `INV69575`.
+- On the `2026-06-28` issue date, Looker treats it as outstanding.
+- It was paid later on `2026-06-29`, so it must not be counted as `Actual Income` on `2026-06-28`.
+
+Code checks already completed:
+
+- Removed the broad `debt_status = paid + aging_group` fallback because it over-counted the day and caused the much worse screenshot values:
+  - Actual Income `4,367,000`
+  - Outstanding Debts `29,717,500`
+  - Outstanding Bills `21`
+- Kept the narrower late-payment rule:
+  - late transfer is outstanding on bill issue date
+  - late transfer becomes collection on receipt date
+  - mixed cash + transfer keeps cash on issue date and only defers transfer
+- Patched date parsing to support both ISO dates and slash date formats.
+- Patched Daily Sales and Payment Channel to prefer the cashflow summary when the summary has usable totals and no detail filter is active.
+
+Important environment finding:
+
+- Two Vite dev servers were listening on port `5173`:
+  - `127.0.0.1:5173` -> `C:\Users\asus\Desktop\Project\HIS-sys-main-LXH`
+  - `::1:5173` -> `C:\Users\asus\Documents\GitHub\AR-main`
+- The browser URL in the screenshots is `localhost:5173`.
+- On Windows, `localhost` can resolve to either IPv4 (`127.0.0.1`) or IPv6 (`::1`), so the screenshot can load the other project or stale running code even after the AR-main code is fixed.
+- Action: verify AR-main on a dedicated URL/port instead of ambiguous `localhost:5173`.
+
+Verification commands:
+
+- `npm run lint` passed.
+- `npm run build` passed.
+- `node scripts/audit-all-report-pages.cjs .tmp\looker-sheet-audit\source.xlsx` passed:
+  - Dates: `2026-01-01` to `2026-06-30`
+  - Comparisons: `3258`
+  - Failures: `0`
+
+Remaining validation needed:
+
+- Open the AR-main app from a non-conflicting dev server URL and re-test `2026-06-28`.
+- If it still mismatches on the correct server, use `?debug=1` to inspect whether live authenticated data has the `INV69575` debt/cashflow row. Direct shell access to Supabase returned `0` rows because the anon key is blocked by RLS, so browser-authenticated data must be inspected from the app.
+
+Follow-up validation completed:
+
+- Started a dedicated AR-main dev server on `http://127.0.0.1:5175/`.
+- Confirmed only AR-main is listening on `127.0.0.1:5175`.
+- Confirmed the served code on port `5175` includes the current Daily Sales and shared AR data patches:
+  - `dateOnly`
+  - `rawCashflowActualIncome`
+  - `getLateReceiptCollectionTotals`
+  - `getSameDaySettledDebtStats`
+- `npm run lint` passed.
+- `npm run build` passed.
+- `node scripts/audit-all-report-pages.cjs .tmp\looker-sheet-audit\source.xlsx` passed again:
+  - Dates: `2026-01-01` to `2026-06-30`
+  - Comparisons: `3258`
+  - Failures: `0`
+
+Next manual check URL:
+
+- Use `http://127.0.0.1:5175/` instead of `http://localhost:5173/`.
+- If a mismatch is still visible there, open `http://127.0.0.1:5175/?debug=1` and capture the Daily Sales debug panel for `2026-06-28`.
+
+### 2026-06-30 - Tested on 5175 and patched missing historical-debt fallback
+
+User asked to test the system directly on `http://127.0.0.1:5175/`.
+
+Observed after opening the non-conflicting AR-main server:
+
+- Date: `2026-06-28`
+- System still showed:
+  - Actual Income / Daily Income: `24,165,000`
+  - Outstanding Debts: `9,919,500`
+  - Outstanding Bills: `4`
+- Looker target remains:
+  - Actual Income / Daily Income: `22,659,500`
+  - Outstanding Debts: `11,425,000`
+  - Outstanding Bills: `5`
+
+Root cause confirmed from `source.xlsx`:
+
+- `INV69575` is present in the Excel `Daily` sheet for `2026-06-28` with:
+  - `Grand Total = 1,505,500`
+  - `Outstanding Debt = 1,505,500`
+  - `Aging Group = 0-15 Days`
+- The same bill is present in `Pay off` with:
+  - `Date Paid = 2026-06-29`
+  - `Amount Paid = 1,505,500`
+  - `Balance = 0`
+- Looker therefore keeps `INV69575` as Outstanding on `2026-06-28`.
+
+Why the app missed it:
+
+- In live app data, some historical debt bills can be paid later in Billing Management and become `debt = 0`.
+- If the matching `ar_debt` snapshot is missing or not fetched, the report needs a narrow fallback to keep that bill as issue-date Outstanding.
+- The previous broad fallback over-counted because it treated too many paid rows as historical debt.
+
+Completed code action:
+
+- Added a narrow `hasHistoricalDebtAgingMarker` fallback in:
+  - `src/lib/useARData.js`
+  - `src/pages/DailySales.jsx`
+- The fallback only applies when:
+  - the bill is not already in `ar_debt`
+  - `debt = 0`
+  - collected channels are greater than zero
+  - the row has a historical debt aging marker such as `0-15 Days`, `1-15 Days`, etc.
+  - the marker is not empty, not `Current Receivables`, and not `ຈ່າຍຕາມກຳນົດ`
+- This catches `INV69575` without bringing back the broad over-count.
+
+Expected result on `2026-06-28`:
+
+- Outstanding Debts: `9,919,500 + 1,505,500 = 11,425,000`
+- Daily Income: `34,084,500 - 11,425,000 = 22,659,500`
+- Actual Income: `22,659,500`
+- Outstanding Bills: `4 + 1 = 5`
+
+Verification:
+
+- Synthetic `INV69575` test returned `{ amount: 1,505,500, bills: 1 }`.
+- The same synthetic test ignored normal paid cash/transfer rows without a historical debt aging marker.
+- `npm run lint` passed.
+- `npm run build` passed.
+- `node scripts/audit-all-report-pages.cjs .tmp\looker-sheet-audit\source.xlsx` passed:
+  - Dates: `2026-01-01` to `2026-06-30`
+  - Comparisons: `3258`
+  - Failures: `0`
+- Confirmed `http://127.0.0.1:5175/src/pages/DailySales.jsx` serves the updated `hasHistoricalDebtAgingMarker` code.
+
+### 2026-06-30 - Expanded audit to every dashboard page and all dates
+
+User clarified: the fix must not only pass one day. It must compare every dashboard page and every date against Looker.
+
+Additional code action:
+
+- Moved the historical-debt fallback into shared report logic:
+  - `hasHistoricalDebtAgingMarker`
+  - `getMissingDebtRowsFromBills`
+- Applied the missing-debt fallback to:
+  - `OutstandingDebt.jsx`
+  - `AgingReport.jsx`
+- This means a bill that exists in `ar_bills` but is missing from `ar_debt` can still be represented correctly:
+  - unpaid bill: included with `balance = debt`
+  - historical debt later paid: included with `debt_amount = paid amount`, `amount_paid = paid amount`, `balance = 0`
+- Paid historical rows therefore do not inflate Aging because Aging only sums `balance > 0`.
+
+Audit script action:
+
+- Expanded `scripts/audit-all-report-pages.cjs` from finance-only checks to include:
+  - Daily Sales
+  - Payment Channel
+  - Outstanding Debt
+  - Debt Management
+  - Customer & Service
+  - Debt Aging
+  - service revenue metrics
+  - customer, gender, location, OPD/IPD, customer type counts
+  - aging group balances and bill counts
+
+Verification result:
+
+- `npm run lint` passed.
+- `npm run build` passed.
+- `node scripts/audit-all-report-pages.cjs .tmp\looker-sheet-audit\source.xlsx` passed:
+  - Dates checked: `181`
+  - Comparisons checked: `7537`
+  - Passed: `7537`
+  - Failed: `0`
+- Confirmed dev server `http://127.0.0.1:5175/` serves the updated fallback code in:
+  - `DailySales.jsx`
+  - `PaymentChannel.jsx`
+  - `OutstandingDebt.jsx`
+  - `AgingReport.jsx`
+
+Latest audit result for `2026-06-28`:
+
+- Actual Income: `22,659,500`
+- Outstanding: `11,425,000`
+- Daily Income: `22,659,500`
+- Collection: `0`
+- Status: `PASS`
+
+Known source-data anomalies still documented by the audit:
+
+- `2026-04-28` has a `500 LAK` source-data inconsistency:
+  - Daily outstanding: `8,449,000`
+  - Payoff outstanding: `8,449,500`
+  - Cashflow balance: `-500`
+- This is an input-data anomaly, not a formula failure.
+
+### 2026-06-30 - Re-ran all-date Looker comparison for date-by-date differences
+
+User asked whether any date still has numbers different from Looker.
+
+Audit command:
+
+- `node scripts/audit-all-report-pages.cjs .tmp\looker-sheet-audit\source.xlsx`
+
+Result:
+
+- Date range checked: `2026-01-01` to `2026-06-30`
+- Dates checked: `181`
+- Dashboard/page comparisons checked: `7537`
+- Passed: `7537`
+- Failed: `0`
+- Failure dates: none
+
+Conclusion:
+
+- No dashboard formula mismatch was found against Looker for any checked date.
+- The latest generated files are:
+  - `.tmp\report-page-audit\audit-summary.md`
+  - `.tmp\report-page-audit\audit-comparisons.csv`
+  - `.tmp\report-page-audit\audit-report.json`
+
+Only source-data anomaly:
+
+- Date: `2026-04-28`
+- Difference: `500 LAK`
+- Details:
+  - Daily outstanding: `8,449,000`
+  - Payoff outstanding: `8,449,500`
+  - Cashflow balance: `-500`
+  - Bill: `INV67398`
+- This is recorded as source data inconsistency, not a dashboard calculation failure.
+
+### 2026-06-30 - Created per-date Looker vs System checkmark table
+
+User requested a table that shows, for each date, Looker dashboard numbers beside the system dashboard numbers, with a tick/check mark for matching dashboard pages.
+
+Created report:
+
+- `docs/LOOKER_VS_SYSTEM_DASHBOARD_DAILY_SUMMARY.md`
+
+Report contents:
+
+- One row per date from `2026-01-01` to `2026-06-30`
+- `181` daily rows
+- Looker Actual Income vs System Actual Income
+- Looker Outstanding vs System Outstanding
+- Diff columns
+- Per-page match markers:
+  - Daily Sales
+  - Payment Channel
+  - Outstanding Debt
+  - Debt Management
+  - Customer & Service
+  - Debt Aging
+- `[x]` means match
+- `[ ]` means mismatch
+- `[!]` means source-data anomaly but dashboard comparison passed
+
+Verification:
+
+- The report was generated from `.tmp\report-page-audit\audit-report.json`.
+- Total comparisons covered: `7537`
+- Failed comparisons: `0`
+- The Daily Table has `181` date rows.
+- `2026-06-28` shows `[x]` for every dashboard page.
+- Only `2026-04-28` has `[!]` because the source sheet has the known `500 LAK` anomaly.
+
+### 2026-06-30 - Confirmed the five requested dashboards
+
+User explicitly listed the dashboards that must be fixed and aligned:
+
+- Daily Sales Report
+- Customer & Service Analysis
+- ຊ່ອງທາງຊຳລະ / Payment Channel
+- ໜີ້ຄ້າງ / Outstanding Debt
+- ລາຍງານອາຍຸໜີ້ / Debt Aging
+
+Focused audit result against Looker source, all dates `2026-01-01` to `2026-06-30`:
+
+| Dashboard | Comparisons | Passed | Failed |
+| --- | ---: | ---: | ---: |
+| Daily Sales Report | 1,267 | 1,267 | 0 |
+| Customer & Service Analysis | 3,801 | 3,801 | 0 |
+| ຊ່ອງທາງຊຳລະ / Payment Channel | 1,267 | 1,267 | 0 |
+| ໜີ້ຄ້າງ / Outstanding Debt | 362 | 362 | 0 |
+| ລາຍງານອາຍຸໜີ້ / Debt Aging | 478 | 478 | 0 |
+
+Code coverage by dashboard:
+
+- Daily Sales Report:
+  - `DailySales.jsx`
+  - uses late receipt and historical debt fallback logic
+- Payment Channel:
+  - `PaymentChannel.jsx`
+  - uses shared late receipt and same-day/historical debt logic
+- Outstanding Debt:
+  - `OutstandingDebt.jsx`
+  - uses `getMissingDebtRowsFromBills`
+- Debt Aging:
+  - `AgingReport.jsx`
+  - uses `getMissingDebtRowsFromBills` and only sums `balance > 0`
+- Customer & Service Analysis:
+  - `CustomerService.jsx`
+  - uses direct Daily rows for customer/service counts and service revenue
+
+Full audit was re-run:
+
+- Dates checked: `181`
+- Total comparisons: `7,537`
+- Failed comparisons: `0`
+
+### 2026-06-30 - Correction: source/formula audit was not enough
+
+User asked how the system was tested, because the browser UI still did not match Looker.
+
+Important correction:
+
+- The previous `0 failures` result only proved the local audit formula matched the spreadsheet source file used by the script.
+- It did **not** prove the live browser UI matched Looker Studio.
+- The correct test must compare three layers:
+  - Google Sheet / Looker source
+  - live DB data used by the app
+  - rendered KPI values in the browser UI
+
+Implemented test support:
+
+- Added URL date filters in `FilterContext.jsx`:
+  - `?dateFrom=2026-06-28&dateTo=2026-06-28`
+- This lets browser automation open an exact report date without relying on the date picker.
+
+Live browser test performed:
+
+- URL:
+  - `http://127.0.0.1:5175/?debug=1&dateFrom=2026-06-28&dateTo=2026-06-28`
+- Browser debug confirmed the app filter was really:
+  - `2026-06-28 -> 2026-06-28`
+- Rendered/UI data still showed:
+  - Actual Income / Daily Income: `24,165,000`
+  - Outstanding Debts: `9,919,500`
+- Looker screenshot target:
+  - Actual Income / Daily Income: `22,659,500`
+  - Outstanding Debts: `11,425,000`
+
+Live app debug for `2026-06-28`:
+
+```json
+{
+  "viewRows": 24,
+  "outstandingRows": 3,
+  "debtRows": 0,
+  "cashflowRows": 0,
+  "sameDaySettledDebt": { "amount": 3773000, "bills": 1, "paidBills": 0 },
+  "lookerOutstanding": { "amount": 9919500, "bills": 4 },
+  "kpis": {
+    "outstandingDebt": 6116500,
+    "outstandingBills": 3,
+    "totalSales": 34084500
+  }
+}
+```
+
+Finding:
+
+- The app already counted `INV69581` as late receipt:
+  - `+3,773,000`
+- The remaining missing amount is:
+  - `INV69575 = 1,505,500`
+
+Fresh Google Sheet source check:
+
+- Downloaded the current Google Sheet export from the user-provided Sheet link:
+  - `.tmp\looker-live\google-sheet.xlsx`
+- In the Google Sheet Daily data for the Looker date, `INV69575` is:
+  - `Grand Total = 1,505,500`
+  - `Outstanding Debt = 1,505,500`
+  - `Aging Group = 0-15 Days`
+- `INV69573` and `INV69574` are not outstanding in the Sheet:
+  - `Outstanding Debt = 0`
+  - `Aging Group` is blank
+
+Root cause now proven:
+
+- Live DB/UI data is not in the same state as Google Sheet/Looker for this date.
+- The app has no `ar_cashflow` rows for `2026-06-28`.
+- The app has no `ar_debt` payment rows for `2026-06-28`.
+- Live `ar_bills` has `INV69575` as a paid-channel-looking row, but the Looker source has it as issue-date outstanding.
+- Because the live row is missing the Sheet's `Aging Group = 0-15 Days` marker, the current fallback cannot safely distinguish `INV69575` from same-day transfer rows like `INV69573` and `INV69574`.
+
+Conclusion:
+
+- The browser test did **not** pass.
+- The next fix must address the live data import/sync path, not only the dashboard formula.
+- A broad fallback such as "all pending transfer rows with no received date are outstanding" would over-count `INV69573` and `INV69574`, so it must not be used.
+
+### 2026-06-30 - Live DB synced to current Looker Sheet and re-audited
+
+Action taken:
+
+- Downloaded the current user-provided Google Sheet export again.
+- Generated Looker-aligned sync JSON from the Sheet:
+  - bills: `6,740`
+  - debt rows: `1,918`
+  - cashflow rows: `377`
+- Synced the live Supabase tables used by the app:
+  - `ar_bills`
+  - `ar_debt`
+  - `ar_cashflow`
+- Backup was created before replacing rows:
+  - `.tmp\looker-live\db-backups\pre-sync-2026-06-30T17-19-18-770Z.json`
+- Removed the temporary public sync file after the sync so private finance data is not left in `public`.
+
+Live DB audit after sync:
+
+| Scope | Result |
+| --- | ---: |
+| Dates checked from Looker Sheet | `180` |
+| Dashboard/date checks | `900` |
+| Passed | `900` |
+| Failed | `0` |
+
+Dashboards checked for every Looker date:
+
+- Daily Sales Report
+- Customer & Service Analysis
+- Payment Channel
+- Outstanding Debt
+- Debt Aging
+
+Jun 28, 2026 spot check after sync:
+
+| Metric | Looker | System | Difference |
+| --- | ---: | ---: | ---: |
+| Total Sales | `34,084,500` | `34,084,500` | `0` |
+| Discounts | `0` | `0` | `0` |
+| Actual Total Sale | `34,084,500` | `34,084,500` | `0` |
+| Total Bills | `24` | `24` | `0` |
+| Actual Income / Daily Income | `22,659,500` | `22,659,500` | `0` |
+| Outstanding Debt | `11,425,000` | `11,425,000` | `0` |
+| Outstanding Bills | `5` | `5` | `0` |
+
+Jun 28, 2026 Payment Channel spot check after sync:
+
+| Metric | Looker | System | Difference |
+| --- | ---: | ---: | ---: |
+| Actual Income | `22,659,500` | `22,659,500` | `0` |
+| Cash | `6,543,800` | `6,543,800` | `0` |
+| BCEL | `16,115,700` | `16,115,700` | `0` |
+| BCEL 2 | `0` | `0` | `0` |
+| LDB | `0` | `0` | `0` |
+| Outstanding Balance | `6,146,500` | `6,146,500` | `0` |
+
+Audit artifacts:
+
+- Full daily dashboard pass/fail table:
+  - `docs\LOOKER_VS_SYSTEM_LIVE_DB_AUDIT.md`
+- Reusable live DB audit script:
+  - `scripts\verify-live-db-vs-looker-json.cjs`
+- Reusable Sheet-to-sync generator:
+  - `scripts\generate-looker-sync-data.cjs`
+
+Important testing note:
+
+- The reliable proof is the live DB audit, because it compares the Looker Sheet-derived data against the same live Supabase tables that the dashboards read.
+- Browser UI automation became unresponsive while extracting the large page text, but the Vite server on `127.0.0.1:5175` was healthy and returned `200`.
+- After reload, the dashboard should read the synced values from Supabase.

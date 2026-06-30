@@ -87,6 +87,19 @@ function sumTransferBcel2(rows) {
     total + num(row['Transfer Payment by BCEL2'] ?? row['Transfer Payment by BCEL 2']), 0)
 }
 
+const SERVICE_FIELDS = [
+  'OPD',
+  'Diag & Image Services',
+  'IPD',
+  'Surg / OT Services',
+  'Emergency Services',
+  'Chronic & Prev Services',
+  'Pharma & Consumables',
+  'Supporting & Ancillary Services',
+  'Admin & Non-Clinical Services',
+  'Home care Services',
+]
+
 function summarizeDate(date, dailyRows, payoffRows, cashflowRows, lookerRows) {
   const daily = addMetric(dailyRows, 'Date', date)
   const payoffIssued = addMetric(payoffRows, 'Date', date)
@@ -126,6 +139,35 @@ function summarizeDate(date, dailyRows, payoffRows, cashflowRows, lookerRows) {
       total + num(row['Transfer Payment by BCEL2 Debt'] ?? row['Transfer Payment by BCEL 2 Debt']), 0),
     ldb: sum(daily, 'Transfer Payment by LDB') + sum(payoffPaid, 'Transfer Payment by LDB Debt'),
   }
+
+  const customerService = {
+    totalCustomers: daily.length,
+    female: daily.filter(row => String(row.Gender || '').trim() === 'Female').length,
+    male: daily.filter(row => String(row.Gender || '').trim() === 'Male').length,
+    insite: daily.filter(row => row['Insite-Onsite'] === 'Insite').length,
+    onsite: daily.filter(row => row['Insite-Onsite'] === 'Onsite').length,
+    opd: daily.filter(row => row['OPD-IPD'] === 'OPD').length,
+    ipd: daily.filter(row => row['OPD-IPD'] === 'IPD').length,
+    gn: daily.filter(row => row['Customer Type Code'] === 'GN').length,
+    ins: daily.filter(row => row['Customer Type Code'] === 'INS').length,
+    b2b: daily.filter(row => row['Customer Type Code'] === 'B2B').length,
+    iNS: daily.filter(row => row['Customer Type Code'] === 'iNS').length,
+  }
+  const serviceRevenue = Object.fromEntries(
+    SERVICE_FIELDS.map(field => [field, sum(daily, field)])
+  )
+
+  const aging = payoffIssued.reduce((acc, row) => {
+    const balance = num(row.Balance)
+    if (balance <= 0) return acc
+    const group = String(row['Aging Group'] || 'Unknown').trim() || 'Unknown'
+    if (!acc[group]) acc[group] = { balance: 0, bills: 0 }
+    acc[group].balance += balance
+    acc[group].bills += 1
+    return acc
+  }, {})
+  const agingTotalDebt = Object.values(aging).reduce((total, row) => total + row.balance, 0)
+  const agingTotalBills = Object.values(aging).reduce((total, row) => total + row.bills, 0)
 
   const lookerCollected = looker
     .filter(row => /Collected/i.test(String(row.Category || '')))
@@ -228,6 +270,31 @@ function summarizeDate(date, dailyRows, payoffRows, cashflowRows, lookerRows) {
   add('Outstanding Debt', 'Remaining Balance', system.remainingBalance, reference.debtPageRemainingBalance)
   add('Debt Management', 'Initial Debt', system.debtPageInitialOutstanding, reference.debtPageInitialOutstanding)
   add('Debt Management', 'Remaining Balance', system.remainingBalance, reference.debtPageRemainingBalance)
+
+  add('Customer & Service', 'Total Customers', customerService.totalCustomers, daily.length)
+  add('Customer & Service', 'Female', customerService.female, daily.filter(row => String(row.Gender || '').trim() === 'Female').length)
+  add('Customer & Service', 'Male', customerService.male, daily.filter(row => String(row.Gender || '').trim() === 'Male').length)
+  add('Customer & Service', 'Insite', customerService.insite, daily.filter(row => row['Insite-Onsite'] === 'Insite').length)
+  add('Customer & Service', 'Onsite', customerService.onsite, daily.filter(row => row['Insite-Onsite'] === 'Onsite').length)
+  add('Customer & Service', 'OPD', customerService.opd, daily.filter(row => row['OPD-IPD'] === 'OPD').length)
+  add('Customer & Service', 'IPD', customerService.ipd, daily.filter(row => row['OPD-IPD'] === 'IPD').length)
+  add('Customer & Service', 'GN', customerService.gn, daily.filter(row => row['Customer Type Code'] === 'GN').length)
+  add('Customer & Service', 'INS', customerService.ins, daily.filter(row => row['Customer Type Code'] === 'INS').length)
+  add('Customer & Service', 'B2B', customerService.b2b, daily.filter(row => row['Customer Type Code'] === 'B2B').length)
+  add('Customer & Service', 'iNS', customerService.iNS, daily.filter(row => row['Customer Type Code'] === 'iNS').length)
+  for (const field of SERVICE_FIELDS) {
+    add('Customer & Service', `Service: ${field}`, serviceRevenue[field], sum(daily, field))
+  }
+
+  add('Debt Aging', 'Total Debt', agingTotalDebt, payoffIssued.reduce((total, row) => total + Math.max(0, num(row.Balance)), 0))
+  add('Debt Aging', 'Total Bills', agingTotalBills, payoffIssued.filter(row => num(row.Balance) > 0).length)
+  for (const [group, value] of Object.entries(aging)) {
+    add('Debt Aging', `${group} Balance`, value.balance, payoffIssued
+      .filter(row => String(row['Aging Group'] || 'Unknown').trim() === group)
+      .reduce((total, row) => total + Math.max(0, num(row.Balance)), 0))
+    add('Debt Aging', `${group} Bills`, value.bills, payoffIssued
+      .filter(row => String(row['Aging Group'] || 'Unknown').trim() === group && num(row.Balance) > 0).length)
+  }
 
   return {
     date,

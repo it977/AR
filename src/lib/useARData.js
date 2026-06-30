@@ -83,9 +83,13 @@ function toDateOnly(value) {
     return `${match[1]}-${String(match[2]).padStart(2, '0')}-${String(match[3]).padStart(2, '0')}`
   }
 
-  match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/)
+  match = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/)
   if (match) {
-    return `${match[3]}-${String(match[2]).padStart(2, '0')}-${String(match[1]).padStart(2, '0')}`
+    const first = Number(match[1])
+    const second = Number(match[2])
+    const month = first > 12 ? second : first
+    const day = first > 12 ? first : second
+    return `${match[3]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
   }
 
   return ''
@@ -129,6 +133,137 @@ export function isRetroBillCollection(row = {}) {
 
 export function getBillCollectionAmount(row = {}) {
   return getBillingCollectedAmount(row)
+}
+
+export function getDeferredReceiptTransferTotals(rows = []) {
+  return (rows || []).reduce((totals, row) => {
+    const issueDate = toDateOnly(row.date)
+    const receiptDate = toDateOnly(row.payment_received_at)
+    if (!issueDate || !receiptDate || receiptDate <= issueDate) return totals
+
+    const late = getLateReceiptCollectionTotals(row)
+    totals.cash += late.cash
+    totals.bcel += late.bcel
+    totals.bcel2 += late.bcel2
+    totals.ldb += late.ldb
+    totals.amount += late.amount
+    return totals
+  }, { cash: 0, bcel: 0, bcel2: 0, ldb: 0, amount: 0 })
+}
+
+export function getLateReceiptCollectionTotals(row = {}) {
+  const cash = toNumber(row.cash)
+  const bcel = toNumber(row.bcel)
+  const bcel2 = toNumber(row.bcel2)
+  const ldb = toNumber(row.ldb)
+  const transfer = bcel + bcel2 + ldb
+
+  if (cash > 0 && transfer > 0) {
+    return { cash: 0, bcel, bcel2, ldb, amount: transfer }
+  }
+
+  return { cash, bcel, bcel2, ldb, amount: cash + transfer }
+}
+
+export function hasHistoricalDebtAgingMarker(row = {}) {
+  const aging = String(row.aging_group || '').trim()
+  if (!aging) return false
+  const normalized = aging.toLowerCase()
+  if (normalized === 'current receivables') return false
+  if (aging === 'ຈ່າຍຕາມກຳນົດ') return false
+  return /\d/.test(aging) || /day/i.test(aging)
+}
+
+export function getMissingDebtRowsFromBills(billRows = [], debtRows = []) {
+  const debtBillSet = new Set(
+    (debtRows || []).map(row => row.bill_no).filter(Boolean)
+  )
+
+  return (billRows || [])
+    .filter(row => row.bill_no && !debtBillSet.has(row.bill_no))
+    .map(row => {
+      const collected = getBillCollectionAmount(row)
+      const balance = toNumber(row.debt)
+      const historicalPaidDebt = balance <= 0 && collected > 0 && hasHistoricalDebtAgingMarker(row)
+      const openDebt = balance > 0
+      if (!historicalPaidDebt && !openDebt) return null
+
+      const debtAmount = openDebt ? balance : collected
+      return {
+        ...row,
+        debt_amount: debtAmount,
+        amount_paid: historicalPaidDebt ? collected : 0,
+        cash_paid: historicalPaidDebt ? toNumber(row.cash) : 0,
+        bcel_paid: historicalPaidDebt ? toNumber(row.bcel) : 0,
+        bcel2_paid: historicalPaidDebt ? toNumber(row.bcel2) : 0,
+        ldb_paid: historicalPaidDebt ? toNumber(row.ldb) : 0,
+        balance: openDebt ? balance : 0,
+      }
+    })
+    .filter(Boolean)
+}
+
+export function getSameDaySettledDebtStats(viewRows = [], outstandingRows = []) {
+  const debtBillSet = new Set(
+    (outstandingRows || []).map(row => row.bill_no).filter(Boolean)
+  )
+  const billsByNo = new Set()
+  const paidBillsByNo = new Set()
+  let amount = 0
+
+  for (const row of viewRows || []) {
+    if (row.bill_no && debtBillSet.has(row.bill_no)) continue
+    if (toNumber(row.debt) > 0) continue
+
+    const collected = getBillCollectionAmount(row)
+    if (collected <= 0) continue
+
+    const issueDate = toDateOnly(row.date)
+    const receiptDate = toDateOnly(row.payment_received_at)
+    const lateReceipt = receiptDate && issueDate && receiptDate > issueDate
+      ? getLateReceiptCollectionTotals(row)
+      : { amount: 0 }
+
+    if (lateReceipt.amount > 0) {
+      amount += lateReceipt.amount
+      if (row.bill_no) {
+        billsByNo.add(row.bill_no)
+        if (toNumber(row.cash) > 0 && (toNumber(row.bcel) + toNumber(row.bcel2) + toNumber(row.ldb)) > 0) {
+          paidBillsByNo.add(row.bill_no)
+        }
+      }
+      continue
+    }
+
+    // Historical debt row that was later paid directly in Billing Management but
+    // has no ar_debt snapshot. Keep it as issue-day Outstanding, matching Looker.
+    if (hasHistoricalDebtAgingMarker(row)) {
+      amount += collected
+      if (row.bill_no) billsByNo.add(row.bill_no)
+      continue
+    }
+
+    const customerType = String(row.customer_type || '').toUpperCase()
+    const insurance = String(row.insurance || '').trim()
+    if (customerType === 'INS' || insurance.length > 0) {
+      amount += collected
+      if (row.bill_no) {
+        billsByNo.add(row.bill_no)
+        paidBillsByNo.add(row.bill_no)
+      }
+    }
+  }
+
+  return { amount, bills: billsByNo.size, paidBills: paidBillsByNo.size }
+}
+
+export function isPaidOnIssueDate(row = {}) {
+  if (getBillCollectionAmount(row) <= 0) return false
+  const issueDate = toDateOnly(row.bill_issued_at) || toDateOnly(row.date)
+  const receiptDate = toDateOnly(row.payment_received_at) || issueDate
+  if (!issueDate || !receiptDate || receiptDate <= issueDate) return true
+
+  return toNumber(row.cash) > 0 && (toNumber(row.bcel) + toNumber(row.bcel2) + toNumber(row.ldb)) > 0
 }
 
 export function useARData(filters = {}) {

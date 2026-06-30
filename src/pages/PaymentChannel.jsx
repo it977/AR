@@ -11,30 +11,18 @@ import {
   useCashflowData,
   computeKPIs,
   computePaymentTypeSummary,
-  getBillCollectionAmount,
+  getBillReceiptDate,
   getDebtInitialAmount,
   getDebtPaidAmountForDateRange,
   getDebtPaidChannelTotalsForDateRange,
+  getLateReceiptCollectionTotals,
+  getSameDaySettledDebtStats,
   isRetroBillCollection,
   isUsableCashflowSummary,
 } from '../lib/useARData'
 import { formatNumber } from '../lib/excelParser'
 import { toNumber } from '../lib/debtUtils'
 import { useGlobalFilters } from '../context/FilterContext'
-
-function getSameDaySettledDebtStats(rows = []) {
-  const debtRows = (rows || []).filter(row => {
-    const customerType = String(row.customer_type || '').toUpperCase()
-    const collected = getBillCollectionAmount(row)
-    const remainingDebt = Number(row.debt || 0)
-    return customerType === 'INS' && remainingDebt <= 0 && collected > 0
-  })
-  const billNos = new Set(debtRows.map(row => row.bill_no).filter(Boolean))
-  return {
-    amount: debtRows.reduce((sum, row) => sum + getBillCollectionAmount(row), 0),
-    bills: billNos.size || debtRows.length,
-  }
-}
 
 const METHODS = [
   { key: 'cash',  label: 'Cash', sublabel: 'Cash',               color: '#10b981', bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-100' },
@@ -125,7 +113,10 @@ export default function PaymentChannel() {
   // Use raw filtered rows directly — matches Dashboard and AR List totals.
   const viewRows = useMemo(() => rows || [], [rows])
   const kpis = useMemo(() => computeKPIs(viewRows), [viewRows])
-  const sameDaySettledDebt = useMemo(() => getSameDaySettledDebtStats(viewRows), [viewRows])
+  const sameDaySettledDebt = useMemo(
+    () => getSameDaySettledDebtStats(viewRows, outstandingRows || []),
+    [viewRows, outstandingRows]
+  )
   // Use ar_bills (date in range) for payment-type breakdown — matches Looker (no retro receipts).
   const paymentTypeSummary = useMemo(() => computePaymentTypeSummary(viewRows), [viewRows])
   const depositCollection = paymentTypeSummary.Deposit?.amount || 0
@@ -149,6 +140,7 @@ export default function PaymentChannel() {
   }, [cashflowRows, hasCashflow])
   const useCashflowSummary = useMemo(() => {
     if (!hasCashflow) return false
+    if (rawCashflowActualIncome > 0 || rawCashflowInitialOutstanding > 0) return true
     return isUsableCashflowSummary({
       totalSales: kpis.totalSales,
       actualIncome: rawCashflowActualIncome,
@@ -183,11 +175,12 @@ export default function PaymentChannel() {
     // from the retro totals so it isn't double-counted on the receipt day. Matches
     // Looker's Collection breakdown (transfer-only for deferred bills).
     const retroTotals = retroRows.reduce((sum, row) => {
-      const transferOnly = Number(row.bcel || 0) + Number(row.bcel2 || 0) + Number(row.ldb || 0)
-      sum.amount += transferOnly
-      sum.bcel += row.bcel || 0
-      sum.bcel2 += row.bcel2 || 0
-      sum.ldb += row.ldb || 0
+      const late = getLateReceiptCollectionTotals(row)
+      sum.amount += late.amount
+      sum.cash += late.cash
+      sum.bcel += late.bcel
+      sum.bcel2 += late.bcel2
+      sum.ldb += late.ldb
       return sum
     }, { amount: 0, cash: 0, bcel: 0, bcel2: 0, ldb: 0 })
     return {
@@ -205,18 +198,20 @@ export default function PaymentChannel() {
   // they will appear as Collection on their receipt date instead (handled via retroRows
   // in `collectionStats`). Cash is always immediate and stays in the issue-day total.
   const deferredFromIssue = useMemo(() => {
-    let bcel = 0, bcel2 = 0, ldb = 0
+    let cash = 0, bcel = 0, bcel2 = 0, ldb = 0
     for (const row of viewRows || []) {
       if (!row.date || !row.payment_received_at) continue
       const issue = String(row.date).slice(0, 10)
       const received = String(row.payment_received_at).slice(0, 10)
       if (received > issue) {
-        bcel  += Number(row.bcel  || 0)
-        bcel2 += Number(row.bcel2 || 0)
-        ldb   += Number(row.ldb   || 0)
+        const late = getLateReceiptCollectionTotals(row)
+        cash += late.cash
+        bcel += late.bcel
+        bcel2 += late.bcel2
+        ldb += late.ldb
       }
     }
-    return { bcel, bcel2, ldb, amount: bcel + bcel2 + ldb }
+    return { cash, bcel, bcel2, ldb, amount: cash + bcel + bcel2 + ldb }
   }, [viewRows])
 
   // Combine ar_bills channels (date in range) and ar_debt channels (date_paid in range). Matches Looker.
@@ -231,7 +226,7 @@ export default function PaymentChannel() {
       })
       return t
     }
-    t.cash  = (kpis.cash  || 0) + collectionStats.cash
+    t.cash  = Math.max(0, (kpis.cash  || 0) - deferredFromIssue.cash)  + collectionStats.cash
     t.bcel  = Math.max(0, (kpis.bcel  || 0) - deferredFromIssue.bcel)  + collectionStats.bcel
     t.bcel2 = Math.max(0, (kpis.bcel2 || 0) - deferredFromIssue.bcel2) + collectionStats.bcel2
     t.ldb   = Math.max(0, (kpis.ldb   || 0) - deferredFromIssue.ldb)   + collectionStats.ldb
@@ -273,14 +268,22 @@ export default function PaymentChannel() {
       if (!r.date) return
       const mo = String(r.date).slice(0, 7)
       if (!map[mo]) map[mo] = { cash: 0, bcel: 0, bcel2: 0, ldb: 0 }
-      map[mo].cash  += r.cash  || 0
-      map[mo].bcel  += r.bcel  || 0
-      map[mo].bcel2 += r.bcel2 || 0
-      map[mo].ldb   += r.ldb   || 0
+      const issue = String(r.date || '').slice(0, 10)
+      const received = String(r.payment_received_at || '').slice(0, 10)
+      const isDeferred = issue && received && received > issue
+      const late = isDeferred
+        ? getLateReceiptCollectionTotals(r)
+        : { cash: 0, bcel: 0, bcel2: 0, ldb: 0 }
+      map[mo].cash  += Math.max(0, (r.cash  || 0) - late.cash)
+      map[mo].bcel  += Math.max(0, (r.bcel  || 0) - late.bcel)
+      map[mo].bcel2 += Math.max(0, (r.bcel2 || 0) - late.bcel2)
+      map[mo].ldb   += Math.max(0, (r.ldb   || 0) - late.ldb)
     })
+    const paidDebtBillNos = new Set()
     ;(debtRows || []).forEach(r => {
       const rowTotals = getDebtPaidChannelTotalsForDateRange(r, filters.dateFrom, filters.dateTo)
       if (rowTotals.amount <= 0) return
+      if (r.bill_no) paidDebtBillNos.add(r.bill_no)
       const mo = String(r.date_paid || r.payment_1_date || r.payment_2_date || r.payment_3_date || '').slice(0, 7)
       if (!mo) return
       if (!map[mo]) map[mo] = { cash: 0, bcel: 0, bcel2: 0, ldb: 0 }
@@ -289,8 +292,21 @@ export default function PaymentChannel() {
       map[mo].bcel2 += rowTotals.bcel2
       map[mo].ldb += rowTotals.ldb
     })
+    ;(billReceiptRows || [])
+      .filter(isRetroBillCollection)
+      .filter(r => !r.bill_no || !paidDebtBillNos.has(r.bill_no))
+      .forEach(r => {
+        const mo = getBillReceiptDate(r).slice(0, 7)
+        if (!mo) return
+        if (!map[mo]) map[mo] = { cash: 0, bcel: 0, bcel2: 0, ldb: 0 }
+        const late = getLateReceiptCollectionTotals(r)
+        map[mo].cash += late.cash
+        map[mo].bcel += late.bcel
+        map[mo].bcel2 += late.bcel2
+        map[mo].ldb += late.ldb
+      })
     return map
-  }, [viewRows, debtRows, cashflowRows, useCashflowSummary, filters.dateFrom, filters.dateTo])
+  }, [viewRows, debtRows, billReceiptRows, cashflowRows, useCashflowSummary, filters.dateFrom, filters.dateTo])
 
   const months = Object.keys(monthly).sort()
 
@@ -328,8 +344,8 @@ export default function PaymentChannel() {
     const filtered = allowedBillNos.size > 0
       ? orows.filter(r => allowedBillNos.has(r.bill_no) || hasDebtPaymentInRange(r))
       : orows
-    return filtered.reduce((s, r) => s + getDebtInitialAmount(r), 0) + sameDaySettledDebt.amount + deferredFromIssue.amount
-  }, [outstandingRows, viewRows, kpis.outstandingDebt, sameDaySettledDebt.amount, deferredFromIssue.amount, filters.dateFrom, filters.dateTo])
+    return filtered.reduce((s, r) => s + getDebtInitialAmount(r), 0) + sameDaySettledDebt.amount
+  }, [outstandingRows, viewRows, kpis.outstandingDebt, sameDaySettledDebt.amount, filters.dateFrom, filters.dateTo])
 
   const dailyIncome = useCashflowSummary && cashflowInitialOutstanding > 0
     ? Math.max(0, kpis.totalSales - cashflowInitialOutstanding)

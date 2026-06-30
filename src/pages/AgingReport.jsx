@@ -4,7 +4,7 @@ import KPICard from '../components/KPICard'
 import DateFilter, { FilterSelect } from '../components/DateFilter'
 import LoadingSpinner, { EmptyState } from '../components/LoadingSpinner'
 import PDFButton from '../components/PDFButton'
-import { usePayoffData, computeAgingData, getLookerMaxDate, capToLookerMaxDate } from '../lib/useARData'
+import { useARData, usePayoffData, computeAgingData, getLookerMaxDate, capToLookerMaxDate, getMissingDebtRowsFromBills } from '../lib/useARData'
 import { formatLAK, formatNumber } from '../lib/excelParser'
 import { useGlobalFilters } from '../context/FilterContext'
 import { getAgingLabel } from '../lib/debtUtils'
@@ -25,11 +25,14 @@ export default function AgingReport() {
   const { filters, updateFilters } = useGlobalFilters()
   const [search, setSearch] = useState('')
 
+  const { data: billRows, loading: billsLoading } = useARData(filters)
   const { data: debtRows, loading } = usePayoffData(filters)
   const lookerMaxDate = useMemo(() => getLookerMaxDate(debtRows || []), [debtRows])
   const reportRows = useMemo(() => {
-    return capToLookerMaxDate(debtRows || [], lookerMaxDate, filters)
-  }, [debtRows, lookerMaxDate, filters])
+    const cappedDebtRows = capToLookerMaxDate(debtRows || [], lookerMaxDate, filters)
+    const missingDebtRows = getMissingDebtRowsFromBills(billRows || [], cappedDebtRows)
+    return [...cappedDebtRows, ...missingDebtRows]
+  }, [debtRows, billRows, lookerMaxDate, filters])
   const viewAgingData = useMemo(() => {
     return computeAgingData(reportRows)
   }, [reportRows])
@@ -111,7 +114,7 @@ export default function AgingReport() {
   )
   const insuranceTotal = byInsurance.reduce((sum, [, value]) => sum + value.balance, 0)
 
-  if (loading) return <div className="p-6"><LoadingSpinner /></div>
+  if (loading || billsLoading) return <div className="p-6"><LoadingSpinner /></div>
 
   return (
     <div id="aging-report-content" className="p-6 space-y-6">

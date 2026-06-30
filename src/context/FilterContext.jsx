@@ -2,10 +2,16 @@ import { createContext, useContext, useState, useMemo } from 'react'
 
 const FilterContext = createContext()
 
+function queryDateParam(name) {
+  if (typeof window === 'undefined') return ''
+  const value = new URLSearchParams(window.location.search).get(name) || ''
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : ''
+}
+
 export function FilterProvider({ children }) {
   const [globalFilters, setGlobalFilters] = useState({
-    dateFrom: '',
-    dateTo: '',
+    dateFrom: queryDateParam('dateFrom'),
+    dateTo: queryDateParam('dateTo'),
     workload: '',
     workloadDebt: '',
     customerType: '',

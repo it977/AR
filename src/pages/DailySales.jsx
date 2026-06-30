@@ -13,6 +13,7 @@ import {
   getDebtInitialAmount,
   getDebtPaidAmountForDateRange,
   getDebtPaidChannelTotalsForDateRange,
+  getLateReceiptCollectionTotals,
   isRetroBillCollection,
   isUsableCashflowSummary,
 } from '../lib/useARData'
@@ -36,6 +37,33 @@ const PAYMENT_METHODS = [
   { key: 'ldb',   label: 'LDB',     sub: 'Lao Dev Bank' },
 ]
 
+function dateOnly(value) {
+  if (!value) return ''
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const y = value.getFullYear()
+    const m = String(value.getMonth() + 1).padStart(2, '0')
+    const d = String(value.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }
+
+  const text = String(value).trim()
+  let match = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)
+  if (match) {
+    return `${match[1]}-${String(match[2]).padStart(2, '0')}-${String(match[3]).padStart(2, '0')}`
+  }
+
+  match = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/)
+  if (match) {
+    const first = Number(match[1])
+    const second = Number(match[2])
+    const month = first > 12 ? second : first
+    const day = first > 12 ? first : second
+    return `${match[3]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+  }
+
+  return ''
+}
+
 // Bills that Looker treats as Outstanding for the issue date even though the app's
 // ar_bills row looks fully paid (debt=0, channels=grand_total). Three patterns exist:
 //
@@ -58,14 +86,12 @@ function getSameDaySettledDebtStats(viewRows = [], outstandingRows = []) {
   const debtBillSet = new Set(
     (outstandingRows || []).map(r => r.bill_no).filter(Boolean)
   )
-  const dateOnly = (v) => (v ? String(v).slice(0, 10) : '')
   const isDeferredReceipt = (row) => {
     const issue = dateOnly(row.date)
     const received = dateOnly(row.payment_received_at)
     return issue && received && received > issue
   }
-  const deferredAmount = (row) =>
-    Number(row.bcel || 0) + Number(row.bcel2 || 0) + Number(row.ldb || 0)
+  const deferredAmount = (row) => getLateReceiptCollectionTotals(row).amount
 
   const billsByNo = new Set()
   // Subset of `billsByNo` that should ALSO count toward "Actual Bills Paid" for the
@@ -90,13 +116,21 @@ function getSameDaySettledDebtStats(viewRows = [], outstandingRows = []) {
         total += amount
         if (row.bill_no) {
           billsByNo.add(row.bill_no)
-          if (Number(row.cash || 0) > 0) paidBillsByNo.add(row.bill_no)
+          if (Number(row.cash || 0) > 0 && (Number(row.bcel || 0) + Number(row.bcel2 || 0) + Number(row.ldb || 0)) > 0) paidBillsByNo.add(row.bill_no)
         }
         continue
       }
     }
 
     // Pattern B — INS / insurance bill settled in-app, no ar_debt journal entry.
+    // Historical debt row that was later paid directly in Billing Management but
+    // has no ar_debt snapshot. Keep it as issue-day Outstanding, matching Looker.
+    if (hasHistoricalDebtAgingMarker(row)) {
+      total += collected
+      if (row.bill_no) billsByNo.add(row.bill_no)
+      continue
+    }
+
     const customerType = String(row.customer_type || '').toUpperCase()
     const insurance = String(row.insurance || '').trim()
     if (customerType === 'INS' || insurance.length > 0) {
@@ -122,13 +156,22 @@ function countDistinctBills(rows = []) {
 
 function isPaidOnIssueDate(row = {}) {
   if (getBillCollectionAmount(row) <= 0) return false
-  const issueDate = String(row.bill_issued_at || row.date || '').slice(0, 10)
-  const receiptDate = String(row.payment_received_at || issueDate || '').slice(0, 10)
+  const issueDate = dateOnly(row.bill_issued_at) || dateOnly(row.date)
+  const receiptDate = dateOnly(row.payment_received_at) || issueDate
   if (!issueDate || !receiptDate || receiptDate <= issueDate) return true
 
   // If only transfer money landed later, Looker keeps this bill outstanding on the
   // issue date. Cash is immediate and still counts as paid on that issue date.
-  return Number(row.cash || 0) > 0
+  return Number(row.cash || 0) > 0 && (Number(row.bcel || 0) + Number(row.bcel2 || 0) + Number(row.ldb || 0)) > 0
+}
+
+function hasHistoricalDebtAgingMarker(row = {}) {
+  const aging = String(row.aging_group || '').trim()
+  if (!aging) return false
+  const normalized = aging.toLowerCase()
+  if (normalized === 'current receivables') return false
+  if (aging === 'ຈ່າຍຕາມກຳນົດ') return false
+  return /\d/.test(aging) || /day/i.test(aging)
 }
 
 function PaymentIcon({ method }) {
@@ -273,20 +316,16 @@ export default function DailySales() {
     const retroRows = (billReceiptRows || [])
       .filter(isRetroBillCollection)
       .filter(row => !row.bill_no || !debtBillNos.has(row.bill_no))
-    // Deferred-receipt retro bills: the cash portion was actually received on the
-    // bill's issue date (immediate, never deferred). Only the transfer portion
-    // (bcel + bcel2 + ldb) is the part that landed late and belongs in the receipt
-    // date's Collection. Matches Looker: for a bill issued Jun-19 with cash 1,482,500
-    // collected that night and BCEL 300,000 received Jun-20, Collection on Jun-20
-    // shows 300,000 (transfer only), not the full 1,782,500.
     const retroAmount = retroRows.reduce(
-      (s, row) => s + Number(row.bcel || 0) + Number(row.bcel2 || 0) + Number(row.ldb || 0),
+      (s, row) => s + getLateReceiptCollectionTotals(row).amount,
       0,
     )
     const retroChannels = retroRows.reduce((totals, row) => {
-      totals.bcel += row.bcel || 0
-      totals.bcel2 += row.bcel2 || 0
-      totals.ldb += row.ldb || 0
+      const late = getLateReceiptCollectionTotals(row)
+      totals.cash += late.cash
+      totals.bcel += late.bcel
+      totals.bcel2 += late.bcel2
+      totals.ldb += late.ldb
       return totals
     }, { cash: 0, bcel: 0, bcel2: 0, ldb: 0 })
     const billNos = new Set([
@@ -324,6 +363,7 @@ export default function DailySales() {
 
   const canUseCashflowSummary = useMemo(() => {
     if (hasCashflowDetailFilters) return false
+    if (rawCashflowActualIncome > 0 || rawCashflowInitialOutstanding > 0) return true
     return isUsableCashflowSummary({
       totalSales: kpis.totalSales,
       actualIncome: rawCashflowActualIncome,
@@ -479,8 +519,8 @@ export default function DailySales() {
     : dailyIncomeTotal + viewCollectionStats.amount
   const collectionBillCount = viewCollectionStats.bills || 0
   const actualPaidBills = useMemo(() => {
-    return viewKpis.paidBills
-  }, [viewKpis.paidBills])
+    return viewKpis.paidBills + collectionBillCount
+  }, [viewKpis.paidBills, collectionBillCount])
 
   const totalShiftBills = Object.values(viewShiftData).reduce((s, v) => s + v.bills, 0)
   const shiftPcts    = SHIFTS.map(s =>
@@ -527,7 +567,7 @@ export default function DailySales() {
             <pre className="mt-1 max-h-80 overflow-auto bg-white p-2">{JSON.stringify(debugInfo.suspectBills, null, 2)}</pre>
           </details>
           <details className="mb-2" open>
-            <summary className="cursor-pointer font-bold">cashflowRows ({debugInfo.cashflowDump.length}) — should sum to Looker Outstanding 10,822,750</summary>
+            <summary className="cursor-pointer font-bold">cashflowRows ({debugInfo.cashflowDump.length}) — should sum to Looker Outstanding for the selected date</summary>
             <pre className="mt-1 max-h-60 overflow-auto bg-white p-2">{JSON.stringify(debugInfo.cashflowDump, null, 2)}</pre>
           </details>
           <details className="mb-2">

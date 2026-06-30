@@ -10,6 +10,7 @@ import {
   computeKPIs,
   getDebtInitialAmount,
   getDebtPaidAmount,
+  getMissingDebtRowsFromBills,
   getLookerMaxDate,
   capToLookerMaxDate,
 } from '../lib/useARData'
@@ -69,8 +70,10 @@ export default function OutstandingDebt() {
   }, [debtRows])
 
   const viewDebtRows = useMemo(() => {
-    return capToLookerMaxDate(debtRows || [], lookerMaxDate, filters)
-  }, [debtRows, lookerMaxDate, filters])
+    const cappedDebtRows = capToLookerMaxDate(debtRows || [], lookerMaxDate, filters)
+    const missingDebtRows = getMissingDebtRowsFromBills(billRows || [], cappedDebtRows)
+    return [...cappedDebtRows, ...missingDebtRows]
+  }, [debtRows, billRows, lookerMaxDate, filters])
 
   const reportRows = useMemo(() => {
     return viewDebtRows.map(row => toDebtReportRow(row, 'debt'))
