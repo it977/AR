@@ -18,6 +18,50 @@ function readEnv() {
   )
 }
 
+function decodeJwt(token) {
+  const payload = token.split('.')[1]
+  const normalized = payload.replace(/-/g, '+').replace(/_/g, '/')
+  return JSON.parse(Buffer.from(normalized, 'base64').toString('utf8'))
+}
+
+function findBrowserToken() {
+  const roots = [
+    path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'Edge', 'User Data', 'Default', 'Local Storage', 'leveldb'),
+    path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'User Data', 'Default', 'Local Storage', 'leveldb'),
+  ].filter(Boolean)
+
+  const candidates = []
+  for (const root of roots) {
+    if (!fs.existsSync(root)) continue
+    for (const name of fs.readdirSync(root)) {
+      if (!/\.(ldb|log)$/i.test(name)) continue
+      const file = path.join(root, name)
+      let text = ''
+      try {
+        text = fs.readFileSync(file).toString('latin1')
+      } catch {
+        continue
+      }
+      if (!text.includes('127.0.0.1:5175') && !text.includes('localhost:5173')) continue
+      const matches = text.match(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g) || []
+      for (const token of matches) {
+        try {
+          const claims = decodeJwt(token)
+          if (!String(claims.iss || '').includes('yomxctcjjlcujmowkhru.supabase.co')) continue
+          if (claims.aud !== 'authenticated') continue
+          candidates.push({ token, claims })
+        } catch {}
+      }
+    }
+  }
+
+  candidates.sort((a, b) => (b.claims.exp || 0) - (a.claims.exp || 0))
+  const best = candidates[0]
+  if (!best) return null
+  if ((best.claims.exp || 0) * 1000 < Date.now()) return null
+  return best
+}
+
 function num(value) {
   const n = Number(value || 0)
   return Number.isFinite(n) ? n : 0
@@ -215,7 +259,8 @@ function status(looker, system, fields) {
 
 async function main() {
   const env = { ...readEnv(), ...process.env }
-  const accessToken = env.SUPABASE_ACCESS_TOKEN || env.VITE_SUPABASE_ACCESS_TOKEN
+  const browserAuth = findBrowserToken()
+  const accessToken = env.SUPABASE_ACCESS_TOKEN || env.VITE_SUPABASE_ACCESS_TOKEN || browserAuth?.token
   const sb = createClient(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_ANON_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
     global: accessToken ? { headers: { Authorization: `Bearer ${accessToken}` } } : undefined,

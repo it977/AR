@@ -15,6 +15,7 @@ import {
   getDebtInitialAmount,
   getDebtPaidAmountForDateRange,
   getDebtPaidChannelTotalsForDateRange,
+  getIssueOutstandingRows,
   getLateReceiptCollectionTotals,
   getSameDaySettledDebtStats,
   isRetroBillCollection,
@@ -241,10 +242,11 @@ export default function PaymentChannel() {
     // Restrict to bills that survived the Looker filter so excluded bills don't leak in.
     const orows = outstandingRows || []
     if (!orows.length) return kpis.outstandingDebt
+    const issueOutstandingRows = getIssueOutstandingRows(orows, viewRows)
     const allowedBillNos = new Set(viewRows.map(r => r.bill_no).filter(Boolean))
     const filtered = allowedBillNos.size > 0
-      ? orows.filter(r => allowedBillNos.has(r.bill_no))
-      : orows
+      ? issueOutstandingRows.filter(r => allowedBillNos.has(r.bill_no))
+      : issueOutstandingRows
     return filtered.reduce((s, r) => s + toNumber(r.balance ?? r.debt), 0)
   }, [cashflowRows, outstandingRows, viewRows, useCashflowSummary, kpis.outstandingDebt])
 
@@ -338,12 +340,13 @@ export default function PaymentChannel() {
   const initialOutstandingForDailyIncome = useMemo(() => {
     const orows = outstandingRows || []
     if (!orows.length) return kpis.outstandingDebt + sameDaySettledDebt.amount
+    const issueOutstandingRows = getIssueOutstandingRows(orows, viewRows)
     const allowedBillNos = new Set(viewRows.map(r => r.bill_no).filter(Boolean))
     const hasDebtPaymentInRange = (row = {}) =>
       getDebtPaidAmountForDateRange(row, filters.dateFrom, filters.dateTo) > 0
     const filtered = allowedBillNos.size > 0
-      ? orows.filter(r => allowedBillNos.has(r.bill_no) || hasDebtPaymentInRange(r))
-      : orows
+      ? issueOutstandingRows.filter(r => allowedBillNos.has(r.bill_no) || hasDebtPaymentInRange(r))
+      : issueOutstandingRows
     return filtered.reduce((s, r) => s + getDebtInitialAmount(r), 0) + sameDaySettledDebt.amount
   }, [outstandingRows, viewRows, kpis.outstandingDebt, sameDaySettledDebt.amount, filters.dateFrom, filters.dateTo])
 

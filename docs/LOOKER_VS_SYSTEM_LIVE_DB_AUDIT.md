@@ -1,10 +1,10 @@
 # Looker vs Live System Audit
 
-Generated: 2026-06-30T17:33:17.239Z
-Source JSON: .tmp\looker-live\looker-live-sync.json
-Dates checked: 180
-Rows checked: 900
-PASS: 900
+Generated: 2026-07-01T05:28:02.183Z
+Source JSON: .tmp\looker-current\looker-live-sync.json
+Dates checked: 181
+Rows checked: 905
+PASS: 905
 FAIL: 0
 
 ## Daily Summary
@@ -191,6 +191,7 @@ FAIL: 0
 | 2026-06-27 | [x] | [x] | [x] | [x] | [x] |
 | 2026-06-28 | [x] | [x] | [x] | [x] | [x] |
 | 2026-06-29 | [x] | [x] | [x] | [x] | [x] |
+| 2026-06-30 | [x] | [x] | [x] | [x] | [x] |
 
 ## Failed Rows
 

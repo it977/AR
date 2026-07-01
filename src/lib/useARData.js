@@ -441,9 +441,34 @@ export function getDebtInitialAmount(row = {}) {
   const explicit = toNumber(row.debt_amount)
   const balance = toNumber(row.balance ?? row.debt)
   const collected = getDebtCollectedAmount(row)
-  if (balance > 0 || collected > 0) return Math.max(explicit, balance + collected)
   if (explicit > 0) return explicit
+  if (balance > 0 || collected > 0) return balance + collected
   return toNumber(row.grand_total)
+}
+
+export function isSameDayPaidBillingRow(row = {}) {
+  const customerType = String(row.customer_type || '').toUpperCase()
+  if (customerType === 'INS' || String(row.insurance || '').trim()) return false
+  if (toNumber(row.debt) > 0) return false
+  if (getBillCollectionAmount(row) <= 0) return false
+
+  const issueDate = toDateOnly(row.bill_issued_at) || toDateOnly(row.date)
+  const receiptDate = toDateOnly(row.payment_received_at)
+  return !!issueDate && !!receiptDate && receiptDate <= issueDate
+}
+
+export function shouldExcludeIssueDebtRow(row = {}, billRows = []) {
+  if (!row.bill_no) return false
+  const rowDate = toDateOnly(row.date)
+  const matchingBill = (billRows || []).find(bill =>
+    bill.bill_no === row.bill_no && (!rowDate || toDateOnly(bill.date) === rowDate)
+  )
+  if (!matchingBill || !isSameDayPaidBillingRow(matchingBill)) return false
+  return getBillCollectionAmount(matchingBill) >= getDebtInitialAmount(row)
+}
+
+export function getIssueOutstandingRows(debtRows = [], billRows = []) {
+  return (debtRows || []).filter(row => !shouldExcludeIssueDebtRow(row, billRows))
 }
 
 export function getDebtPaidAmount(row = {}) {
@@ -451,6 +476,21 @@ export function getDebtPaidAmount(row = {}) {
   if (direct > 0) return direct
   const paid = getDebtInitialAmount(row) - toNumber(row.balance ?? row.debt)
   return paid > 0 ? paid : 0
+}
+
+function capPaymentEntriesToInitialDebt(row = {}, entries = []) {
+  const initial = getDebtInitialAmount(row)
+  const total = entries.reduce((sum, entry) => sum + toNumber(entry.amount), 0)
+  if (initial <= 0 || total <= initial) return entries
+
+  let remaining = initial
+  return entries
+    .map(entry => {
+      const amount = Math.min(toNumber(entry.amount), remaining)
+      remaining -= amount
+      return { ...entry, amount }
+    })
+    .filter(entry => entry.amount > 0)
 }
 
 export function getDebtPaymentEntries(row = {}) {
@@ -461,7 +501,7 @@ export function getDebtPaymentEntries(row = {}) {
     amount: toNumber(row[`payment_${number}_amount`]),
   })).filter(entry => entry.amount > 0)
 
-  if (installmentEntries.length) return installmentEntries
+  if (installmentEntries.length) return capPaymentEntriesToInitialDebt(row, installmentEntries)
 
   const fallbackDate = toDateOnly(row.date_paid)
   const channelEntries = [
@@ -472,15 +512,15 @@ export function getDebtPaymentEntries(row = {}) {
   ].filter(entry => entry.amount > 0)
 
   if (channelEntries.length) {
-    return channelEntries.map((entry, index) => ({
+    return capPaymentEntriesToInitialDebt(row, channelEntries.map((entry, index) => ({
       number: index + 1,
       date: fallbackDate,
       ...entry,
-    }))
+    })))
   }
 
   const amount = getDebtPaidAmount(row)
-  return amount > 0 ? [{ number: 1, date: fallbackDate, method: '', amount }] : []
+  return amount > 0 ? capPaymentEntriesToInitialDebt(row, [{ number: 1, date: fallbackDate, method: '', amount }]) : []
 }
 
 export function getDebtPaidAmountForDateRange(row = {}, from = '', to = '') {

@@ -13,6 +13,7 @@ import {
   getDebtInitialAmount,
   getDebtPaidAmountForDateRange,
   getDebtPaidChannelTotalsForDateRange,
+  getIssueOutstandingRows,
   getLateReceiptCollectionTotals,
   isRetroBillCollection,
   isUsableCashflowSummary,
@@ -390,8 +391,8 @@ export default function DailySales() {
 
   const issuedDebtBillCount = useMemo(() => {
     if (hasCashflowDetailFilters) return 0
-    return countDistinctBills(outstandingRows || [])
-  }, [outstandingRows, hasCashflowDetailFilters])
+    return countDistinctBills(getIssueOutstandingRows(outstandingRows || [], viewRows))
+  }, [outstandingRows, viewRows, hasCashflowDetailFilters])
 
   const lookerOutstanding = useMemo(() => {
     if (canUseCashflowSummary && cashflowInitialOutstanding > 0) {
@@ -401,9 +402,10 @@ export default function DailySales() {
       }
     }
     if (!hasCashflowDetailFilters && (outstandingRows || []).length) {
+      const issueOutstandingRows = getIssueOutstandingRows(outstandingRows || [], viewRows)
       return {
-        amount: (outstandingRows || []).reduce((sum, row) => sum + getDebtInitialAmount(row), 0) + sameDaySettledDebt.amount,
-        bills: countDistinctBills(outstandingRows || []) + sameDaySettledDebt.bills,
+        amount: issueOutstandingRows.reduce((sum, row) => sum + getDebtInitialAmount(row), 0) + sameDaySettledDebt.amount,
+        bills: countDistinctBills(issueOutstandingRows) + sameDaySettledDebt.bills,
       }
     }
     return {
